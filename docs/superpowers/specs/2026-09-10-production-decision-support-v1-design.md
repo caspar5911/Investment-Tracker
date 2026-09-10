@@ -20,6 +20,8 @@ A non-official engineering/evidence readiness score of at least **85/100** is ne
 
 Official production readiness remains under Independent Audit authority. The system itself, Codex, the coordinator, and workers must never self-promote official maturity or mark official Promotion Gates PASS.
 
+Production designation means that the evidence, controls, operations, and audit process meet this specification. It does **not** guarantee profitable recommendations, prevent investment losses, or imply certainty about future market behavior.
+
 ## Non-Goals
 
 Production Decision Support v1 explicitly excludes:
@@ -321,7 +323,7 @@ A weak or adverse Phase B result must remain visible; it cannot be repaired by s
 
 ## Replacement Holdout Gate
 
-The replacement holdout symbols remain inaccessible until Independent Audit authorizes release after the prerequisite frozen gates have passed.
+The replacement holdout symbols remain inaccessible until Independent Audit authorizes release **after Phase A PASS, ROBUST-v1.0 PASS, Phase B PASS, and candidate freeze**.
 
 Programmatic enforcement must prevent provider requests, cache inspection, inference, summaries, or derived statistics for:
 
@@ -333,7 +335,7 @@ Programmatic enforcement must prevent provider requests, cache inspection, infer
 
 When eventually authorized, holdout evaluation must be performed once under a frozen candidate and fully logged.
 
-Codex must treat accidental holdout access as a contamination incident requiring DQ evidence and governance review.
+Any unauthorized access to a replacement-holdout symbol is a contamination incident. The affected symbol/evidence must immediately lose clean-holdout status and cannot contribute to holdout qualification. Independent Audit must explicitly select/authorize replacement clean holdout evidence or otherwise adjudicate the contamination before the holdout gate can pass. Codex may not simply record the incident and continue treating the exposed history as clean.
 
 ## Prospective Paper Validation Gate
 
@@ -472,7 +474,7 @@ The system may be proposed to Independent Audit for Production Decision Support 
 4. Independent recalculation materially agrees with canonical evidence.
 5. Candidate rules and code are frozen before Phase B.
 6. Phase B has completed strictly out-of-sample and passed its acceptance criteria.
-7. Holdout governance has no unauthorized access incident, or any incident has been explicitly adjudicated.
+7. Replacement holdout remains clean: any unauthorized access has forced the exposed evidence to contaminated status and replacement clean holdout evidence has been explicitly authorized before qualification continues.
 8. Prospective paper protocol is frozen and its minimum evidence target is satisfied.
 9. Portfolio Risk Policy and Portfolio Snapshot integration are complete and tested.
 10. Alerting/monitoring/recovery controls are operational and tested.
@@ -502,7 +504,7 @@ Tracker produces the same complete decision record intended for production, but 
 
 Allowed only after all hard gates and Independent Audit pass.
 
-The tracker may then be used as a primary input to human investment decisions. Every record still requires human approval and remains subject to portfolio policy and abstention controls.
+The tracker may then be used as a primary structured input to human investment decisions, but not as an infallible or sole basis for action. Every record still requires human approval and remains subject to portfolio policy and abstention controls.
 
 ### Stage 4 — Autonomous Execution
 
