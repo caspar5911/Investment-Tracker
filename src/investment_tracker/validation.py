@@ -6,13 +6,26 @@ from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from pydantic import ValidationError
 
 from .governance import assert_symbol_allowed
 from .identity import canonical_bar_key, raw_digest_token
 from .models import WorkerManifest
+
+
+_ALLOWED_ARTIFACT_NAMES = frozenset(
+    {
+        "market-data.csv",
+        "replay-daily.csv",
+        "replay-episodes.csv",
+        "baseline-results.csv",
+        "validation.json",
+        "dq-candidates.json",
+        "notes.md",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -101,6 +114,32 @@ def validate_market_bars(
     return ValidationReport(ok=not errors, counts=counts, errors=tuple(errors))
 
 
+def _safe_artifact_path(manifest_dir: Path, relative_name: str) -> tuple[Path | None, str | None]:
+    # Worker manifests use repository-contract filenames, not arbitrary paths.
+    if "\\" in relative_name:
+        return None, f"unsafe artifact path: {relative_name}"
+    candidate = PurePosixPath(relative_name)
+    if candidate.is_absolute() or len(candidate.parts) != 1 or any(part in {".", ".."} for part in candidate.parts):
+        return None, f"unsafe artifact path: {relative_name}"
+    if relative_name not in _ALLOWED_ARTIFACT_NAMES:
+        return None, f"artifact name not allowed: {relative_name}"
+
+    artifact_path = manifest_dir / relative_name
+    if artifact_path.is_symlink():
+        return None, f"symlink artifact not allowed: {relative_name}"
+
+    # Defense in depth: even a future path-contract change must remain inside
+    # the manifest directory after filesystem resolution.
+    try:
+        resolved_parent = artifact_path.resolve(strict=False).parent
+        manifest_root = manifest_dir.resolve(strict=True)
+    except OSError as exc:
+        return None, f"unsafe artifact path: {relative_name}: {exc}"
+    if resolved_parent != manifest_root:
+        return None, f"unsafe artifact path: {relative_name}"
+    return artifact_path, None
+
+
 def validate_manifest_files(manifest_path: str | Path) -> ValidationReport:
     path = Path(manifest_path)
     errors: list[str] = []
@@ -120,7 +159,10 @@ def validate_manifest_files(manifest_path: str | Path) -> ValidationReport:
         errors.append("no output evidence declared")
 
     for relative_name, expected_digest in manifest.output_digests.items():
-        artifact_path = path.parent / relative_name
+        artifact_path, path_error = _safe_artifact_path(path.parent, relative_name)
+        if path_error is not None or artifact_path is None:
+            errors.append(path_error or f"unsafe artifact path: {relative_name}")
+            continue
         try:
             actual_digest = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
         except OSError as exc:
