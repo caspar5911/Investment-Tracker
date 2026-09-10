@@ -42,6 +42,9 @@ def validate_market_bars(
     range_usable = 0
     benchmark_mismatches = 0
 
+    if not materialized:
+        errors.append("no market-data evidence")
+
     for index, row in enumerate(materialized, start=1):
         try:
             asset = assert_symbol_allowed(str(row["asset"]))
@@ -112,6 +115,9 @@ def validate_manifest_files(manifest_path: str | Path) -> ValidationReport:
             counts={"verified_files": 0},
             errors=(f"invalid manifest: {exc}",),
         )
+
+    if not manifest.output_digests:
+        errors.append("no output evidence declared")
 
     for relative_name, expected_digest in manifest.output_digests.items():
         artifact_path = path.parent / relative_name
