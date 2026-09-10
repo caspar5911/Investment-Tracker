@@ -59,7 +59,7 @@ The agent system must preserve these project constraints:
 
 ## Architecture
 
-The system uses a coordinator plus isolated workers.
+The system uses one coordinator plus isolated parallel workers.
 
 ```text
                          +----------------------+
@@ -68,31 +68,61 @@ The system uses a coordinator plus isolated workers.
                          | writer               |
                          +----------+-----------+
                                     |
-              review / validate / merge only
+                     dispatch / review / merge
                                     |
-      +-----------------------------+-----------------------------+
-      |                             |                             |
-+-----v------+                +-----v------+                +-----v------+
-| Worker A   |                | Worker B   |                | Worker C   |
-| URA        |                | CIBR       |                | SMH        |
-| isolated   |                | isolated   |                | isolated   |
-+------------+                +------------+                +------------+
-      |                             |                             |
-      +-----------------------------+-----------------------------+
+      +--------------+--------------+--------------+--------------+
+      |              |              |              |              |
++-----v------+ +-----v------+ +-----v------+ +-----v------+ +-----v------+
+| Worker A   | | Worker B   | | Worker C   | | Worker D   | | Worker E   |
+| URA        | | CIBR       | | SMH        | | COPX / XLE | | Audit /    |
+| isolated   | | isolated   | | isolated   | | isolated   | | Robustness |
++------------+ +------------+ +------------+ +------------+ +------------+
+      |              |              |              |              |
+      +--------------+--------------+--------------+--------------+
                                     |
-                         +----------v-----------+
-                         | Worker D             |
-                         | COPX / XLE           |
-                         +----------------------+
+                        staging artifacts only
                                     |
                          +----------v-----------+
-                         | Worker E             |
-                         | audit / robustness   |
-                         | read-only canonical  |
+                         | Coordinator verifies |
+                         | and owns Sheet write |
                          +----------------------+
 ```
 
 The key rule is that workers do not directly mutate canonical Sheet tabs. They produce deterministic staging outputs plus validation manifests. The coordinator verifies those outputs and is the only role permitted to perform canonical writes.
+
+## Least-Privilege Runtime Boundary
+
+Parallel safety must be enforced through permissions, not only instructions.
+
+- Worker runtimes must not receive Google Sheets write credentials or any connector capability that can mutate the canonical control plane.
+- Worker runtimes may receive read-only canonical snapshots and approved market-data credentials required for their assigned asset scope.
+- The coordinator is the only runtime allowed to hold the canonical Sheet write capability.
+- Locked-holdout denial must be enforced in code before any provider request is issued, even if a worker prompt asks otherwise.
+- Credentials must be scoped to the minimum capability needed by each role.
+
+A worker that cannot mutate canonical evidence is safer than a worker merely instructed not to do so.
+
+## Immutable Input Snapshot Protocol
+
+Workers must not calculate against an unconstrained live Sheet that may change while other workers are being integrated.
+
+Before dispatching a worker, the coordinator creates an immutable input-snapshot manifest containing:
+
+- snapshot ID;
+- coordinator dispatch run ID;
+- frozen version strings;
+- authorized asset/date scope;
+- canonical evidence references used as inputs;
+- canonical SPY benchmark cutoff and digest;
+- relevant Data Quality references;
+- Phase Matrix state for the assigned scope;
+- content digests for material canonical inputs;
+- dispatch timestamp;
+- explicit locked-holdout exclusion assertion.
+
+Workers compute only from that snapshot plus newly fetched data for their authorized scope. The snapshot itself may be materialized as local files or deterministic exports, but it must be immutable for the duration of that worker run.
+
+Every worker `manifest.json` must include the exact input snapshot ID and digests it consumed.
 
 ## Agent Roles
 
@@ -102,6 +132,7 @@ Responsibilities:
 
 - read startup control-plane tabs before each integration run;
 - verify exact frozen versions and calculation-test status;
+- create immutable input snapshots before worker dispatch;
 - allocate non-overlapping worker scopes;
 - verify workers did not access locked holdout symbols;
 - compare staging output against canonical schema and frozen rules;
@@ -128,7 +159,7 @@ Scope:
 
 ### Worker B — CIBR
 
-Same full Phase-A pipeline as URA, isolated to CIBR plus the already-canonical SPY benchmark.
+Same full Phase-A pipeline as URA, isolated to CIBR plus the immutable canonical SPY benchmark snapshot.
 
 ### Worker C — SMH
 
@@ -140,7 +171,7 @@ Complete COPX first, then XLE. XLE must retain awareness of its verified 2025 sp
 
 ### Worker E — Audit / Robustness
 
-Read-only against canonical evidence. Responsibilities:
+Read-only against immutable canonical evidence snapshots. Responsibilities:
 
 - independent arithmetic recomputation;
 - duplicate/session/key/digest checks;
@@ -191,6 +222,8 @@ Must contain:
 
 - worker role;
 - run ID;
+- input snapshot ID;
+- input snapshot digests;
 - asset scope;
 - exact date scope;
 - frozen version strings;
@@ -225,21 +258,54 @@ A worker may mark its staging run `READY_FOR_COORDINATOR_REVIEW`; it may not mar
 For each worker submission the coordinator must perform the following sequence:
 
 1. Re-read startup control tabs and verify frozen versions.
-2. Verify the worker manifest and file digests.
-3. Verify asset/date scope is authorized.
-4. Verify no locked holdout symbol appears in any input/output/log.
-5. Re-run deterministic validation locally or independently.
-6. Compare session dates against canonical SPY using asset/date/status logic, never physical row-position assumptions.
-7. Persist one bounded canonical block.
-8. Read that block back.
-9. Freeze formulas to static values when the canonical schema requires static evidence.
-10. Run post-freeze invariants.
-11. Append DQ evidence if any defect was detected or repaired.
-12. Append Run Ledger evidence.
-13. Update Phase Matrix last.
-14. Re-read Phase Matrix and the relevant evidence endpoints.
+2. Verify the worker manifest and output-file digests.
+3. Verify the worker consumed the exact immutable input snapshot assigned at dispatch.
+4. Verify asset/date scope is authorized.
+5. Verify no locked holdout symbol appears in any input/output/log/provider request record.
+6. Recompute current canonical input digests relevant to the worker submission.
+7. Compare those current digests to the dispatch snapshot digests.
+8. If any material canonical input changed, reject the merge as `STALE_SNAPSHOT` and require deterministic revalidation or worker rerun; never merge optimistically against stale inputs.
+9. Re-run deterministic validation locally or independently.
+10. Compare session dates against canonical SPY using asset/date/status logic, never physical row-position assumptions.
+11. Re-resolve the current canonical append/update boundary by semantic keys immediately before the write; never trust row numbers supplied by a worker or an older run.
+12. Acquire the canonical write lock.
+13. Persist one bounded canonical block.
+14. Read that block back.
+15. Freeze formulas to static values when the canonical schema requires static evidence.
+16. Run post-freeze invariants.
+17. Append DQ evidence if any defect was detected or repaired.
+18. Append Run Ledger evidence.
+19. Update Phase Matrix last.
+20. Re-read Phase Matrix and the relevant evidence endpoints.
+21. Release the canonical write lock only after the integration state is durably recorded.
 
-If any step fails, the coordinator stops that asset/year at its previous canonical state.
+If any step fails, the coordinator stops that asset/year at its previous canonical state and records the failure when required by governance.
+
+## Optimistic-Concurrency Guard
+
+The immutable snapshot protocol prevents workers from silently using moving inputs, while the integration protocol prevents stale worker output from being merged after canonical evidence changes.
+
+A merge is valid only when:
+
+```text
+worker.input_snapshot_digest == coordinator.current_recomputed_input_digest
+```
+
+for every material input category declared by the worker manifest.
+
+If equality does not hold, the coordinator must not guess whether the difference matters. The result is `STALE_SNAPSHOT` until deterministic revalidation proves compatibility or the worker is rerun from a fresh snapshot.
+
+## Semantic Addressing Rule
+
+Canonical evidence identity is semantic, not positional.
+
+- Market Data is addressed by canonical `bar_key` plus active/supersession state.
+- Replay Daily is addressed by asset + trading date + calculation/rule version.
+- Replay Episodes is addressed by stable episode identity plus calculation version.
+- Baseline Results is addressed by asset + baseline type + episode/date/horizon/friction identity as applicable.
+- DQ and Run Ledger records are addressed by their IDs.
+
+Physical Sheet row numbers are evidence references after persistence, never durable identifiers for future writes. The coordinator must determine current row locations at integration time.
 
 ## Write Lock
 
@@ -247,13 +313,15 @@ Canonical Google Sheet writes are serialized through a logical lock owned by the
 
 A mutation run must have a unique run ID and must not overlap another canonical mutation run. Worker computation can remain parallel because it does not own the canonical lock.
 
-A future executable implementation should enforce this with a lock file/state record, for example:
+The executable implementation must enforce this with coordinator-owned runtime lock state, for example:
 
 ```text
 .runtime/canonical-write-lock.json
 ```
 
-The lock record should contain coordinator run ID, acquired timestamp, scope, and expected release condition. Stale locks must never be silently broken; they require an explicit recovery path and DQ record.
+The lock record must contain coordinator run ID, acquired timestamp, scope, input snapshot ID, and expected release condition. Stale locks must never be silently broken; they require an explicit recovery path and DQ record.
+
+The lock file is runtime state and must not be committed as shared coordination state between branches.
 
 ## Market Data Rules
 
@@ -265,7 +333,7 @@ Workers and coordinator must preserve the established cache protocol:
 - then fall back to quarter and month if required;
 - no provider substitution for canonical history;
 - independent sources may corroborate anomalies but never silently replace Alpaca raw data;
-- persist/read back a clean fetched window before advancing;
+- persist/read back a clean fetched window before advancing canonical integration;
 - identical active key + identical raw means reuse;
 - changed raw means append a superseding record plus DQ evidence, never overwrite without lineage.
 
@@ -330,6 +398,10 @@ Mark the affected calculation `UNKNOWN` and stop canonical promotion of that blo
 
 The coordinator does not average or vote. It reproduces the disputed invariant and either resolves it deterministically or records a DQ gap.
 
+### Stale worker snapshot
+
+Reject integration as `STALE_SNAPSHOT`. Revalidate from current canonical inputs or rerun the worker. Never merge stale staging results merely because their asset rows do not appear to overlap another worker's rows.
+
 ### Canonical write defect
 
 Do not hide the defect. Preserve the erroneous lineage where necessary, repair with deterministic evidence, append a DQ record, and close through a new reconciliation run.
@@ -340,16 +412,21 @@ No canonical state is considered frozen until formula-backed staging output is r
 
 ## Security and Secrets
 
-No API key, credential, OAuth token, service-account secret, or connector token may be committed to GitHub.
+No API key, credential, OAuth token, service-account secret, connector token, or other write credential may be committed to GitHub.
 
 Repository configuration must use environment-variable names and example files only. Runtime credentials remain in Codex/connector secret storage.
+
+Because the repository may be publicly visible, no sensitive canonical-control-plane identifiers or confidential evidence should be committed unless intentionally approved for public disclosure. Public market data alone does not make operational credentials or internal control metadata safe to publish.
 
 ## Testing Strategy
 
 The implementation must provide automated tests for at least:
 
 - frozen version enforcement;
-- holdout symbol denial;
+- holdout symbol denial before provider dispatch;
+- worker inability to obtain canonical write capability;
+- immutable input snapshot generation and digest verification;
+- stale-snapshot rejection;
 - one-symbol provider requests;
 - retry/fallback sequencing;
 - canonical key construction;
@@ -365,7 +442,9 @@ The implementation must provide automated tests for at least:
 - friction arithmetic;
 - MAE/MFE quarantine propagation;
 - baseline definitions;
+- semantic-key row resolution;
 - single-writer lock behavior;
+- stale-lock recovery requiring explicit evidence;
 - Phase Matrix transition ordering;
 - failure-closed behavior for missing evidence.
 
@@ -406,9 +485,11 @@ The first implementation milestone will create:
 - root `AGENTS.md` with project-wide safety and governance rules;
 - role-specific agent instruction files;
 - typed configuration for assets, versions, boundaries, and locked holdout;
-- canonical schemas for Market Data, Replay Daily, Replay Episodes, Baseline Results, DQ candidates, and manifests;
+- canonical schemas for Market Data, Replay Daily, Replay Episodes, Baseline Results, DQ candidates, snapshots, and manifests;
+- an immutable snapshot builder;
 - a worker staging contract;
 - deterministic validation library;
+- stale-snapshot/concurrency validation;
 - single-writer coordinator lock/integration layer;
 - unit and integration tests;
 - a CLI entry point suitable for Codex workers and coordinator use;
@@ -421,10 +502,12 @@ The first implementation milestone will not execute trades, unlock holdouts, alt
 The architecture is ready for production-style historical validation when all of the following are true:
 
 1. Multiple Codex workers can compute independent asset scopes concurrently without sharing writable canonical state.
-2. Only the coordinator can perform canonical Sheet mutations.
-3. Every worker result is deterministic and self-describing through a manifest and validation report.
-4. Locked holdout access is programmatically denied.
-5. Canonical writes are read back and verified before Phase Matrix advancement.
-6. Data-quality defects create explicit lineage rather than being silently repaired.
-7. Full automated tests prove replay, execution, censoring, normalization, quarantine, and baseline conventions.
-8. Existing tracker evidence can be reproduced without changing frozen rules.
+2. Workers have no canonical Sheet write capability; only the coordinator can perform canonical mutations.
+3. Every worker consumes an immutable, digest-identified input snapshot.
+4. Stale worker output is rejected when material canonical inputs changed after dispatch.
+5. Every worker result is deterministic and self-describing through a manifest and validation report.
+6. Locked holdout access is programmatically denied before provider dispatch.
+7. Canonical writes use semantic identities, are read back, and are verified before Phase Matrix advancement.
+8. Data-quality defects create explicit lineage rather than being silently repaired.
+9. Full automated tests prove replay, execution, censoring, normalization, quarantine, baseline, lock, and snapshot conventions.
+10. Existing tracker evidence can be reproduced without changing frozen rules.
