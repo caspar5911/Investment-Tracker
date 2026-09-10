@@ -12,23 +12,16 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class FrozenVersionsModel(StrictModel):
-    tpc: str
-    replay: str
-    calc: str
-    robust: str
-
-    @model_validator(mode="after")
-    def require_frozen_versions(self) -> "FrozenVersionsModel":
-        if self.model_dump() != FROZEN_VERSIONS.as_dict():
-            raise ValueError("version set does not match frozen tracker versions")
-        return self
+def _validate_versions(value: dict[str, str]) -> dict[str, str]:
+    if value != FROZEN_VERSIONS.as_dict():
+        raise ValueError("version set does not match frozen tracker versions")
+    return value
 
 
 class InputSnapshot(StrictModel):
     snapshot_id: str = Field(min_length=1)
     dispatch_run_id: str = Field(min_length=1)
-    versions: FrozenVersionsModel
+    versions: dict[str, str]
     asset: str
     start_date: date
     end_date: date
@@ -38,6 +31,11 @@ class InputSnapshot(StrictModel):
     input_digests: dict[str, str]
     dispatch_timestamp: datetime
     locked_holdout_excluded: Literal[True]
+
+    @field_validator("versions")
+    @classmethod
+    def validate_versions(cls, value: dict[str, str]) -> dict[str, str]:
+        return _validate_versions(value)
 
     @field_validator("asset")
     @classmethod
@@ -61,13 +59,18 @@ class WorkerManifest(StrictModel):
     asset: str
     start_date: date
     end_date: date
-    versions: FrozenVersionsModel
+    versions: dict[str, str]
     source_provider: Literal["Alpaca"]
     source_feed: Literal["SIP"]
     input_refs: list[str]
     output_digests: dict[str, str]
     locked_holdout_excluded: Literal[True]
     completion_status: Literal["READY_FOR_COORDINATOR_REVIEW"]
+
+    @field_validator("versions")
+    @classmethod
+    def validate_versions(cls, value: dict[str, str]) -> dict[str, str]:
+        return _validate_versions(value)
 
     @field_validator("asset")
     @classmethod
