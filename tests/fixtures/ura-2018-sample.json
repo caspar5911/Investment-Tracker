@@ -1,0 +1,43 @@
+{
+  "source": {
+    "spreadsheet_id": "1NO_EuFtA4vKorR2S74L2ln9Z_c82EFa-dzSWSHtmXCk",
+    "sheet": "Market Data",
+    "ura_rows": [6513, 6514],
+    "spy_rows": [769, 770],
+    "derived_at": "2026-09-10",
+    "note": "Authorized live-derived canonical fixture; no synthetic or substitute-provider data."
+  },
+  "market_bars": [
+    {
+      "asset": "URA",
+      "bar_date": "2018-01-02",
+      "open_raw": 15.14,
+      "high_raw": 15.74,
+      "low_raw": 15.12,
+      "close_raw": 15.68,
+      "volume_raw": 609218,
+      "trade_count_raw": 2530,
+      "vwap_raw": 15.495505,
+      "bar_key": "URA|2018-01-02|ALPACA_SIP|NORM-v1",
+      "source_digest": "RAWv1|URA|2018-01-02|15.14|15.74|15.12|15.68|609218|2530|15.495505",
+      "range_usable": true,
+      "close_usable": true
+    },
+    {
+      "asset": "URA",
+      "bar_date": "2018-01-03",
+      "open_raw": 15.8,
+      "high_raw": 15.91,
+      "low_raw": 15.49,
+      "close_raw": 15.71,
+      "volume_raw": 656259,
+      "trade_count_raw": 2496,
+      "vwap_raw": 15.66262,
+      "bar_key": "URA|2018-01-03|ALPACA_SIP|NORM-v1",
+      "source_digest": "RAWv1|URA|2018-01-03|15.8|15.91|15.49|15.71|656259|2496|15.66262",
+      "range_usable": true,
+      "close_usable": true
+    }
+  ],
+  "spy_dates": ["2018-01-02", "2018-01-03"]
+}
