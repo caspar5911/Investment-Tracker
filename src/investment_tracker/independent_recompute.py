@@ -101,7 +101,7 @@ def recompute_replay(asset_bars: Iterable[AuditBar], spy_bars: Iterable[AuditBar
     previous_state: str | None = None
     for i, bar in enumerate(bars):
         sma200 = _mean(closes[i - 199 : i + 1]) if i >= 199 else None
-        prior_high = max(b.high for b in bars[i - 60 : i]) if i >= 60 else None
+        prior_high = max(b.close for b in bars[i - 60 : i]) if i >= 60 else None
         sma5 = _mean(closes[i - 4 : i + 1]) if i >= 4 else None
         ret20 = closes[i] / closes[i - 20] - 1 if i >= 20 else None
         spy_ret20 = spy_closes[i] / spy_closes[i - 20] - 1 if i >= 20 else None
@@ -186,7 +186,7 @@ def recompute_baseline_entries(bars: Iterable[AuditBar]) -> dict[str, list[date]
         if month not in seen_months:
             c18.append(bar.bar_date)
             seen_months.add(month)
-        qualifying = i >= 60 and bar.close <= Decimal("0.90") * max(b.high for b in ordered[i - 60 : i])
+        qualifying = i >= 60 and bar.close <= Decimal("0.90") * max(b.close for b in ordered[i - 60 : i])
         if qualifying and not previously_qualified and i + 1 < len(ordered):
             c19.append(ordered[i + 1].bar_date)
         previously_qualified = qualifying
