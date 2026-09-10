@@ -71,7 +71,7 @@ def test_manifest_snapshot_lineage_accepts_exact_scope_and_current_digests():
     [
         ({"input_snapshot_id": "SNAP-WRONG"}, "snapshot ID"),
         ({"asset": "CIBR"}, "asset scope"),
-        ({"start_date": date(2020, 1, 1)}, "date scope"),
+        ({"start_date": date(2019, 2, 1)}, "date scope"),
         ({"input_snapshot_digests": {"spy": "spy-wrong", "governance": "gov-a"}}, "digest map"),
     ],
 )
