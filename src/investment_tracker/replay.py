@@ -20,8 +20,7 @@ def trend_gate(close: float, sma200: float | None) -> str:
 def pullback_gate(close: float, prior60_high: float | None) -> str:
     if prior60_high is None or prior60_high <= 0:
         return UNKNOWN
-    pullback_pct = close / prior60_high - 1
-    return PASS if -0.15 <= pullback_pct <= -0.05 else FAIL
+    return PASS if 0.85 * prior60_high <= close <= 0.95 * prior60_high else FAIL
 
 
 def stabilization_gate(close: float, prior_close: float | None, sma5: float | None) -> str:
@@ -33,14 +32,13 @@ def stabilization_gate(close: float, prior_close: float | None, sma5: float | No
 def relative_strength_gate(asset_ret20: float | None, spy_ret20: float | None) -> str:
     if asset_ret20 is None or spy_ret20 is None:
         return UNKNOWN
-    return PASS if asset_ret20 - spy_ret20 >= -0.05 else FAIL
+    return PASS if asset_ret20 >= spy_ret20 - 0.05 else FAIL
 
 
 def chase_gate(close: float, prior60_high: float | None, ret20: float | None) -> str:
     if prior60_high is None or prior60_high <= 0 or ret20 is None:
         return UNKNOWN
-    chase_distance = close / prior60_high - 1
-    return FAIL if chase_distance >= -0.02 and ret20 >= 0.08 else PASS
+    return FAIL if close >= 0.98 * prior60_high and ret20 >= 0.08 else PASS
 
 
 def signal_state(
