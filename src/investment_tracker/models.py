@@ -91,6 +91,44 @@ class WorkerManifest(StrictModel):
         return self
 
 
+class BlockedWorkerManifest(StrictModel):
+    """Fail-closed preflight evidence; never coordinator-reviewable output."""
+
+    role: str = Field(min_length=1)
+    run_id: str = Field(min_length=1)
+    asset: str
+    start_date: date
+    end_date: date
+    versions: dict[str, str]
+    source_provider: Literal["Alpaca"]
+    source_feed: Literal["SIP"]
+    requested_outputs: list[str] = Field(min_length=1)
+    required_inputs: list[str] = Field(min_length=1)
+    unavailable_inputs: list[str] = Field(min_length=1)
+    diagnostic_digests: dict[str, str]
+    locked_holdout_excluded: Literal[True]
+    canonical_write_attempted: Literal[False]
+    completion_status: Literal["BLOCKED_REQUIRED_INPUT"]
+
+    @field_validator("versions")
+    @classmethod
+    def validate_versions(cls, value: dict[str, str]) -> dict[str, str]:
+        return _validate_versions(value)
+
+    @field_validator("asset")
+    @classmethod
+    def validate_asset(cls, value: str) -> str:
+        return _allowed_asset(value)
+
+    @model_validator(mode="after")
+    def validate_scope(self) -> "BlockedWorkerManifest":
+        if self.end_date < self.start_date:
+            raise ValueError("end_date must be on or after start_date")
+        if not self.diagnostic_digests:
+            raise ValueError("blocked preflight must include diagnostic evidence")
+        return self
+
+
 class MarketBar(StrictModel):
     asset: str
     bar_date: date

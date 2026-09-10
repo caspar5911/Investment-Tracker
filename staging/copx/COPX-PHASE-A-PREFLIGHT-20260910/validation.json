@@ -1,0 +1,11 @@
+{
+  "canonical_write_attempted": false,
+  "completion_status": "BLOCKED_REQUIRED_INPUT",
+  "fetched_sessions": 0,
+  "locked_holdout_access_count": 0,
+  "persisted_sessions": 0,
+  "reason_codes": [
+    "MISSING_COORDINATOR_ISSUED_IMMUTABLE_COPX_SNAPSHOT"
+  ],
+  "unique_episode_starts": 0
+}

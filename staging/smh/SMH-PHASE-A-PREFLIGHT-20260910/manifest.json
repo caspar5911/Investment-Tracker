@@ -1,0 +1,37 @@
+{
+  "asset": "SMH",
+  "canonical_write_attempted": false,
+  "completion_status": "BLOCKED_REQUIRED_INPUT",
+  "diagnostic_digests": {
+    "notes.md": "e1dc0de4e2157c27529234ac1b620b378ba230ee845b0302d762cc95f180f52b",
+    "validation.json": "1188c9eda37d8123d3dc64f09507fe79237e1f93b4861a0eb5080c8019b198d2"
+  },
+  "end_date": "2023-12-31",
+  "locked_holdout_excluded": true,
+  "requested_outputs": [
+    "market-data.csv",
+    "replay-daily.csv",
+    "replay-episodes.csv",
+    "baseline-results.csv",
+    "validation.json",
+    "dq-candidates.json",
+    "notes.md"
+  ],
+  "required_inputs": [
+    "coordinator-issued immutable SMH Phase-A snapshot containing canonical active SMH and SPY bars, Phase Matrix and DQ lineage, passing frozen Calculation Tests status, authorized scope, evidence refs, dispatch timestamp, and complete material input digests"
+  ],
+  "role": "SMH",
+  "run_id": "SMH-PHASE-A-PREFLIGHT-20260910",
+  "source_feed": "SIP",
+  "source_provider": "Alpaca",
+  "start_date": "2019-01-01",
+  "unavailable_inputs": [
+    "coordinator-issued immutable SMH Phase-A snapshot containing canonical active SMH and SPY bars, Phase Matrix and DQ lineage, passing frozen Calculation Tests status, authorized scope, evidence refs, dispatch timestamp, and complete material input digests"
+  ],
+  "versions": {
+    "calc": "CALC-v1.2",
+    "replay": "REPLAY-v1.0",
+    "robust": "ROBUST-v1.0",
+    "tpc": "TPC-v1.2"
+  }
+}

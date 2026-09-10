@@ -1,0 +1,37 @@
+{
+  "asset": "CIBR",
+  "canonical_write_attempted": false,
+  "completion_status": "BLOCKED_REQUIRED_INPUT",
+  "diagnostic_digests": {
+    "notes.md": "f3f524e882970b3d59ea79fa6fb41d38444f61b7e8460f8e23b4ad692441424b",
+    "validation.json": "bbc3b2eb8abcc437587a298b5f355877443c208902418062f661567ca1443b03"
+  },
+  "end_date": "2023-12-31",
+  "locked_holdout_excluded": true,
+  "requested_outputs": [
+    "market-data.csv",
+    "replay-daily.csv",
+    "replay-episodes.csv",
+    "baseline-results.csv",
+    "validation.json",
+    "dq-candidates.json",
+    "notes.md"
+  ],
+  "required_inputs": [
+    "coordinator-issued immutable CIBR Phase-A snapshot containing canonical active CIBR and SPY bars, Phase Matrix and DQ lineage, passing frozen Calculation Tests status, authorized scope, evidence refs, dispatch timestamp, and complete material input digests"
+  ],
+  "role": "CIBR",
+  "run_id": "CIBR-PHASE-A-PREFLIGHT-20260910",
+  "source_feed": "SIP",
+  "source_provider": "Alpaca",
+  "start_date": "2019-01-01",
+  "unavailable_inputs": [
+    "coordinator-issued immutable CIBR Phase-A snapshot containing canonical active CIBR and SPY bars, Phase Matrix and DQ lineage, passing frozen Calculation Tests status, authorized scope, evidence refs, dispatch timestamp, and complete material input digests"
+  ],
+  "versions": {
+    "calc": "CALC-v1.2",
+    "replay": "REPLAY-v1.0",
+    "robust": "ROBUST-v1.0",
+    "tpc": "TPC-v1.2"
+  }
+}

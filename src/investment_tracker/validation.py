@@ -12,7 +12,7 @@ from pydantic import ValidationError
 
 from .governance import assert_symbol_allowed
 from .identity import canonical_bar_key, raw_digest_token
-from .models import WorkerManifest
+from .models import BlockedWorkerManifest, WorkerManifest
 
 
 _ALLOWED_ARTIFACT_NAMES = frozenset(
@@ -26,6 +26,7 @@ _ALLOWED_ARTIFACT_NAMES = frozenset(
         "notes.md",
     }
 )
+_ALLOWED_DIAGNOSTIC_NAMES = frozenset({"validation.json", "notes.md"})
 
 
 @dataclass(frozen=True)
@@ -114,14 +115,41 @@ def validate_market_bars(
     return ValidationReport(ok=not errors, counts=counts, errors=tuple(errors))
 
 
-def _safe_artifact_path(manifest_dir: Path, relative_name: str) -> tuple[Path | None, str | None]:
+def validate_session_coverage(
+    actual_dates: Iterable[date], expected_dates: Iterable[date]
+) -> ValidationReport:
+    actual = list(actual_dates)
+    expected = set(expected_dates)
+    duplicates = len(actual) - len(set(actual))
+    missing = expected - set(actual)
+    unexpected = set(actual) - expected
+    errors = []
+    if duplicates:
+        errors.append(f"duplicate session count: {duplicates}")
+    if missing:
+        errors.append("missing sessions: " + ", ".join(sorted(day.isoformat() for day in missing)))
+    if unexpected:
+        errors.append("unexpected sessions: " + ", ".join(sorted(day.isoformat() for day in unexpected)))
+    return ValidationReport(
+        ok=not errors,
+        counts={"expected": len(expected), "actual": len(actual), "missing": len(missing),
+                "duplicates": duplicates, "unexpected": len(unexpected)},
+        errors=tuple(errors),
+    )
+
+
+def _safe_artifact_path(
+    manifest_dir: Path,
+    relative_name: str,
+    allowed_names: frozenset[str] = _ALLOWED_ARTIFACT_NAMES,
+) -> tuple[Path | None, str | None]:
     # Worker manifests use repository-contract filenames, not arbitrary paths.
     if "\\" in relative_name:
         return None, f"unsafe artifact path: {relative_name}"
     candidate = PurePosixPath(relative_name)
     if candidate.is_absolute() or len(candidate.parts) != 1 or any(part in {".", ".."} for part in candidate.parts):
         return None, f"unsafe artifact path: {relative_name}"
-    if relative_name not in _ALLOWED_ARTIFACT_NAMES:
+    if relative_name not in allowed_names:
         return None, f"artifact name not allowed: {relative_name}"
 
     artifact_path = manifest_dir / relative_name
@@ -147,7 +175,14 @@ def validate_manifest_files(manifest_path: str | Path) -> ValidationReport:
 
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-        manifest = WorkerManifest.model_validate(payload)
+        if payload.get("completion_status") == "BLOCKED_REQUIRED_INPUT":
+            manifest = BlockedWorkerManifest.model_validate(payload)
+            output_digests = manifest.diagnostic_digests
+            allowed_names = _ALLOWED_DIAGNOSTIC_NAMES
+        else:
+            manifest = WorkerManifest.model_validate(payload)
+            output_digests = manifest.output_digests
+            allowed_names = _ALLOWED_ARTIFACT_NAMES
     except (OSError, json.JSONDecodeError, ValidationError, ValueError) as exc:
         return ValidationReport(
             ok=False,
@@ -155,11 +190,11 @@ def validate_manifest_files(manifest_path: str | Path) -> ValidationReport:
             errors=(f"invalid manifest: {exc}",),
         )
 
-    if not manifest.output_digests:
+    if not output_digests:
         errors.append("no output evidence declared")
 
-    for relative_name, expected_digest in manifest.output_digests.items():
-        artifact_path, path_error = _safe_artifact_path(path.parent, relative_name)
+    for relative_name, expected_digest in output_digests.items():
+        artifact_path, path_error = _safe_artifact_path(path.parent, relative_name, allowed_names)
         if path_error is not None or artifact_path is None:
             errors.append(path_error or f"unsafe artifact path: {relative_name}")
             continue

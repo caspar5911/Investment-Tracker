@@ -1,0 +1,37 @@
+{
+  "asset": "COPX",
+  "canonical_write_attempted": false,
+  "completion_status": "BLOCKED_REQUIRED_INPUT",
+  "diagnostic_digests": {
+    "notes.md": "69778a0edbe6c12f53297c3bf5bf721d5bdfb3311d1a908f9dcd41362310226d",
+    "validation.json": "080c8f546a9f1aacfdd4c4d63070123ac3fa6937345ca5768a5ed04b14182f5e"
+  },
+  "end_date": "2023-12-31",
+  "locked_holdout_excluded": true,
+  "requested_outputs": [
+    "market-data.csv",
+    "replay-daily.csv",
+    "replay-episodes.csv",
+    "baseline-results.csv",
+    "validation.json",
+    "dq-candidates.json",
+    "notes.md"
+  ],
+  "required_inputs": [
+    "coordinator-issued immutable COPX Phase-A snapshot containing canonical active COPX and SPY bars, Phase Matrix and DQ lineage, passing frozen Calculation Tests status, authorized scope, evidence refs, dispatch timestamp, and complete material input digests"
+  ],
+  "role": "COPX",
+  "run_id": "COPX-PHASE-A-PREFLIGHT-20260910",
+  "source_feed": "SIP",
+  "source_provider": "Alpaca",
+  "start_date": "2019-01-01",
+  "unavailable_inputs": [
+    "coordinator-issued immutable COPX Phase-A snapshot containing canonical active COPX and SPY bars, Phase Matrix and DQ lineage, passing frozen Calculation Tests status, authorized scope, evidence refs, dispatch timestamp, and complete material input digests"
+  ],
+  "versions": {
+    "calc": "CALC-v1.2",
+    "replay": "REPLAY-v1.0",
+    "robust": "ROBUST-v1.0",
+    "tpc": "TPC-v1.2"
+  }
+}

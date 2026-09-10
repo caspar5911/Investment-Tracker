@@ -1,0 +1,37 @@
+{
+  "asset": "URA",
+  "canonical_write_attempted": false,
+  "completion_status": "BLOCKED_REQUIRED_INPUT",
+  "diagnostic_digests": {
+    "notes.md": "89d743c152026ae8954751f1c1bd780e8caea778b96ce612b0d0c517da5d11b5",
+    "validation.json": "a0b0bf942ad357c6fe78ef9644bf94a93159be3935f315210fa33c70648dbd76"
+  },
+  "end_date": "2023-12-31",
+  "locked_holdout_excluded": true,
+  "requested_outputs": [
+    "market-data.csv",
+    "replay-daily.csv",
+    "replay-episodes.csv",
+    "baseline-results.csv",
+    "validation.json",
+    "dq-candidates.json",
+    "notes.md"
+  ],
+  "required_inputs": [
+    "coordinator-issued immutable URA snapshot containing canonical active URA bars through the persisted/read-back cache boundary, canonical SPY benchmark bars and digest, Phase Matrix and DQ lineage, passing frozen Calculation Tests status, authorized scope, evidence refs, dispatch timestamp, and complete material input digests"
+  ],
+  "role": "URA",
+  "run_id": "URA-PHASE-A-PREFLIGHT-20260910",
+  "source_feed": "SIP",
+  "source_provider": "Alpaca",
+  "start_date": "2020-01-01",
+  "unavailable_inputs": [
+    "coordinator-issued immutable URA snapshot containing canonical active URA bars through the persisted/read-back cache boundary, canonical SPY benchmark bars and digest, Phase Matrix and DQ lineage, passing frozen Calculation Tests status, authorized scope, evidence refs, dispatch timestamp, and complete material input digests"
+  ],
+  "versions": {
+    "calc": "CALC-v1.2",
+    "replay": "REPLAY-v1.0",
+    "robust": "ROBUST-v1.0",
+    "tpc": "TPC-v1.2"
+  }
+}
