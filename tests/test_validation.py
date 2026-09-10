@@ -54,11 +54,8 @@ def test_market_bar_validation_rejects_duplicate_and_bad_digest():
     assert any("source_digest mismatch" in error for error in bad_report.errors)
 
 
-def test_manifest_file_digests_are_verified(tmp_path):
-    artifact = tmp_path / "market-data.csv"
-    artifact.write_text("asset,bar_date\nURA,2018-01-02\n")
-    digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
-    manifest = {
+def manifest_payload(output_digests):
+    return {
         "role": "URA",
         "run_id": "WORKER-1",
         "input_snapshot_id": "SNAP-1",
@@ -70,12 +67,18 @@ def test_manifest_file_digests_are_verified(tmp_path):
         "source_provider": "Alpaca",
         "source_feed": "SIP",
         "input_refs": ["Phase Matrix URA 2018"],
-        "output_digests": {"market-data.csv": digest},
+        "output_digests": output_digests,
         "locked_holdout_excluded": True,
         "completion_status": "READY_FOR_COORDINATOR_REVIEW",
     }
+
+
+def test_manifest_file_digests_are_verified(tmp_path):
+    artifact = tmp_path / "market-data.csv"
+    artifact.write_text("asset,bar_date\nURA,2018-01-02\n")
+    digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
     manifest_path = tmp_path / "manifest.json"
-    manifest_path.write_text(json.dumps(manifest))
+    manifest_path.write_text(json.dumps(manifest_payload({"market-data.csv": digest})))
 
     report = validate_manifest_files(manifest_path)
     assert report.ok is True
@@ -85,3 +88,11 @@ def test_manifest_file_digests_are_verified(tmp_path):
     report = validate_manifest_files(manifest_path)
     assert report.ok is False
     assert any("digest mismatch" in error for error in report.errors)
+
+
+def test_manifest_with_zero_output_evidence_fails_closed(tmp_path):
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest_payload({})))
+    report = validate_manifest_files(manifest_path)
+    assert report.ok is False
+    assert any("no output evidence" in error for error in report.errors)
