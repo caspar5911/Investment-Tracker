@@ -1,0 +1,33 @@
+{
+  "arithmetic_mismatch_count": 0,
+  "benchmark_date_mismatches": 0,
+  "canonical_write_attempted": false,
+  "completion_status": "BLOCKED_REQUIRED_INPUT",
+  "expected_sessions": null,
+  "fetched_sessions": 0,
+  "friction_counts": {
+    "0": 0,
+    "10": 0,
+    "25": 0
+  },
+  "horizon_counts": {
+    "1": 0,
+    "120": 0,
+    "20": 0,
+    "250": 0,
+    "5": 0,
+    "60": 0
+  },
+  "locked_holdout_access_count": 0,
+  "malformed_digest_count": 0,
+  "matured_count": 0,
+  "persisted_sessions": 0,
+  "quarantine_propagation_count": 0,
+  "reason_codes": [
+    "MISSING_COORDINATOR_ISSUED_IMMUTABLE_URA_SNAPSHOT"
+  ],
+  "signal_state_distribution": {},
+  "unique_canonical_keys": 0,
+  "unique_dates": 0,
+  "unique_episode_starts": 0
+}

@@ -1,0 +1,37 @@
+{
+  "asset": "XLE",
+  "canonical_write_attempted": false,
+  "completion_status": "BLOCKED_REQUIRED_INPUT",
+  "diagnostic_digests": {
+    "notes.md": "691702faa98437adc4abfc81d4533cf6f6216ce966042538958c240c32c6f53b",
+    "validation.json": "6c094a6cfce4e43f7bc56698b6f69de050bf045ac3ad22872fe0c03a6546dad6"
+  },
+  "end_date": "2023-12-31",
+  "locked_holdout_excluded": true,
+  "requested_outputs": [
+    "market-data.csv",
+    "replay-daily.csv",
+    "replay-episodes.csv",
+    "baseline-results.csv",
+    "validation.json",
+    "dq-candidates.json",
+    "notes.md"
+  ],
+  "required_inputs": [
+    "coordinator-issued immutable XLE Phase-A snapshot containing canonical active XLE and SPY bars, Phase Matrix and DQ lineage, passing frozen Calculation Tests status, authorized scope, evidence refs, dispatch timestamp, and complete material input digests"
+  ],
+  "role": "XLE",
+  "run_id": "XLE-PHASE-A-PREFLIGHT-20260910",
+  "source_feed": "SIP",
+  "source_provider": "Alpaca",
+  "start_date": "2019-01-01",
+  "unavailable_inputs": [
+    "coordinator-issued immutable XLE Phase-A snapshot containing canonical active XLE and SPY bars, Phase Matrix and DQ lineage, passing frozen Calculation Tests status, authorized scope, evidence refs, dispatch timestamp, and complete material input digests"
+  ],
+  "versions": {
+    "calc": "CALC-v1.2",
+    "replay": "REPLAY-v1.0",
+    "robust": "ROBUST-v1.0",
+    "tpc": "TPC-v1.2"
+  }
+}
