@@ -111,6 +111,7 @@ class EpisodeObservation:
     gross_return: Decimal
     spy_return: Decimal
     cash_return: Decimal
+    return_net: Decimal
     max_drawdown: Decimal | None
     dq_status: str = "CLEAN"
 
@@ -217,27 +218,26 @@ def freeze_backtest_protocol(
         )
     _validate_fold_order(folds)
 
-    payload = {
-        "candidate_id": candidate_id,
-        "qualification_dataset_id": qualification_dataset_id,
-        "panel": normalized_panel,
-        "benchmark": normalized_benchmark,
-        "research_end_date": research_end_date,
-        "folds": tuple(folds),
-        "preregistered_at": preregistered_at,
-        "history_accessed_at": history_accessed_at,
-        "strategy_version": strategy_version,
-        "calculation_version": calculation_version,
-        "robustness_version": robustness_version,
-    }
-    digest = _digest(payload)
-    return FrozenBacktestProtocol(**payload, protocol_digest=digest)
+    record = FrozenBacktestProtocol(
+        candidate_id=candidate_id,
+        qualification_dataset_id=qualification_dataset_id,
+        panel=normalized_panel,
+        benchmark=normalized_benchmark,
+        research_end_date=research_end_date,
+        folds=tuple(folds),
+        preregistered_at=preregistered_at,
+        history_accessed_at=history_accessed_at,
+        strategy_version=strategy_version,
+        calculation_version=calculation_version,
+        robustness_version=robustness_version,
+        protocol_digest="",
+    )
+    digest = _digest(_protocol_payload(record))
+    return FrozenBacktestProtocol(**{**asdict(record), "folds": record.folds, "protocol_digest": digest})
 
 
 def verify_protocol_digest(protocol: FrozenBacktestProtocol) -> bool:
-    payload = asdict(protocol)
-    digest = payload.pop("protocol_digest")
-    return digest == _digest(payload)
+    return protocol.protocol_digest == _digest(_protocol_payload(protocol))
 
 
 def assert_qualification_dataset_unused(
@@ -652,7 +652,7 @@ def _bootstrap_median_interval(
 
 
 def _net(row: EpisodeObservation) -> Decimal:
-    return row.gross_return - Decimal(row.friction_bps) / Decimal(10000)
+    return row.return_net
 
 
 def _net_excess_spy(row: EpisodeObservation) -> Decimal:
@@ -712,6 +712,30 @@ def _calendar(values: Sequence[date]) -> list[date]:
 def _require_aware(value: datetime) -> None:
     if value.tzinfo is None or value.utcoffset() is None:
         raise BacktestProtocolError("timestamps must be timezone-aware")
+
+
+def _protocol_payload(protocol: FrozenBacktestProtocol) -> dict[str, object]:
+    """Canonical JSON-safe representation used for both freeze and verification."""
+    return {
+        "candidate_id": protocol.candidate_id,
+        "qualification_dataset_id": protocol.qualification_dataset_id,
+        "panel": list(protocol.panel),
+        "benchmark": protocol.benchmark,
+        "research_end_date": protocol.research_end_date.isoformat(),
+        "folds": [
+            {
+                "fold_id": fold.fold_id,
+                "start_date": fold.start_date.isoformat(),
+                "end_date": fold.end_date.isoformat(),
+            }
+            for fold in protocol.folds
+        ],
+        "preregistered_at": protocol.preregistered_at.isoformat(),
+        "history_accessed_at": protocol.history_accessed_at.isoformat(),
+        "strategy_version": protocol.strategy_version,
+        "calculation_version": protocol.calculation_version,
+        "robustness_version": protocol.robustness_version,
+    }
 
 
 def _digest(payload: object) -> str:
