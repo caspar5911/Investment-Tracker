@@ -60,3 +60,43 @@ def test_independent_baselines_and_strict_comparison():
 def test_locked_holdout_is_rejected_before_recomputation():
     with pytest.raises(ValueError, match="locked replacement holdout"):
         recompute_replay(bars("HACK", 2), bars("SPY", 2))
+
+def test_prior60_high_uses_previous_normalized_closes_not_ohlc_highs():
+    asset, spy = bars("URA", 61), bars("SPY", 61)
+    result = recompute_replay(asset, spy)
+
+    assert result[60].prior60_high == max(b.close for b in asset[:60])
+
+
+def test_simple_dip_baseline_uses_previous_closes_not_ohlc_highs():
+    start = date(2020, 1, 1)
+    source = [
+        AuditBar(
+            "URA",
+            start + timedelta(days=i),
+            Decimal("100"),
+            Decimal("200"),
+            Decimal("90"),
+            Decimal("100"),
+        )
+        for i in range(62)
+    ]
+    source[60] = AuditBar(
+        "URA",
+        source[60].bar_date,
+        Decimal("150"),
+        Decimal("150"),
+        Decimal("140"),
+        Decimal("150"),
+    )
+    source[61] = AuditBar(
+        "URA",
+        source[61].bar_date,
+        Decimal("150"),
+        Decimal("150"),
+        Decimal("140"),
+        Decimal("150"),
+    )
+
+    assert recompute_baseline_entries(source)["C19_SIMPLE_DIP"] == []
+
