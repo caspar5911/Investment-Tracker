@@ -2,8 +2,8 @@
 
 Candidate v2 is a governance/calculation protocol revision, not a post-hoc
 performance repair. REPLAY-v1.0 signal thresholds are inherited unchanged.
-Legacy Phase A and Phase B evidence are development/diagnostic evidence only
-for v2 and can never be relabelled as unseen validation.
+Legacy Candidate-v1 Phase A and Phase B evidence are development/diagnostic
+evidence only for v2 and can never be relabelled as unseen validation.
 """
 
 from __future__ import annotations
@@ -23,9 +23,14 @@ V2_VERSIONS = {
     "robust": "ROBUST-v2.0",
 }
 LEGACY_SEEN_PARTITIONS = (
-    "PHASE_A_2018-01-01_2023-12-31",
-    "PHASE_B_2024-01-01_2025-09-07",
+    "CANDIDATE_V1_PHASE_A_2018-01-01_2023-12-31",
+    "CANDIDATE_V1_PHASE_B_2024-01-01_2025-09-07",
 )
+V2_VALIDATION_PANEL = ("XLI", "XLU", "XLB", "XME", "XOP", "IGV", "XSD", "IYT")
+V2_BENCHMARK = "SPY"
+V2_WARMUP_WINDOW = ("2017-01-01", "2017-12-31")
+V2_PHASE_A_WINDOW = ("2018-01-01", "2023-12-31")
+V2_PHASE_B_WINDOW = ("2024-01-01", "2025-09-07")
 
 
 @dataclass(frozen=True)
@@ -37,6 +42,12 @@ class CandidateV2Preregistration:
     max_drawdown_convention: str
     rb09_same_session_rule: str
     rb09_supportive_threshold: str
+    validation_panel: tuple[str, ...]
+    benchmark: str
+    warmup_window: tuple[str, str]
+    phase_a_window: tuple[str, str]
+    phase_b_window: tuple[str, str]
+    panel_substitution_after_history_access_allowed: bool
     legacy_seen_partitions: tuple[str, ...]
     legacy_seen_partitions_eligible_as_unseen_oos: bool
     replacement_holdout_symbols: tuple[str, ...]
@@ -70,6 +81,12 @@ def preregister_candidate_v2(
         "rb09_supportive_threshold": (
             ">=20 non-overlap clusters and median 20d excess versus SPY >= 0"
         ),
+        "validation_panel": V2_VALIDATION_PANEL,
+        "benchmark": V2_BENCHMARK,
+        "warmup_window": V2_WARMUP_WINDOW,
+        "phase_a_window": V2_PHASE_A_WINDOW,
+        "phase_b_window": V2_PHASE_B_WINDOW,
+        "panel_substitution_after_history_access_allowed": False,
         "legacy_seen_partitions": LEGACY_SEEN_PARTITIONS,
         "legacy_seen_partitions_eligible_as_unseen_oos": False,
         "replacement_holdout_symbols": tuple(sorted(LOCKED_HOLDOUT)),
@@ -81,10 +98,7 @@ def preregister_candidate_v2(
     digest = sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()
     ).hexdigest()
-    return CandidateV2Preregistration(
-        **payload,
-        preregistration_digest=digest,
-    )
+    return CandidateV2Preregistration(**payload, preregistration_digest=digest)
 
 
 def verify_preregistration(record: CandidateV2Preregistration) -> bool:
@@ -97,6 +111,9 @@ def verify_preregistration(record: CandidateV2Preregistration) -> bool:
         digest == expected
         and record.versions == V2_VERSIONS
         and record.replay_thresholds_changed is False
+        and record.validation_panel == V2_VALIDATION_PANEL
+        and record.benchmark == V2_BENCHMARK
+        and record.panel_substitution_after_history_access_allowed is False
         and record.legacy_seen_partitions_eligible_as_unseen_oos is False
         and record.replacement_holdout_locked is True
         and set(record.replacement_holdout_symbols) == set(LOCKED_HOLDOUT)
