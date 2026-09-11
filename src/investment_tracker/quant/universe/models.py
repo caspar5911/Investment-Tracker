@@ -84,7 +84,7 @@ class RawRowReference(FrozenPhase3Model):
 class CalendarDiagnostic(FrozenPhase3Model):
     state: Literal["AGREE_OPEN", "AGREE_CLOSED", "DISAGREE", "UNAVAILABLE"]
     evidence: ArtifactIdentity | None = None
-    provider_open_dates: tuple[date, ...] = ()
+    provider_reported_open: bool | None = None
     error: str | None = None
 
 
@@ -154,6 +154,53 @@ class CandidateDQResult(FrozenPhase3Model):
             if self.quarantine is None:
                 raise ValueError("FAIL candidate requires a quarantine artifact")
         return self
+
+
+class CandidateDQAssessment(FrozenPhase3Model):
+    schema_version: Literal["PHASE3-CANDIDATE-ASSESSMENT-v1"] = (
+        "PHASE3-CANDIDATE-ASSESSMENT-v1"
+    )
+    symbol: str
+    status: Literal["PASS", "FAIL"]
+    row_count: int = Field(ge=0)
+    provider_request: ProviderRequestRecord
+    raw_evidence: ArtifactIdentity
+    normalized_dataset: ArtifactIdentity | None
+    issues: tuple[DataQualityIssueRecord, ...]
+    missing_sessions: tuple[SessionDiagnostic, ...]
+    unexpected_sessions: tuple[SessionDiagnostic, ...]
+    sdk_version: str | None
+    opend_version: str | None
+    normalization_version: Literal["MOOMOO-US-DAILY-EASTERN-DATE-UTC-v1"] = (
+        NORMALIZATION_VERSION
+    )
+    validator_version: Literal["XNYS-OHLCV-DQ-v1"] = VALIDATOR_VERSION
+    calendar_source_version: Literal["exchange_calendars-XNYS-v1"] = (
+        CALENDAR_SOURCE_VERSION
+    )
+    retrieved_at: datetime
+
+    def finalize(self, quarantine: ArtifactIdentity | None) -> CandidateDQResult:
+        if self.status == "FAIL" and quarantine is None:
+            raise ValueError("failed DQ assessment requires a quarantine artifact")
+        return CandidateDQResult(
+            symbol=self.symbol,
+            status=self.status,
+            row_count=self.row_count,
+            provider_request=self.provider_request,
+            raw_evidence=self.raw_evidence,
+            normalized_dataset=self.normalized_dataset,
+            quarantine=quarantine,
+            issues=self.issues,
+            missing_sessions=self.missing_sessions,
+            unexpected_sessions=self.unexpected_sessions,
+            sdk_version=self.sdk_version,
+            opend_version=self.opend_version,
+            normalization_version=self.normalization_version,
+            validator_version=self.validator_version,
+            calendar_source_version=self.calendar_source_version,
+            retrieved_at=self.retrieved_at,
+        )
 
 
 class NormalizedDatasetMetadata(FrozenPhase3Model):
