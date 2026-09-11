@@ -134,3 +134,81 @@ runtime evidence. Code or documentation alone does not close those controls.
 Negative results remain evidence. Candidate versions may improve methodology,
 but no version may rewrite or hide a prior adverse result to manufacture a
 higher readiness score.
+
+
+## Frozen unseen cross-sectional validation panel
+
+Before any historical price request for these symbols, Candidate v2 fixes the
+following validation panel:
+
+| Symbol | Role |
+| --- | --- |
+| XLI | broad U.S. industrials |
+| XLU | utilities |
+| XLB | materials |
+| XME | metals and mining |
+| XOP | oil and gas exploration/production |
+| IGV | software |
+| XSD | semiconductors |
+| IYT | transportation |
+
+The benchmark is SPY.
+
+Only current asset-identity metadata was checked before this panel was frozen.
+No historical bars for these eight panel symbols were inspected before
+preregistration.
+
+The panel cannot be substituted after historical access begins. Provider
+failure, insufficient history, or a new data-quality problem becomes
+UNKNOWN/ABSTAIN for the affected evidence; it does not permit replacing a weak
+symbol with a more favorable one.
+
+### Fixed validation windows
+
+- Warm-up only: 2017-01-01 through 2017-12-31.
+- Candidate-v2 Phase A: 2018-01-01 through 2023-12-31.
+- Candidate-v2 strict Phase B: 2024-01-01 through 2025-09-07.
+- Benchmark: exact-session SPY.
+- C24 partition isolation remains mandatory.
+
+Candidate-v2 Phase-B history must not be fetched until Candidate-v2 Phase A and
+ROBUST-v2.0 have been computed and the candidate remains frozen without rule
+changes. A failed Phase-A or robustness result is recorded as failure; it does
+not authorize tuning and retrying under the same candidate identifier.
+
+## PHASEB-v2.0 acceptance criteria
+
+The following criteria are frozen before any panel history is inspected.
+
+A Candidate-v2 Phase-B PASS requires all of the following:
+
+1. At least 20 clean matured 20-trading-day REPLAY episodes overall.
+2. Median 20-day excess return versus exact-timing SPY is strictly greater than
+   zero.
+3. Median 20-day excess return versus the matched 3.25% cash hurdle is strictly
+   greater than zero.
+4. Median 60-day excess return versus SPY is non-negative.
+5. At least four panel proxies have at least three matured 20-day episodes.
+6. A strict majority of adequately sampled proxies have non-negative median
+   20-day SPY excess.
+7. At 25 bps total round-trip friction, median 20-day net return is strictly
+   greater than the median matched cash hurdle.
+8. REPLAY median 20-day SPY excess is at least the frozen Simple-Dip median
+   20-day SPY excess.
+
+Insufficient sample produces INCONCLUSIVE. Once the minimum sample exists,
+failure of any performance criterion produces FAIL. No failed criterion may be
+redefined after seeing results under the same candidate.
+
+## Score consequence
+
+The present 74-point cap is not removed by this preregistration itself.
+
+- ROBUST-v2.0 must first PASS on genuinely eligible Candidate-v2 evidence before
+  the robustness cap can be removed.
+- PHASEB-v2.0 must then PASS on still-unseen Phase-B panel history before the
+  Phase-B cap can be removed.
+- DQ-046 and RECON-009 require runtime operational proof independently of model
+  efficacy.
+
+The scoring weights and caps are not changed to target 80.
