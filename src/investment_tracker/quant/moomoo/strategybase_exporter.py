@@ -15,16 +15,27 @@ class ExportBlockedError(RuntimeError):
 SUPPORTED_FAMILIES = frozenset({"trend", "momentum", "trend_momentum"})
 
 
-def export_strategy(snapshot: ValidatedSnapshot, destination: Path) -> Path:
+def export_strategy(
+    snapshot: ValidatedSnapshot,
+    destination: Path,
+    *,
+    symbol: str | None = None,
+) -> Path:
     if not isinstance(snapshot, ValidatedSnapshot) or snapshot.status != "VALIDATED_SNAPSHOT":
         raise ExportBlockedError("Moomoo export requires an immutable VALIDATED_SNAPSHOT")
     manifest = snapshot.candidate_manifest
     symbols = tuple(assert_symbol_allowed(symbol) for symbol in manifest.data_manifest_hashes)
-    if len(symbols) != 1:
-        raise ExportBlockedError("StrategyBase export currently requires exactly one validated symbol")
+    if symbol is None:
+        if len(symbols) != 1:
+            raise ExportBlockedError("multi-symbol snapshots require an explicit validated export symbol")
+        export_symbol = symbols[0]
+    else:
+        export_symbol = assert_symbol_allowed(symbol)
+        if export_symbol not in symbols:
+            raise ExportBlockedError("export symbol is not part of the validated snapshot")
     if manifest.strategy_family not in SUPPORTED_FAMILIES:
         raise ExportBlockedError("strategy cannot be represented exactly with the documented exporter")
-    source = _render(manifest.strategy_family, manifest.strategy_parameters, symbols[0], snapshot.digest)
+    source = _render(manifest.strategy_family, manifest.strategy_parameters, export_symbol, snapshot.digest)
     destination = Path(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
     with destination.open("x", encoding="utf-8", newline="\n") as handle:

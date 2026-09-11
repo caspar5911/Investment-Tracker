@@ -46,6 +46,7 @@ def parser() -> argparse.ArgumentParser:
     export = subparsers.add_parser("export-moomoo", help="export a validated StrategyBase source file")
     export.add_argument("--snapshot", type=Path, required=True)
     export.add_argument("--output", type=Path, required=True)
+    export.add_argument("--symbol")
     return root
 
 
@@ -157,7 +158,7 @@ def _export_moomoo(args: argparse.Namespace) -> int:
     from .moomoo.strategybase_exporter import export_strategy
     from .promotion import ValidatedSnapshot
     snapshot = ValidatedSnapshot.model_validate_json(args.snapshot.read_text(encoding="utf-8"))
-    path = export_strategy(snapshot, args.output)
+    path = export_strategy(snapshot, args.output, symbol=args.symbol)
     print(json.dumps({"status": "OK", "output": str(path)}, sort_keys=True))
     return 0
 

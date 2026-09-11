@@ -1,5 +1,6 @@
 __pycache__/
 *.py[cod]
+*.egg-info/
 .pytest_cache/
 .venv/
 venv/
@@ -8,3 +9,8 @@ venv/
 .env.*
 !*.example
 staging/**/runtime/
+data/cache/
+results/experiments/
+results/baselines/
+results/validated/
+results/exports/
