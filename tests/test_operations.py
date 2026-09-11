@@ -6,8 +6,10 @@ from investment_tracker.operations import (
     RECON_009,
     AlertDispatcher,
     AlertStatus,
+    OperationalReconciliationEvidence,
     RecoveryMismatchError,
     RunMonitor,
+    evaluate_operational_reconciliation,
     verify_recovery_readback,
 )
 
@@ -78,3 +80,39 @@ def test_recon_009_is_a_hard_production_support_limitation():
     assert RECON_009.resolved is False
     assert RECON_009.hard_gate is True
 
+
+def test_recon_009_cannot_close_from_partial_runtime_evidence():
+    report = evaluate_operational_reconciliation(
+        OperationalReconciliationEvidence(
+            single_writer_runtime_proven=True,
+            post_write_readback_runtime_proven=True,
+            interrupted_write_recovery_runtime_proven=True,
+            alert_delivery_runtime_proven=False,
+            alert_acknowledgement_runtime_proven=False,
+            alert_failure_escalation_runtime_proven=True,
+        )
+    )
+
+    assert report.resolved is False
+    assert report.status == "RECON-009_OPEN"
+    assert report.missing_evidence == (
+        "alert_delivery_runtime_proven",
+        "alert_acknowledgement_runtime_proven",
+    )
+
+
+def test_recon_009_requires_all_runtime_evidence():
+    report = evaluate_operational_reconciliation(
+        OperationalReconciliationEvidence(
+            single_writer_runtime_proven=True,
+            post_write_readback_runtime_proven=True,
+            interrupted_write_recovery_runtime_proven=True,
+            alert_delivery_runtime_proven=True,
+            alert_acknowledgement_runtime_proven=True,
+            alert_failure_escalation_runtime_proven=True,
+        )
+    )
+
+    assert report.resolved is True
+    assert report.status == "RECON-009_RESOLVED"
+    assert report.missing_evidence == ()

@@ -1,6 +1,6 @@
 """Fail-closed, repository-local operational reliability primitives.
 
-The objects in this module hold process-local state only.  They neither mutate the
+The objects in this module hold process-local state only. They neither mutate the
 canonical evidence plane nor perform network delivery themselves; callers must
 provide an explicit alert sink and readback function.
 """
@@ -181,7 +181,49 @@ def verify_recovery_readback(
     return True
 
 
+@dataclass(frozen=True)
+class OperationalReconciliationEvidence:
+    """Runtime evidence required before RECON-009 can be considered resolved.
+
+    Unit tests can prove the mechanisms exist, but the booleans below must come
+    from actual runtime observations. This prevents code-only work from closing
+    an operational hard gate.
+    """
+
+    single_writer_runtime_proven: bool
+    post_write_readback_runtime_proven: bool
+    interrupted_write_recovery_runtime_proven: bool
+    alert_delivery_runtime_proven: bool
+    alert_acknowledgement_runtime_proven: bool
+    alert_failure_escalation_runtime_proven: bool
+
+
+@dataclass(frozen=True)
+class OperationalReconciliationReport:
+    resolved: bool
+    status: str
+    missing_evidence: tuple[str, ...]
+
+
+def evaluate_operational_reconciliation(
+    evidence: OperationalReconciliationEvidence,
+) -> OperationalReconciliationReport:
+    required = (
+        "single_writer_runtime_proven",
+        "post_write_readback_runtime_proven",
+        "interrupted_write_recovery_runtime_proven",
+        "alert_delivery_runtime_proven",
+        "alert_acknowledgement_runtime_proven",
+        "alert_failure_escalation_runtime_proven",
+    )
+    missing = tuple(name for name in required if not getattr(evidence, name))
+    return OperationalReconciliationReport(
+        resolved=not missing,
+        status="RECON-009_RESOLVED" if not missing else "RECON-009_OPEN",
+        missing_evidence=missing,
+    )
+
+
 def _require_aware(value: datetime) -> None:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("operational timestamps must be timezone-aware")
-
