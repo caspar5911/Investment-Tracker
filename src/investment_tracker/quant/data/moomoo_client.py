@@ -103,3 +103,10 @@ class MoomooHistoricalDataSource:
             except importlib_metadata.PackageNotFoundError:
                 version = None
         return normalized, version
+
+    def preflight(self, symbol: str) -> None:
+        assert_symbol_allowed(symbol)
+        sdk = self._sdk_loader()
+        factory = self._context_factory or sdk.OpenQuoteContext
+        context = factory(host=self._host, port=self._port)
+        context.close()
