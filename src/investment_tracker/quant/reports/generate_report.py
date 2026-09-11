@@ -142,7 +142,7 @@ def write_report(records: Iterable[ExperimentRecord], destination: Path) -> Path
     os.close(descriptor)
     temporary = Path(temporary_name)
     try:
-        temporary.write_text(content, encoding="utf-8")
+        temporary.write_text(content, encoding="utf-8", newline="\n")
         os.replace(temporary, destination)
     finally:
         temporary.unlink(missing_ok=True)

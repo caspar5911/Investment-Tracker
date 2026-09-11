@@ -236,8 +236,12 @@ def _evaluate_and_store(
         strategy = build_strategy(configuration.family, configuration.parameters)
         train_frames = {symbol: _slice(frame, train_period) for symbol, frame in bars_by_symbol.items()}
         validation_frames = {symbol: _slice(frame, validation_period) for symbol, frame in bars_by_symbol.items()}
-        train_metrics = _portfolio_metrics(strategy, train_frames, assumptions)
-        validation_metrics = _portfolio_metrics(strategy, validation_frames, assumptions)
+        train_metrics, train_loss_rate = _portfolio_metrics_with_loss_rate(
+            strategy, train_frames, assumptions
+        )
+        validation_metrics, validation_loss_rate = _portfolio_metrics_with_loss_rate(
+            strategy, validation_frames, assumptions
+        )
         benchmark_metrics = _benchmark_metrics(validation_frames, assumptions)
         neighbor_returns = _neighbor_returns(strategy, validation_frames, assumptions)
         friction_returns = _friction_returns(strategy, validation_frames, assumptions)
@@ -302,9 +306,9 @@ def _evaluate_and_store(
             symbols=tuple(sorted(bars_by_symbol)),
             train_period=train_period,
             validation_period=validation_period,
-            metrics=_metrics_dict(train_metrics),
+            metrics=_metrics_dict(train_metrics, loss_rate=train_loss_rate),
             validation_metrics={
-                **_metrics_dict(validation_metrics),
+                **_metrics_dict(validation_metrics, loss_rate=validation_loss_rate),
                 "benchmark_total_return": benchmark_metrics.total_return,
                 "benchmark_excess_return": excess,
                 "cash_total_return": calculate_metrics(
@@ -350,6 +354,14 @@ def _portfolio_metrics(
     bars_by_symbol: Mapping[str, pd.DataFrame],
     assumptions: ExecutionAssumptions,
 ) -> PerformanceMetrics:
+    return _portfolio_metrics_with_loss_rate(strategy, bars_by_symbol, assumptions)[0]
+
+
+def _portfolio_metrics_with_loss_rate(
+    strategy: StrategyDefinition,
+    bars_by_symbol: Mapping[str, pd.DataFrame],
+    assumptions: ExecutionAssumptions,
+) -> tuple[PerformanceMetrics, float | None]:
     results = {
         symbol: run_backtest(frame, strategy.targets(frame), assumptions)
         for symbol, frame in bars_by_symbol.items()
@@ -363,7 +375,13 @@ def _portfolio_metrics(
     ).mean(axis=1)
     pnls = tuple(trade.realized_pnl for result in results.values() for trade in result.trades)
     turnover = sum(result.turnover_notional for result in results.values()) / len(results)
-    return calculate_metrics(equity, realized_pnls=pnls, turnover_notional=turnover, exposure=exposure)
+    metrics = calculate_metrics(
+        equity,
+        realized_pnls=pnls,
+        turnover_notional=turnover,
+        exposure=exposure,
+    )
+    return metrics, _loss_rate(pnls)
 
 
 def _benchmark_metrics(
@@ -446,8 +464,17 @@ def _slice(frame: pd.DataFrame, period: tuple[date, date]) -> pd.DataFrame:
     return frame.loc[(dates >= period[0]) & (dates <= period[1])]
 
 
-def _metrics_dict(metrics: PerformanceMetrics) -> dict[str, float | int | None]:
-    return asdict(metrics)
+def _metrics_dict(
+    metrics: PerformanceMetrics,
+    *,
+    loss_rate: float | None,
+) -> dict[str, float | int | None]:
+    return {**asdict(metrics), "loss_rate": loss_rate}
+
+
+def _loss_rate(realized_pnls: Iterable[float]) -> float | None:
+    pnls = tuple(float(value) for value in realized_pnls)
+    return None if not pnls else sum(value < 0 for value in pnls) / len(pnls)
 
 
 def _strategy_code_hash(strategy: StrategyDefinition) -> str:

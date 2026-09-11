@@ -16,6 +16,7 @@ from investment_tracker.quant.experiments import (
 from investment_tracker.quant.reports.generate_report import (
     render_report,
     write_leaderboard,
+    write_report,
 )
 
 
@@ -126,6 +127,16 @@ def test_report_command_reads_experiments_and_writes_derived_views(tmp_path: Pat
     assert leaderboard.exists()
     assert report.exists()
     assert "exp-1" in report.read_text(encoding="utf-8")
+
+
+def test_report_writer_uses_platform_independent_lf_line_endings(tmp_path: Path) -> None:
+    report = tmp_path / "latest_report.md"
+
+    write_report([experiment("exp-1", 65.0, 0.9)], report)
+
+    content = report.read_bytes()
+    assert b"\n" in content
+    assert b"\r\n" not in content
 
 
 def test_validate_command_fails_closed_on_invalid_experiment(tmp_path: Path) -> None:

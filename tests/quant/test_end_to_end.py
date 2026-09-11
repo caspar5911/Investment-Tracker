@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import investment_tracker.quant.workflow as workflow
 from investment_tracker.quant.workflow import run_fixture_pipeline
 
 
@@ -49,6 +50,8 @@ def test_experiment_persists_cash_friction_walk_forward_and_bootstrap_evidence(t
     payload = json.loads(next((tmp_path / "results" / "experiments").glob("*.json")).read_text(encoding="utf-8"))
     metrics = payload["validation_metrics"]
 
+    assert payload["metrics"]["loss_rate"] is not None
+    assert metrics["loss_rate"] is not None
     assert metrics["cash_total_return"] == 0.0
     assert metrics["bootstrap_median_lower"] <= metrics["bootstrap_median_upper"]
     assert {key for key in metrics if key.startswith("friction_return_")} == {
@@ -62,3 +65,8 @@ def test_experiment_persists_cash_friction_walk_forward_and_bootstrap_evidence(t
         "walk_forward_return_2",
         "walk_forward_return_3",
     }
+
+
+def test_loss_rate_counts_only_strictly_negative_closed_trades() -> None:
+    assert workflow._loss_rate((-10.0, 0.0, 5.0, -2.0)) == 0.5
+    assert workflow._loss_rate(()) is None
