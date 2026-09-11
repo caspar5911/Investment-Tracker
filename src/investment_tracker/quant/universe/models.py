@@ -17,6 +17,7 @@ from .constants import (
     NORMALIZATION_VERSION,
     PROVIDER_REQUEST_SCHEMA_VERSION,
     VALIDATOR_VERSION,
+    NORMALIZED_DATASET_SCHEMA_VERSION,
 )
 
 
@@ -152,6 +153,39 @@ class CandidateDQResult(FrozenPhase3Model):
                 raise ValueError("FAIL candidate requires at least one DQ issue")
             if self.quarantine is None:
                 raise ValueError("FAIL candidate requires a quarantine artifact")
+        return self
+
+
+class NormalizedDatasetMetadata(FrozenPhase3Model):
+    schema_version: Literal["PHASE3-NORMALIZED-DATASET-v1"] = (
+        NORMALIZED_DATASET_SCHEMA_VERSION
+    )
+    symbol: str
+    provider_request: ProviderRequestRecord
+    raw_evidence: ArtifactIdentity
+    sdk_version: str | None
+    opend_version: str | None
+    normalization_version: Literal["MOOMOO-US-DAILY-EASTERN-DATE-UTC-v1"] = (
+        NORMALIZATION_VERSION
+    )
+    retrieved_at: datetime
+    row_count: int = Field(gt=0)
+    first_timestamp: datetime
+    last_timestamp: datetime
+
+    @model_validator(mode="after")
+    def validate_metadata(self) -> "NormalizedDatasetMetadata":
+        symbol = assert_symbol_allowed(self.symbol)
+        if symbol not in CANDIDATE_POOL or symbol != self.provider_request.symbol:
+            raise ValueError("normalized dataset symbol identity mismatch")
+        if self.raw_evidence.kind != "raw_provider_evidence":
+            raise ValueError("normalized dataset must reference raw provider evidence")
+        for field_name in ("retrieved_at", "first_timestamp", "last_timestamp"):
+            value = getattr(self, field_name)
+            if value.tzinfo is None or value.utcoffset() is None:
+                raise ValueError(f"{field_name} must be timezone-aware")
+        if self.last_timestamp < self.first_timestamp:
+            raise ValueError("normalized dataset timestamps must be ordered")
         return self
 
 

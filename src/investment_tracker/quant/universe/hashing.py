@@ -5,6 +5,7 @@ from decimal import Decimal
 from hashlib import sha256
 import json
 import math
+from numbers import Integral, Real
 from pathlib import Path
 from typing import Any
 
@@ -16,15 +17,16 @@ def tag_scalar(value: object) -> dict[str, object]:
         return {"type": "null", "value": None}
     if isinstance(value, bool):
         return {"type": "bool", "value": value}
-    if isinstance(value, int):
-        return {"type": "int", "value": str(value)}
-    if isinstance(value, float):
-        if math.isnan(value):
+    if isinstance(value, Integral):
+        return {"type": "int", "value": str(int(value))}
+    if isinstance(value, Real):
+        numeric = float(value)
+        if math.isnan(numeric):
             encoded = "nan"
-        elif math.isinf(value):
-            encoded = "inf" if value > 0 else "-inf"
+        elif math.isinf(numeric):
+            encoded = "inf" if numeric > 0 else "-inf"
         else:
-            encoded = format(value, ".17g")
+            encoded = format(numeric, ".17g")
         return {"type": "float", "value": encoded}
     if isinstance(value, Decimal):
         return {"type": "decimal", "value": str(value)}
@@ -65,4 +67,3 @@ def canonical_json_bytes(value: object) -> bytes:
 
 def canonical_sha256(value: object) -> str:
     return sha256(canonical_json_bytes(value)).hexdigest()
-
