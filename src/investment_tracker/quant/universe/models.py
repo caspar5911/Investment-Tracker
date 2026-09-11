@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -14,10 +14,11 @@ from .constants import (
     CAMPAIGN_START,
     CANDIDATE_POOL,
     DQ_SNAPSHOT_SCHEMA_VERSION,
+    NORMALIZED_DATASET_SCHEMA_VERSION,
     NORMALIZATION_VERSION,
     PROVIDER_REQUEST_SCHEMA_VERSION,
+    SELECTION_POLICY_VERSION,
     VALIDATOR_VERSION,
-    NORMALIZED_DATASET_SCHEMA_VERSION,
 )
 
 
@@ -259,4 +260,78 @@ class DQSnapshot(FrozenPhase3Model):
             raise ValueError("DQ snapshot candidate results must be unique")
         if self.created_at.tzinfo is None or self.created_at.utcoffset() is None:
             raise ValueError("created_at must be timezone-aware")
+        return self
+
+
+class SelectionCandidateStatus(FrozenPhase3Model):
+    symbol: str
+    status: Literal["PASS", "FAIL"]
+
+
+class SelectionDecision(FrozenPhase3Model):
+    category: str = Field(min_length=1)
+    ordered_candidates: tuple[str, ...] = Field(min_length=1)
+    dq_statuses: tuple[SelectionCandidateStatus, ...] = Field(min_length=1)
+    selected_symbol: str | None
+    reason: Literal["SELECTED_FIRST_CLEAN", "NO_CLEAN_CANDIDATE"]
+
+    @model_validator(mode="after")
+    def validate_decision(self) -> "SelectionDecision":
+        status_symbols = tuple(item.symbol for item in self.dq_statuses)
+        if status_symbols != self.ordered_candidates:
+            raise ValueError("selection status order must match declared candidate order")
+        passing = [item.symbol for item in self.dq_statuses if item.status == "PASS"]
+        expected = passing[0] if passing else None
+        if self.selected_symbol != expected:
+            raise ValueError("selection must choose the first clean candidate")
+        expected_reason = "SELECTED_FIRST_CLEAN" if expected else "NO_CLEAN_CANDIDATE"
+        if self.reason != expected_reason:
+            raise ValueError("selection reason does not match DQ outcomes")
+        return self
+
+
+class SelectedExposure(FrozenPhase3Model):
+    category: str = Field(min_length=1)
+    symbol: str
+
+
+class SelectionResult(FrozenPhase3Model):
+    schema_version: Literal["PHASE3-SELECTION-RESULT-v1"] = "PHASE3-SELECTION-RESULT-v1"
+    selection_policy_version: Literal["PHASE3-EXPOSURE-SELECTION-v1"] = (
+        SELECTION_POLICY_VERSION
+    )
+    snapshot: ArtifactIdentity
+    decisions: tuple[SelectionDecision, ...]
+    selected_exposures: tuple[SelectedExposure, ...]
+    selected_symbols: tuple[str, ...]
+    admitted: bool
+    stop_reason: Literal[
+        "PHASE_3_UNIVERSE_FROZEN", "INSUFFICIENT_CLEAN_DIVERSIFIED_UNIVERSE"
+    ]
+    strategy_performance_used: Literal[False] = False
+
+    @model_validator(mode="after")
+    def validate_result(self) -> "SelectionResult":
+        if self.snapshot.kind != "dq_snapshot":
+            raise ValueError("selection requires a frozen DQ snapshot")
+        exposure_symbols = tuple(item.symbol for item in self.selected_exposures)
+        if exposure_symbols != self.selected_symbols:
+            raise ValueError("selected symbol and exposure order differ")
+        if len(self.selected_symbols) != len(set(self.selected_symbols)):
+            raise ValueError("selected symbols must be unique")
+        categories = tuple(item.category for item in self.selected_exposures)
+        if len(categories) != len(set(categories)):
+            raise ValueError("selected exposure categories must be unique")
+        if len(self.selected_symbols) > 8:
+            raise ValueError("Phase 3 selection cannot exceed eight exposures")
+        expected_admitted = len(self.selected_symbols) >= 6
+        if self.admitted != expected_admitted:
+            raise ValueError("admission must fail closed below six exposures")
+        expected_reason = (
+            "PHASE_3_UNIVERSE_FROZEN"
+            if expected_admitted
+            else "INSUFFICIENT_CLEAN_DIVERSIFIED_UNIVERSE"
+        )
+        if self.stop_reason != expected_reason:
+            raise ValueError("stop reason does not match selected exposure count")
         return self
