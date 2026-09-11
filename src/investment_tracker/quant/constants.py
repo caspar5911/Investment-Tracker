@@ -1,0 +1,6 @@
+from typing import Final, Literal
+
+
+TRADING_MODE: Final[Literal["SIMULATE"]] = "SIMULATE"
+ENGINE_VERSION: Final = "QUANT-ENGINE-v1"
+EXECUTION_CONVENTION: Final = "COMPLETED_BAR_SIGNAL_NEXT_BAR_OPEN"

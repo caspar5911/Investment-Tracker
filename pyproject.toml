@@ -11,12 +11,23 @@ dependencies = ["pydantic>=2.8,<3"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8,<9"]
+quant = [
+    "exchange-calendars>=4.5,<5",
+    "numpy>=1.26,<3",
+    "pandas>=2.2,<3",
+    "pyarrow>=16,<22",
+    "PyYAML>=6,<7",
+]
+moomoo = ["moomoo-api>=9,<11"]
 
 [project.scripts]
 investment-tracker = "investment_tracker.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"investment_tracker.quant" = ["defaults/*.yaml"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
