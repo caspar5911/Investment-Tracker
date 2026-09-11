@@ -18,6 +18,7 @@ from .constants import (
     NORMALIZATION_VERSION,
     PROVIDER_REQUEST_SCHEMA_VERSION,
     SELECTION_POLICY_VERSION,
+    UNIVERSE_MANIFEST_SCHEMA_VERSION,
     VALIDATOR_VERSION,
 )
 
@@ -334,4 +335,108 @@ class SelectionResult(FrozenPhase3Model):
         )
         if self.stop_reason != expected_reason:
             raise ValueError("stop reason does not match selected exposure count")
+        return self
+
+
+class UniverseManifest(FrozenPhase3Model):
+    schema_version: Literal["PHASE3-UNIVERSE-MANIFEST-v1"] = (
+        UNIVERSE_MANIFEST_SCHEMA_VERSION
+    )
+    campaign_spec_version: Literal["PHASE3-ETF-DQ-SPEC-v1"] = CAMPAIGN_SPEC_VERSION
+    campaign_id: str = Field(min_length=1)
+    window_start: date
+    window_end: date
+    candidate_pool: tuple[str, ...]
+    candidate_pool_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    selection_policy_version: Literal["PHASE3-EXPOSURE-SELECTION-v1"] = (
+        SELECTION_POLICY_VERSION
+    )
+    provider: Literal["MOOMOO"] = "MOOMOO"
+    sdk_versions: tuple[str, ...]
+    opend_versions: tuple[str, ...]
+    normalization_version: Literal["MOOMOO-US-DAILY-EASTERN-DATE-UTC-v1"] = (
+        NORMALIZATION_VERSION
+    )
+    validator_version: Literal["XNYS-OHLCV-DQ-v1"] = VALIDATOR_VERSION
+    calendar_source_version: Literal["exchange_calendars-XNYS-v1"] = (
+        CALENDAR_SOURCE_VERSION
+    )
+    dq_snapshot: ArtifactIdentity
+    dq_report: ArtifactIdentity
+    candidates: tuple[CandidateDQResult, ...]
+    raw_evidence: tuple[ArtifactIdentity, ...]
+    normalized_datasets: tuple[ArtifactIdentity, ...]
+    selected_exposures: tuple[SelectedExposure, ...]
+    selected_symbols: tuple[str, ...]
+    source_revision: str = Field(min_length=1)
+    dependency_identity: str = Field(pattern=r"^[0-9a-f]{64}$")
+    qfq_execution_methodology: Literal[
+        "NORMALIZED_RESEARCH_SIMULATION_NOT_HISTORICAL_EXECUTABLE_FILLS"
+    ] = "NORMALIZED_RESEARCH_SIMULATION_NOT_HISTORICAL_EXECUTABLE_FILLS"
+    decision_grade: Literal[False] = False
+    strategy_performance_used: Literal[False] = False
+    strategy_backtests_executed: Literal[0] = 0
+    bars_repaired: Literal[0] = 0
+    final_holdout_accessed: Literal[False] = False
+    protected_symbols_accessed: tuple[()] = ()
+    live_trading_capability: Literal[False] = False
+    created_at: datetime
+
+    @model_validator(mode="after")
+    def validate_manifest(self) -> "UniverseManifest":
+        if (self.window_start, self.window_end) != (CAMPAIGN_START, CAMPAIGN_END):
+            raise ValueError("universe manifest must use the fixed 2014-2022 window")
+        if self.candidate_pool != CANDIDATE_POOL:
+            raise ValueError("universe manifest candidate pool differs from the frozen pool")
+        candidate_symbols = tuple(candidate.symbol for candidate in self.candidates)
+        if len(candidate_symbols) != 16 or set(candidate_symbols) != set(CANDIDATE_POOL):
+            raise ValueError("universe manifest requires all 16 DQ candidates")
+        if self.dq_snapshot.kind != "dq_snapshot" or self.dq_report.kind != "dq_report":
+            raise ValueError("universe manifest evidence identity kind mismatch")
+        if self.raw_evidence != tuple(candidate.raw_evidence for candidate in self.candidates):
+            raise ValueError("raw evidence chain does not match candidate DQ records")
+        expected_normalized = tuple(
+            candidate.normalized_dataset
+            for candidate in self.candidates
+            if candidate.normalized_dataset is not None
+        )
+        if self.normalized_datasets != expected_normalized:
+            raise ValueError("normalized evidence chain does not match candidate DQ records")
+        if self.selected_symbols != tuple(item.symbol for item in self.selected_exposures):
+            raise ValueError("selected exposure and symbol order differ")
+        if not 6 <= len(self.selected_symbols) <= 8:
+            raise ValueError("admitted Phase 3 universe must contain six to eight exposures")
+        if self.created_at.tzinfo is None or self.created_at.utcoffset() is None:
+            raise ValueError("created_at must be timezone-aware")
+        return self
+
+
+class CampaignOutcome(FrozenPhase3Model):
+    schema_version: Literal["PHASE3-CAMPAIGN-OUTCOME-v1"] = "PHASE3-CAMPAIGN-OUTCOME-v1"
+    campaign_id: str
+    window_start: date
+    window_end: date
+    candidate_pool: tuple[str, ...]
+    preflight_sdk_version: str | None
+    preflight_opend_version: str | None
+    dq_snapshot: ArtifactIdentity
+    dq_report: ArtifactIdentity
+    selection: SelectionResult
+    universe_manifest: ArtifactIdentity | None
+    stop_reason: Literal[
+        "PHASE_3_UNIVERSE_FROZEN", "INSUFFICIENT_CLEAN_DIVERSIFIED_UNIVERSE"
+    ]
+
+    @model_validator(mode="after")
+    def validate_outcome(self) -> "CampaignOutcome":
+        if (self.window_start, self.window_end) != (CAMPAIGN_START, CAMPAIGN_END):
+            raise ValueError("campaign outcome window mismatch")
+        if self.candidate_pool != CANDIDATE_POOL:
+            raise ValueError("campaign outcome candidate pool mismatch")
+        if self.selection.snapshot != self.dq_snapshot:
+            raise ValueError("selection does not reference the frozen campaign snapshot")
+        if self.stop_reason != self.selection.stop_reason:
+            raise ValueError("campaign and selection stop reasons differ")
+        if self.selection.admitted != (self.universe_manifest is not None):
+            raise ValueError("manifest presence must match selection admission")
         return self

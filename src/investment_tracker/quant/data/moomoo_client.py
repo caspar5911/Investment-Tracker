@@ -125,6 +125,11 @@ class MoomooHistoricalDataSource:
             "port": self._port,
         }
 
+    def history_request_parameters(self, request: DataRequest) -> dict[str, object]:
+        symbol = assert_symbol_allowed(request.symbol)
+        guarded = request.model_copy(update={"symbol": symbol})
+        return self._history_parameters(self._sdk_loader(), guarded)
+
     @staticmethod
     def _normalize_pages(
         pages: list[MoomooRawPage], expected_code: str

@@ -141,6 +141,29 @@ def test_fetch_evidence_preserves_complete_raw_pages_and_request_chain() -> None
     assert context.closed
 
 
+def test_history_request_parameters_are_available_without_opening_context() -> None:
+    context = FakeContext()
+
+    parameters = source(context).history_request_parameters(request())
+
+    assert parameters == {
+        "provider": "MOOMOO",
+        "code": "US.SPY",
+        "start": "2014-01-01",
+        "end": "2022-12-31",
+        "ktype": {"name": "K_DAY", "value": "K_DAY_VALUE"},
+        "autype": {"name": "QFQ", "value": "qfq-value"},
+        "fields": [{"name": "ALL", "value": "all-fields-value"}],
+        "max_count": 1000,
+        "extended_time": False,
+        "session": {"name": "RTH", "value": "rth-value"},
+        "host": "127.0.0.1",
+        "port": 11111,
+    }
+    assert context.history_calls == []
+    assert context.global_state_calls == 0
+
+
 def test_provider_failure_returns_partial_auditable_evidence() -> None:
     context = FakeContext(
         history=[

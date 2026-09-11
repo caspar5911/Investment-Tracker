@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Any
-
 import exchange_calendars as xcals
 import pandas as pd
 
@@ -31,8 +29,12 @@ def _enum_value(parameters: dict[str, object], key: str) -> str:
     return str(value["value"])
 
 
-def provider_request_from_evidence(evidence: MoomooFetchEvidence) -> ProviderRequestRecord:
-    parameters = evidence.request_parameters
+def provider_request_from_parameters(
+    request: object, parameters: dict[str, object]
+) -> ProviderRequestRecord:
+    symbol = getattr(request, "symbol")
+    start = getattr(request, "start")
+    end = getattr(request, "end")
     field_records = parameters.get("fields")
     if not isinstance(field_records, list):
         raise ValueError("provider request parameter fields is malformed")
@@ -42,10 +44,10 @@ def provider_request_from_evidence(evidence: MoomooFetchEvidence) -> ProviderReq
             raise ValueError("provider request field identity is malformed")
         fields.append(str(record["value"]))
     return ProviderRequestRecord(
-        symbol=evidence.request.symbol,
+        symbol=symbol,
         code=str(parameters["code"]),
-        start=evidence.request.start,
-        end=evidence.request.end,
+        start=start,
+        end=end,
         host=str(parameters["host"]),
         port=int(parameters["port"]),
         ktype=_enum_value(parameters, "ktype"),
@@ -55,6 +57,10 @@ def provider_request_from_evidence(evidence: MoomooFetchEvidence) -> ProviderReq
         extended_time=bool(parameters["extended_time"]),
         session=_enum_value(parameters, "session"),
     )
+
+
+def provider_request_from_evidence(evidence: MoomooFetchEvidence) -> ProviderRequestRecord:
+    return provider_request_from_parameters(evidence.request, evidence.request_parameters)
 
 
 def _raw_reference(

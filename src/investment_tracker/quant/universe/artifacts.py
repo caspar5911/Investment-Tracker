@@ -13,7 +13,10 @@ import pandas as pd
 
 from investment_tracker.governance import assert_symbol_allowed
 from investment_tracker.quant.data.cache import content_hash
-from investment_tracker.quant.data.moomoo_client import MoomooFetchEvidence
+from investment_tracker.quant.data.moomoo_client import (
+    MoomooCalendarEvidence,
+    MoomooFetchEvidence,
+)
 
 from .constants import RAW_EVIDENCE_SCHEMA_VERSION
 from .hashing import canonical_json_bytes, canonical_sha256, tag_scalar
@@ -23,6 +26,7 @@ from .models import (
     DQSnapshot,
     NormalizedDatasetMetadata,
     ProviderRequestRecord,
+    UniverseManifest,
 )
 
 
@@ -176,6 +180,27 @@ class Phase3ArtifactStore:
             logical_path="phase3/raw/moomoo/sha256/{digest}/evidence.json",
         )
 
+    def write_calendar_evidence(
+        self, evidence: MoomooCalendarEvidence, opend_version: str | None
+    ) -> ArtifactIdentity:
+        assert_symbol_allowed(evidence.request.symbol)
+        payload = {
+            "schema_version": "MOOMOO-CALENDAR-EVIDENCE-v1",
+            "status": evidence.status,
+            "request": evidence.request.model_dump(mode="json"),
+            "request_parameters": evidence.request_parameters,
+            "retrieved_at": evidence.retrieved_at.isoformat(),
+            "sdk_version": evidence.sdk_version,
+            "opend_version": opend_version,
+            "data": _tag_nested(evidence.data),
+            "error": evidence.error,
+        }
+        return self._write_json_artifact(
+            kind="calendar_provider_evidence",
+            payload=payload,
+            logical_path="phase3/raw/moomoo-calendar/sha256/{digest}/evidence.json",
+        )
+
     def write_normalized_dataset(
         self,
         frame: pd.DataFrame,
@@ -259,6 +284,9 @@ class Phase3ArtifactStore:
             self.load_normalized_dataset(result.normalized_dataset)
         if result.quarantine is not None:
             self.read_json(result.quarantine)
+        for diagnostic in (*result.missing_sessions, *result.unexpected_sessions):
+            if diagnostic.calendar.evidence is not None:
+                self.read_json(diagnostic.calendar.evidence)
         return self._write_json_artifact(
             kind="candidate_dq",
             payload=result.model_dump(mode="json"),
@@ -298,6 +326,9 @@ class Phase3ArtifactStore:
                     self.load_normalized_dataset(result.normalized_dataset)
                 if result.quarantine is not None:
                     self.read_json(result.quarantine)
+                for diagnostic in (*result.missing_sessions, *result.unexpected_sessions):
+                    if diagnostic.calendar.evidence is not None:
+                        self.read_json(diagnostic.calendar.evidence)
                 return result
         return None
 
@@ -318,3 +349,46 @@ class Phase3ArtifactStore:
         if identity.kind != "dq_snapshot":
             raise ArtifactIntegrityError("artifact is not a DQ snapshot")
         return DQSnapshot.model_validate(self.read_json(identity))
+
+    def write_report(self, campaign_id: str, report: str) -> ArtifactIdentity:
+        safe_campaign_id = re.sub(r"[^A-Za-z0-9_.-]", "_", campaign_id)
+        if safe_campaign_id != campaign_id:
+            raise ArtifactIntegrityError("campaign_id is not path-safe")
+        payload = report.encode("utf-8")
+        digest = sha256(payload).hexdigest()
+        identity = ArtifactIdentity(
+            kind="dq_report",
+            sha256=digest,
+            path=f"phase3/campaigns/{campaign_id}/reports/{digest}.md",
+        )
+        self._write_once(self.resolve(identity), payload)
+        return identity
+
+    def read_text(self, identity: ArtifactIdentity) -> str:
+        path = self.resolve(identity)
+        try:
+            payload = path.read_bytes()
+        except OSError as exc:
+            raise ArtifactIntegrityError(f"artifact unreadable: {path}") from exc
+        actual = sha256(payload).hexdigest()
+        if actual != identity.sha256:
+            raise ArtifactIntegrityError(
+                f"artifact hash mismatch: expected {identity.sha256}, got {actual}"
+            )
+        try:
+            return payload.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ArtifactIntegrityError(f"artifact text is not UTF-8: {path}") from exc
+
+    def write_universe_manifest(self, manifest: UniverseManifest) -> ArtifactIdentity:
+        self.load_frozen_snapshot(manifest.dq_snapshot)
+        self.read_text(manifest.dq_report)
+        for identity in manifest.raw_evidence:
+            self.read_json(identity)
+        for identity in manifest.normalized_datasets:
+            self.load_normalized_dataset(identity)
+        return self._write_json_artifact(
+            kind="universe_manifest",
+            payload=manifest.model_dump(mode="json"),
+            logical_path="phase3/universes/{digest}/manifest.json",
+        )
