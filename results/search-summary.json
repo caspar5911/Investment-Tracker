@@ -1,0 +1,24 @@
+{
+  "schema_version": "QUANT-SEARCH-RUN-v1",
+  "status": "RESEARCH_ONLY_NO_ACCEPTED_CANDIDATE",
+  "experiment_count": 4,
+  "unique_configurations_by_family": {
+    "trend": 1,
+    "momentum": 1,
+    "trend_momentum": 1,
+    "risk_managed_trend": 1
+  },
+  "stop_reason_by_family": {
+    "trend": "ROBUSTNESS_DETERIORATED",
+    "momentum": "ROBUSTNESS_DETERIORATED",
+    "trend_momentum": "ROBUSTNESS_DETERIORATED",
+    "risk_managed_trend": "ROBUSTNESS_DETERIORATED"
+  },
+  "best_research_candidate_id": "risk_managed_trend-0dc5fd8e9f17b21b",
+  "best_research_candidate_digest": "a14e7798cc25a5e4cf4c8a577f8b8926b8d09f05fd9e82a11d0dbf431622d3ec",
+  "best_score": 3.69045744,
+  "accepted_candidate_count": 0,
+  "validated_snapshot": null,
+  "strategybase_export": null,
+  "final_holdout_accessed": false
+}

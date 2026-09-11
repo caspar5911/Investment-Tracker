@@ -13,7 +13,7 @@ from uuid import uuid4
 import numpy as np
 import pandas as pd
 
-from .backtest.benchmark import aggregate_equal_weight, buy_and_hold
+from .backtest.benchmark import aggregate_equal_weight, buy_and_hold, cash_benchmark
 from .backtest.engine import run_backtest
 from .backtest.metrics import PerformanceMetrics, calculate_metrics, metrics_for_backtest
 from .backtest.models import ExecutionAssumptions
@@ -29,11 +29,13 @@ from .experiments import (
 from .moomoo.strategybase_exporter import export_strategy
 from .optimizer.candidate_generator import CandidateConfiguration, CandidateGenerator, default_generators
 from .optimizer.scorer import CandidateEvidence, ScoreBreakdown, score_candidate
+from .optimizer.search import CandidateEvaluation, SEARCH_POLICY_VERSION, SearchBudget, run_search
 from .promotion import BaselineRegistry, PromotionGate, ValidatedSnapshot, promote_candidate
 from .reports.generate_report import load_experiments, write_leaderboard, write_report
 from .strategies.base import StrategyDefinition
 from .strategies.registry import build_strategy
 from .validation.access import SplitDefinition
+from .validation.bootstrap import bootstrap_interval
 from .validation.robustness import friction_scenarios, neighbor_parameters, robustness_summary
 
 
@@ -157,13 +159,10 @@ def optimize_cached_universe(
     )
     lock_hash = _dependency_lock_hash(Path("requirements-quant.lock"))
     all_evaluated: list[EvaluatedCandidate] = []
+    eligible_best_ids: set[str] = set()
     family_stops = {}
     for family, generator in default_generators().items():
-        bounded = tuple(generator)[: config.validation.max_candidates_per_family]
-        stale = 0
-        best_score: float | None = None
-        stop_reason = "EXHAUSTED"
-        for configuration in bounded:
+        def evaluate(configuration: CandidateConfiguration) -> CandidateEvaluation:
             item = _evaluate_and_store(
                 CandidateGenerator((configuration,)),
                 bars_by_symbol,
@@ -177,24 +176,33 @@ def optimize_cached_universe(
                 data_hashes={symbol: dataset.metadata.content_hash for symbol, dataset in datasets.items()},
             )[0]
             all_evaluated.append(item)
-            if item.evidence.robustness_deteriorated:
-                stop_reason = "ROBUSTNESS_DETERIORATED"
-                break
-            score = item.score.total
-            if score is not None and (best_score is None or score > best_score + 0.01):
-                best_score = score
-                stale = 0
-            else:
-                stale += 1
-                if stale >= config.validation.patience:
-                    stop_reason = "NO_MEANINGFUL_IMPROVEMENT_50"
-                    break
-        family_stops[family] = stop_reason
+            return CandidateEvaluation(
+                configuration,
+                item.score.total,
+                item.evidence.out_of_sample_improved,
+                item.evidence.robustness_deteriorated,
+            )
+
+        search = run_search(
+            generator,
+            evaluate,
+            SearchBudget(
+                max_candidates=config.validation.max_candidates_per_family,
+                patience=config.validation.patience,
+                meaningful_improvement=0.01,
+            ),
+        )
+        family_stops[family] = search.stop_reason
+        if search.best is not None:
+            eligible_best_ids.add(search.best.candidate.candidate_id)
     records = load_experiments(Path(results_dir) / "experiments")
     write_leaderboard(records, Path(results_dir) / "leaderboard.csv")
     write_report(records, Path(results_dir) / "latest_report.md")
     best = max(
-        (item for item in all_evaluated if item.score.total is not None),
+        (
+            item for item in all_evaluated
+            if item.configuration.candidate_id in eligible_best_ids and item.score.total is not None
+        ),
         key=lambda item: float(item.score.total),
         default=None,
     )
@@ -234,6 +242,11 @@ def _evaluate_and_store(
         neighbor_returns = _neighbor_returns(strategy, validation_frames, assumptions)
         friction_returns = _friction_returns(strategy, validation_frames, assumptions)
         fold_returns = _fold_returns(strategy, validation_frames, assumptions, folds=3)
+        bootstrap_lower, bootstrap_upper = bootstrap_interval(
+            _portfolio_daily_returns(strategy, validation_frames, assumptions),
+            draws=2000,
+            seed=0,
+        )
         robust = robustness_summary(
             base_validation_return=validation_metrics.total_return,
             neighbor_returns=neighbor_returns,
@@ -257,14 +270,13 @@ def _evaluate_and_store(
             robustness_deteriorated=robust.deteriorated,
         )
         score = score_candidate(evidence)
-        accepted = (
-            score.status == "RANKED"
-            and score.total is not None
-            and score.total >= 60.0
-            and excess > 0
-            and not robust.deteriorated
-            and robust.walk_forward_consistency == 1.0
+        rejection_reasons = _candidate_rejection_reasons(
+            score=score,
+            benchmark_excess_return=excess,
+            robustness_deteriorated=robust.deteriorated,
+            walk_forward_consistency=robust.walk_forward_consistency,
         )
+        accepted = not rejection_reasons
         moment = datetime.now(timezone.utc)
         manifest = ResearchCandidateManifest.create(
             candidate_id=configuration.candidate_id,
@@ -274,7 +286,7 @@ def _evaluate_and_store(
             universe_config_hash=artifact_digest(tuple(sorted(bars_by_symbol))),
             data_manifest_hashes=hashes,
             split_definition_hash=split_definition.digest,
-            engine_version=assumptions.engine_version,
+            engine_version=f"{assumptions.engine_version}+{SEARCH_POLICY_VERSION}",
             fee_model={"name": "notional_bps", "commission_bps": assumptions.commission_bps},
             slippage_model={"name": "adverse_bps", "slippage_bps": assumptions.slippage_bps},
             execution_convention=assumptions.execution_convention,
@@ -295,14 +307,34 @@ def _evaluate_and_store(
                 **_metrics_dict(validation_metrics),
                 "benchmark_total_return": benchmark_metrics.total_return,
                 "benchmark_excess_return": excess,
+                "cash_total_return": calculate_metrics(
+                    cash_benchmark(
+                        next(iter(validation_frames.values())).index,
+                        assumptions.initial_capital,
+                    )
+                ).total_return,
                 "walk_forward_consistency": robust.walk_forward_consistency,
                 "parameter_stability": robust.parameter_stability,
                 "friction_sensitivity": robust.friction_sensitivity,
                 "period_concentration": robust.period_concentration,
+                "bootstrap_median_lower": bootstrap_lower,
+                "bootstrap_median_upper": bootstrap_upper,
+                **{
+                    f"friction_return_{_bps_label(bps)}bps": value
+                    for bps, value in friction_returns.items()
+                },
+                **{
+                    f"walk_forward_return_{index}": value
+                    for index, value in enumerate(fold_returns, start=1)
+                },
             },
             score=score.total,
             accepted=accepted,
-            reason=f"{reason_prefix}; " + ("gates passed" if accepted else "one or more gates failed"),
+            reason=f"{reason_prefix}; " + (
+                "gates passed"
+                if accepted
+                else "rejected: " + ", ".join(rejection_reasons)
+            ),
             stop_reason="CANDIDATE_EVALUATED",
             recorded_at=moment,
         )
@@ -345,6 +377,22 @@ def _benchmark_metrics(
     exposure = pd.concat([result.exposure_curve for result in results.values()], axis=1).mean(axis=1)
     turnover = sum(result.turnover_notional for result in results.values()) / len(results)
     return calculate_metrics(equity, turnover_notional=turnover, exposure=exposure)
+
+
+def _portfolio_daily_returns(
+    strategy: StrategyDefinition,
+    bars_by_symbol: Mapping[str, pd.DataFrame],
+    assumptions: ExecutionAssumptions,
+) -> list[float]:
+    results = {
+        symbol: run_backtest(frame, strategy.targets(frame), assumptions)
+        for symbol, frame in bars_by_symbol.items()
+    }
+    equity = aggregate_equal_weight(
+        {symbol: result.equity_curve for symbol, result in results.items()},
+        assumptions.initial_capital,
+    )
+    return equity.pct_change(fill_method=None).dropna().astype(float).tolist()
 
 
 def _neighbor_returns(
@@ -426,6 +474,31 @@ def _dependency_lock_hash(path: Path) -> str:
     if not path.is_file():
         raise FileNotFoundError("requirements-quant.lock is required for candidate identity")
     return sha256(path.read_bytes()).hexdigest()
+
+
+def _bps_label(value: float) -> str:
+    return f"{value:g}"
+
+
+def _candidate_rejection_reasons(
+    *,
+    score: ScoreBreakdown,
+    benchmark_excess_return: float,
+    robustness_deteriorated: bool,
+    walk_forward_consistency: float,
+) -> tuple[str, ...]:
+    reasons: list[str] = []
+    if score.status != "RANKED" or score.total is None:
+        reasons.append("UNRANKABLE")
+    elif score.total < 60.0:
+        reasons.append("SCORE_BELOW_THRESHOLD")
+    if benchmark_excess_return <= 0:
+        reasons.append("OOS_BENCHMARK_NOT_IMPROVED")
+    if robustness_deteriorated:
+        reasons.append("ROBUSTNESS_DETERIORATED")
+    if walk_forward_consistency != 1.0:
+        reasons.append("WALK_FORWARD_GATE_FAILED")
+    return tuple(reasons)
 
 
 def _fixture_bars(*, offset: float) -> pd.DataFrame:

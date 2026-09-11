@@ -175,3 +175,30 @@ def test_empty_or_malformed_provider_payload_fails_closed() -> None:
     with pytest.raises(MoomooDataError, match="missing columns"):
         source.fetch(request())
     assert context.closed
+
+
+def test_provider_payload_for_a_different_symbol_fails_closed() -> None:
+    wrong = page("2024-07-03", 101.0).assign(code="US.QQQ")
+    context = FakeContext([(0, wrong, None)])
+    source = MoomooHistoricalDataSource(
+        context_factory=lambda **_: context,
+        sdk_loader=lambda: FakeSDK,
+    )
+
+    with pytest.raises(MoomooDataError, match="symbol identity mismatch"):
+        source.fetch(request("SPY"))
+    assert context.closed
+
+
+def test_us_provider_timestamp_uses_eastern_market_date_for_session_label() -> None:
+    payload = page("2024-07-03", 101.0)
+    payload.loc[0, "time_key"] = "2024-07-04T03:30:00+00:00"
+    context = FakeContext([(0, payload, None)])
+    source = MoomooHistoricalDataSource(
+        context_factory=lambda **_: context,
+        sdk_loader=lambda: FakeSDK,
+    )
+
+    frame, _ = source.fetch(request("SPY"))
+
+    assert frame.index.tolist() == [pd.Timestamp("2024-07-03", tz="UTC")]

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -58,6 +60,35 @@ def test_missing_metrics_render_unknown() -> None:
     assert "production-approved" not in report.lower()
 
 
+def test_report_renders_validation_and_robustness_evidence() -> None:
+    record = experiment("exp-evidence", 65.0, 0.9)
+    record = record.model_copy(update={
+        "validation_metrics": {
+            **record.validation_metrics,
+            "sortino": 1.1,
+            "calmar": 0.6,
+            "benchmark_excess_return": 0.02,
+            "cash_total_return": 0.0,
+            "walk_forward_consistency": 2 / 3,
+            "parameter_stability": 0.75,
+            "friction_sensitivity": 0.8,
+            "bootstrap_median_lower": -0.001,
+            "bootstrap_median_upper": 0.002,
+            "benchmark_total_return": 0.12,
+            "friction_return_3bps": 0.04,
+            "walk_forward_return_1": 0.01,
+        }
+    })
+    report = render_report([record])
+    for label in (
+        "Candidate digest", "Parameters", "Train CAGR", "Sortino", "Calmar",
+        "Buy-and-hold total return", "Benchmark excess return", "Cash total return",
+        "Walk-forward consistency", "Parameter stability", "Friction sensitivity",
+        "Bootstrap median interval", "Friction returns", "Walk-forward fold returns",
+    ):
+        assert label in report
+
+
 def test_leaderboard_is_deterministic_and_unranked_rows_sort_last(tmp_path: Path) -> None:
     path = tmp_path / "leaderboard.csv"
     write_leaderboard(
@@ -102,3 +133,30 @@ def test_validate_command_fails_closed_on_invalid_experiment(tmp_path: Path) -> 
     experiments.mkdir()
     (experiments / "broken.json").write_text("{}", encoding="utf-8")
     assert main(["validate", "--experiments-dir", str(experiments)]) == 2
+
+
+def test_download_classifies_every_allowed_symbol_after_one_dataset_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    from investment_tracker.quant.data.moomoo_client import MoomooDataError
+    from investment_tracker.quant.data.repository import HistoricalDataRepository
+
+    attempted: list[str] = []
+
+    def load(self, request, *, refresh=False):
+        attempted.append(request.symbol)
+        if request.symbol == "SPY":
+            raise MoomooDataError("provider fixture rejected")
+        return SimpleNamespace(metadata=SimpleNamespace(content_hash=request.symbol.lower().ljust(64, "0")))
+
+    monkeypatch.setattr(HistoricalDataRepository, "load", load)
+    exit_code = main(["download", "--cache-root", str(tmp_path / "cache")])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 2
+    assert len(attempted) == 16
+    assert payload["status"] == "PARTIAL"
+    assert payload["failed"] == [{"symbol": "SPY", "error": "provider fixture rejected"}]
+    assert len(payload["datasets"]) == 15

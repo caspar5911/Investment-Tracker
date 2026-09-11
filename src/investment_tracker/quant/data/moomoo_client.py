@@ -83,16 +83,25 @@ class MoomooHistoricalDataSource:
         if not pages or all(page.empty for page in pages):
             raise MoomooDataError("Moomoo returned no historical bars")
         combined = pd.concat(pages, ignore_index=True)
-        required_provider_columns = {"time_key", *REQUIRED_COLUMNS}
+        required_provider_columns = {"code", "time_key", *REQUIRED_COLUMNS}
         missing = sorted(required_provider_columns.difference(combined.columns))
         if missing:
             raise MoomooDataError(f"Moomoo response missing columns: {', '.join(missing)}")
+        expected_code = f"US.{guarded.symbol}"
+        actual_codes = set(combined["code"].astype(str))
+        if actual_codes != {expected_code}:
+            raise MoomooDataError(
+                f"Moomoo response symbol identity mismatch: expected {expected_code}"
+            )
 
         timestamps = pd.to_datetime(combined["time_key"], errors="raise")
         if timestamps.dt.tz is None:
-            timestamps = timestamps.dt.normalize().dt.tz_localize("UTC")
+            eastern_timestamps = timestamps.dt.tz_localize("America/New_York")
         else:
-            timestamps = timestamps.dt.tz_convert("UTC").dt.normalize()
+            eastern_timestamps = timestamps.dt.tz_convert("America/New_York")
+        # The API documents US time_key in Eastern market time. Daily bars are
+        # represented internally as UTC-midnight labels for that market date.
+        timestamps = pd.to_datetime(eastern_timestamps.dt.date, utc=True)
         normalized = combined.loc[:, REQUIRED_COLUMNS].copy()
         normalized.index = pd.DatetimeIndex(timestamps, name="timestamp")
 

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Literal
+from typing import Callable, Final, Literal
 
 from .candidate_generator import CandidateConfiguration, CandidateGenerator
+
+
+SEARCH_POLICY_VERSION: Final = "SEARCH-POLICY-v2"
 
 
 @dataclass(frozen=True)
@@ -31,9 +34,8 @@ class SearchBudget:
 
 StopReason = Literal[
     "MAX_CANDIDATES",
-    "NO_MEANINGFUL_IMPROVEMENT_50",
-    "ROBUSTNESS_DETERIORATED",
-    "OUT_OF_SAMPLE_NOT_IMPROVED_50",
+    "NO_MEANINGFUL_IMPROVEMENT",
+    "PERSISTENT_OOS_FAILURE",
     "EXHAUSTED",
 ]
 
@@ -51,6 +53,13 @@ def run_search(
     evaluator: Callable[[CandidateConfiguration], CandidateEvaluation],
     budget: SearchBudget,
 ) -> SearchResult:
+    """Run one family search under consecutive-failure policies.
+
+    PERSISTENT_OOS_FAILURE means exactly ``budget.patience`` consecutive
+    candidates with ``out_of_sample_improved=False``. Any True observation
+    resets that streak. Robustness deterioration rejects candidate eligibility
+    but is never, by itself, a family stop.
+    """
     evaluations: list[CandidateEvaluation] = []
     best: CandidateEvaluation | None = None
     stale = 0
@@ -60,18 +69,18 @@ def run_search(
             return SearchResult(tuple(evaluations), best, len(evaluations), "MAX_CANDIDATES")
         evaluation = evaluator(candidate)
         evaluations.append(evaluation)
-        if evaluation.robustness_deteriorated:
-            return SearchResult(tuple(evaluations), best, len(evaluations), "ROBUSTNESS_DETERIORATED")
 
         if evaluation.out_of_sample_improved:
             oos_stale = 0
         else:
             oos_stale += 1
             if oos_stale >= budget.patience:
-                return SearchResult(tuple(evaluations), best, len(evaluations), "OUT_OF_SAMPLE_NOT_IMPROVED_50")
+                return SearchResult(tuple(evaluations), best, len(evaluations), "PERSISTENT_OOS_FAILURE")
 
         improved = (
-            evaluation.score is not None
+            not evaluation.robustness_deteriorated
+            and evaluation.out_of_sample_improved
+            and evaluation.score is not None
             and (best is None or best.score is None or evaluation.score > best.score + budget.meaningful_improvement)
         )
         if improved:
@@ -80,5 +89,5 @@ def run_search(
         else:
             stale += 1
             if stale >= budget.patience:
-                return SearchResult(tuple(evaluations), best, len(evaluations), "NO_MEANINGFUL_IMPROVEMENT_50")
+                return SearchResult(tuple(evaluations), best, len(evaluations), "NO_MEANINGFUL_IMPROVEMENT")
     return SearchResult(tuple(evaluations), best, len(evaluations), "EXHAUSTED")

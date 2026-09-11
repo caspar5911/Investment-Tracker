@@ -84,11 +84,11 @@ def _load_config(directory: Path | None):
 
 def _download(args: argparse.Namespace) -> int:
     from .configuration import load_default_config
-    from .data.cache import ImmutableParquetCache
+    from .data.cache import CacheIntegrityError, ImmutableParquetCache
     from .data.models import DataRequest
-    from .data.moomoo_client import MoomooHistoricalDataSource
+    from .data.moomoo_client import MoomooDataError, MoomooHistoricalDataSource
     from .data.repository import HistoricalDataRepository
-    from .data.validation import BarDataValidator
+    from .data.validation import BarDataValidator, DataQualityError
 
     config = _load_config(args.config_dir)
     source_factory = lambda: MoomooHistoricalDataSource(host=args.host, port=args.port)
@@ -100,18 +100,27 @@ def _download(args: argparse.Namespace) -> int:
         ImmutableParquetCache(args.cache_root), source_factory, BarDataValidator("XNYS")
     )
     datasets = []
+    failed = []
     for symbol in config.universe.symbols:
-        dataset = repository.load(
-            DataRequest(
-                symbol=symbol,
-                start=config.validation.train_start,
-                end=config.validation.validation_end,
-            ),
-            refresh=args.refresh,
-        )
+        try:
+            dataset = repository.load(
+                DataRequest(
+                    symbol=symbol,
+                    start=config.validation.train_start,
+                    end=config.validation.validation_end,
+                ),
+                refresh=args.refresh,
+            )
+        except (CacheIntegrityError, DataQualityError, MoomooDataError) as exc:
+            failed.append({"symbol": symbol, "error": str(exc)})
+            continue
         datasets.append({"symbol": symbol, "hash": dataset.metadata.content_hash})
-    print(json.dumps({"status": "OK", "mode": "SIMULATE", "datasets": datasets}, sort_keys=True))
-    return 0
+    status = "OK" if not failed else "PARTIAL"
+    print(json.dumps(
+        {"status": status, "mode": "SIMULATE", "datasets": datasets, "failed": failed},
+        sort_keys=True,
+    ))
+    return 0 if not failed else 2
 
 
 def _backtest(args: argparse.Namespace) -> int:

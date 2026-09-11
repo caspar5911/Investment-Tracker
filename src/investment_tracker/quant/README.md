@@ -42,6 +42,22 @@ The installed and inspected SDK during implementation was `moomoo-api
 `request_history_kline` API with `KLType.K_DAY`, `AuType.QFQ`, and
 `Session.RTH`. It never constructs an account or trading context.
 
+The authoritative local API reference is
+`docs/moomoo/moomoo-API-Doc-en-Python.md`. It documents US symbols as
+`US.<ticker>`, US `time_key` values in Eastern market time, a recommended
+1,000-row page size, continuation with the returned `page_req_key`, and a
+60-initial-request-per-30-seconds limit. Subsequent pages do not count against
+that frequency limit. Each unique symbol requested within seven days consumes
+one historical-candlestick quota slot; repeat periods for that symbol do not
+consume another slot. Daily history is limited to the latest 20 years.
+
+The adapter always closes `OpenQuoteContext`, including on errors. A non-OK
+return, malformed response, unexpected returned symbol, missing field, empty
+response, or repeated pagination key fails closed. Documented Eastern daily
+timestamps are converted to UTC-normalized trading-session labels before
+calendar validation; provider rows are never shifted to hide a missing or
+unexpected exchange session.
+
 ## Configuration
 
 Defaults live in `defaults/`:
@@ -77,6 +93,20 @@ retrieval time, row count, first/last timestamps, and canonical SHA-256 content
 hash. Admission uses an atomic directory move. Equivalent refreshes reuse the
 existing version; changed content creates another immutable version.
 
+## Price methodology
+
+The current `QFQ-NORMALIZED-RESEARCH-v1` methodology is explicitly
+`decision_grade=false`. QFQ bars provide continuity for signals, but the
+current engine also uses their next-open values for normalized percentage-based
+simulation. Scale invariance under fractional sizing validates internal return
+arithmetic only; it does not show that adjusted prices were historically
+executable fills.
+
+The methodology decision and limitations are recorded in
+`docs/superpowers/reports/2026-09-12-qfq-methodology-audit.md`. Decision-grade
+reruns require a future version using aligned unadjusted execution prices and
+explicit corporate-action/distribution accounting.
+
 ## One backtest
 
 The following example uses a clean cached SPY dataset and a fixed 50% trend
@@ -108,9 +138,12 @@ python -m investment_tracker.quant.cli report
 
 The four initial families are trend, momentum, trend plus momentum, and
 risk-managed trend. Search grids are deterministic and bounded to at most 500
-configurations per family. Search stops after 50 candidates without meaningful
-improvement, persistent out-of-sample non-improvement, or immediate robustness
-deterioration.
+configurations per family. A robustness failure rejects only that candidate.
+Search continues until the generator is exhausted, the 500-candidate budget is
+reached, or a family accumulates 50 consecutive candidates without meaningful
+improvement. `PERSISTENT_OOS_FAILURE` is exactly 50 consecutive candidates
+without positive out-of-sample benchmark improvement; any improving candidate
+resets that streak. The configured patience remains 50.
 
 Score version `QUANT-SCORE-v1` allocates 20 points to validation CAGR, 15 to
 Sharpe, 10 to Sortino, 10 to Calmar, 15 to benchmark excess return, 10 to

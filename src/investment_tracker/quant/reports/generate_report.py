@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -83,15 +84,37 @@ def render_report(records: Iterable[ExperimentRecord]) -> str:
         "",
     ]
     for record in ranked:
+        friction_returns = _prefixed_metrics(record.validation_metrics, "friction_return_")
+        walk_forward_returns = _prefixed_metrics(record.validation_metrics, "walk_forward_return_")
         lines.extend([
             f"## {record.experiment_id}",
             "",
             f"Candidate: {record.candidate_manifest.candidate_id}",
+            f"Candidate digest: {record.candidate_manifest.digest}",
             f"Family: {record.candidate_manifest.strategy_family}",
+            "Parameters: " + json.dumps(
+                record.candidate_manifest.strategy_parameters,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
             f"Score: {_display(record.score)}",
+            f"Train CAGR: {_display(record.metrics.get('cagr'))}",
             f"Validation CAGR: {_display(record.validation_metrics.get('cagr'))}",
             f"Sharpe: {_display(record.validation_metrics.get('sharpe'))}",
+            f"Sortino: {_display(record.validation_metrics.get('sortino'))}",
+            f"Calmar: {_display(record.validation_metrics.get('calmar'))}",
             f"Max drawdown: {_display(record.validation_metrics.get('max_drawdown', record.metrics.get('max_drawdown')))}",
+            f"Buy-and-hold total return: {_display(record.validation_metrics.get('benchmark_total_return'))}",
+            f"Benchmark excess return: {_display(record.validation_metrics.get('benchmark_excess_return'))}",
+            f"Cash total return: {_display(record.validation_metrics.get('cash_total_return'))}",
+            f"Walk-forward consistency: {_display(record.validation_metrics.get('walk_forward_consistency'))}",
+            f"Walk-forward fold returns: {walk_forward_returns}",
+            f"Parameter stability: {_display(record.validation_metrics.get('parameter_stability'))}",
+            f"Friction sensitivity: {_display(record.validation_metrics.get('friction_sensitivity'))}",
+            f"Friction returns: {friction_returns}",
+            "Bootstrap median interval: "
+            f"[{_display(record.validation_metrics.get('bootstrap_median_lower'))}, "
+            f"{_display(record.validation_metrics.get('bootstrap_median_upper'))}]",
             f"Accepted: {record.accepted}",
             f"Reason: {record.reason}",
             f"Stop reason: {record.stop_reason}",
@@ -100,6 +123,15 @@ def render_report(records: Iterable[ExperimentRecord]) -> str:
     if not ranked:
         lines.extend(["No experiment evidence is available.", ""])
     return "\n".join(lines)
+
+
+def _prefixed_metrics(metrics: dict[str, object], prefix: str) -> str:
+    values = [
+        f"{key.removeprefix(prefix)}={_display(metrics[key])}"
+        for key in sorted(metrics)
+        if key.startswith(prefix)
+    ]
+    return ", ".join(values) if values else "UNKNOWN"
 
 
 def write_report(records: Iterable[ExperimentRecord], destination: Path) -> Path:

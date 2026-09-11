@@ -79,6 +79,22 @@ def test_experiment_store_never_overwrites(tmp_path: Path) -> None:
     assert len(list(tmp_path.glob("*.json"))) == 1
 
 
+def test_rejected_experiment_remains_when_subsequent_candidate_is_persisted(tmp_path: Path) -> None:
+    store = ExperimentStore(tmp_path)
+    rejected = experiment("exp-rejected").model_copy(update={
+        "accepted": False,
+        "reason": "rejected: ROBUSTNESS_DETERIORATED",
+    })
+    subsequent = experiment("exp-subsequent")
+
+    first_path = store.append(rejected)
+    first_bytes = first_path.read_bytes()
+    store.append(subsequent)
+
+    assert first_path.read_bytes() == first_bytes
+    assert len(list(tmp_path.glob("*.json"))) == 2
+
+
 def test_candidate_digest_changes_with_parameters() -> None:
     assert candidate_manifest().digest != candidate_manifest(fast_window=25).digest
 

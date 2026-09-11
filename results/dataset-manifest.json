@@ -1,0 +1,60 @@
+{
+  "schema_version": "QUANT-DATA-RUN-v1",
+  "provider": "MOOMOO",
+  "provider_api_version": "10.10.7008",
+  "interval": "1d",
+  "adjustment": "QFQ",
+  "session": "RTH",
+  "requested_start": "2010-01-01",
+  "requested_end": "2022-12-31",
+  "successful": [
+    {
+      "symbol": "QQQ",
+      "row_count": 3272,
+      "first_timestamp": "2010-01-04T00:00:00Z",
+      "last_timestamp": "2022-12-30T00:00:00Z",
+      "content_hash": "3d28b4a98e049170f32db942751632a5a822807200dfb3daa90b07eea17d943f"
+    },
+    {
+      "symbol": "TLT",
+      "row_count": 3272,
+      "first_timestamp": "2010-01-04T00:00:00Z",
+      "last_timestamp": "2022-12-30T00:00:00Z",
+      "content_hash": "56aed15476392a2b351d01096b94a7c34432552f383d994dc03ae8a1fb4aea34"
+    },
+    {
+      "symbol": "IEF",
+      "row_count": 3272,
+      "first_timestamp": "2010-01-04T00:00:00Z",
+      "last_timestamp": "2022-12-30T00:00:00Z",
+      "content_hash": "fa0c89127c6cab2901a7a3a8bb8ed99b23aca4d24e2d42517fe295fb810b1bc9"
+    }
+  ],
+  "rejected_symbols": [
+    "SPY",
+    "IWM",
+    "DIA",
+    "XLK",
+    "XLF",
+    "XLE",
+    "XLV",
+    "XLI",
+    "XLP",
+    "XLY",
+    "XLU",
+    "VNQ",
+    "GLD"
+  ],
+  "rejection_reasons": [
+    "MISSING_SESSION",
+    "UNEXPECTED_SESSION"
+  ],
+  "quarantine_artifact_count": 21,
+  "quarantine_note": "Count includes repeated SPY diagnosis and a uniform 2013-2022 diagnostic pass; no rejected bars were repaired or admitted.",
+  "research_symbols": [
+    "QQQ",
+    "TLT",
+    "IEF"
+  ],
+  "final_holdout_accessed": false
+}
