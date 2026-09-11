@@ -20,8 +20,11 @@ from investment_tracker.backtest_v1 import (
 
 
 def calendar(n=800):
+    # Synthetic benchmark sessions are spaced two calendar days apart so the
+    # passing fixture spans several calendar years and does not accidentally
+    # trip the time-concentration gate.
     start=date(2020,1,1)
-    return [start+timedelta(days=i) for i in range(n)]
+    return [start+timedelta(days=i*2) for i in range(n)]
 
 
 def protocol():
@@ -80,6 +83,7 @@ def observations(*,negative=False,missing_drawdown=False):
                 gross_return=gross,
                 spy_return=spy,
                 cash_return=cash,
+                return_net=gross-Decimal(friction)/Decimal(10000),
                 max_drawdown=drawdown,
             ))
     return rows
@@ -205,12 +209,30 @@ def test_fold_sample_shortage_is_inconclusive():
     assert any("F3:independent_count_below_5"==x for x in report.inconclusive_reasons)
 
 
-def test_concentrated_calendar_year_fails():
-    # Calendar helper advances by calendar days, so all observations are in a
-    # compact span. Use a deliberately stricter synthetic protocol/rows in one
-    # year to verify concentration hard-fails.
-    p=protocol()
+def test_concentrated_calendar_year_fails_even_if_sample_is_also_incomplete():
+    # Keep only the earliest 13 independent episodes. Seven fall in the first
+    # calendar year, so the >50% time-concentration failure is observed. The
+    # smaller sample is also inconclusive, but an observed hard failure wins.
+    keep={f"E{i:02d}" for i in range(13)}
+    rows=[r for r in observations() if r.episode_id in keep]
+    report=evaluate_backtest(protocol(),rows,baselines(),calendar(),bootstrap_draws=200)
+    assert report.status==BacktestStatus.FAIL
+    assert "calendar_year_concentration_above_50pct" in report.failures
+
+
+def test_single_asset_concentration_fails():
+    rows=[]
+    for r in observations():
+        rows.append(EpisodeObservation(**{**r.__dict__,"asset":"QQQ"}))
+    report=evaluate_backtest(protocol(),rows,baselines(),calendar(),bootstrap_draws=200)
+    assert report.status==BacktestStatus.FAIL
+    assert "asset_concentration_above_50pct" in report.failures
+
+
+def test_stored_net_return_must_match_friction_arithmetic():
     rows=observations()
-    report=evaluate_backtest(p,rows,baselines(),calendar(),bootstrap_draws=200)
-    # Synthetic calendar spans > 1 year, so normal passing fixture stays clean.
-    assert "calendar_year_concentration_above_50pct" not in report.failures
+    first=rows[0]
+    rows[0]=EpisodeObservation(**{**first.__dict__,"return_net":first.return_net+Decimal("0.01")})
+    report=evaluate_backtest(protocol(),rows,baselines(),calendar(),bootstrap_draws=200)
+    assert report.status==BacktestStatus.FAIL
+    assert "inconsistent_friction_scenario_inputs" in report.failures
