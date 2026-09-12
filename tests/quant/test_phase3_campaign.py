@@ -280,7 +280,7 @@ def test_verified_candidate_cache_avoids_new_history_and_calendar_calls(tmp_path
 def test_dq_report_covers_every_candidate_without_strategy_metrics(tmp_path: Path) -> None:
     store = artifact_store(tmp_path)
     outcome = run_phase3_campaign(
-        FakeQuoteSource(provider_failures={"IWM"}),
+        FakeQuoteSource(provider_failures={"XLE"}),
         store,
         campaign_id="phase3-report-test",
         created_at=NOW,
@@ -291,6 +291,8 @@ def test_dq_report_covers_every_candidate_without_strategy_metrics(tmp_path: Pat
     report = store.read_text(outcome.dq_report)
     assert all(f"| {symbol} |" in report for symbol in CANDIDATE_POOL)
     assert "PROVIDER_ERROR" in report
+    xle_row = next(line for line in report.splitlines() if line.startswith("| XLE |"))
+    assert xle_row.endswith("| NOT_SELECTED_DQ_FAIL |")
     assert "DQ snapshot SHA-256" in report
     forbidden = ("CAGR", "Sharpe", "Sortino", "Calmar", "drawdown", "strategy score")
     assert all(term not in report for term in forbidden)

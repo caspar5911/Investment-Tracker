@@ -10,13 +10,13 @@ _CATEGORY_BY_SYMBOL = {
 
 
 def _selection_reason(symbol: str, status: str, selection: SelectionResult) -> str:
+    if status == "FAIL":
+        return "NOT_SELECTED_DQ_FAIL"
     for decision in selection.decisions:
         if symbol not in decision.ordered_candidates:
             continue
         if decision.selected_symbol == symbol:
             return "SELECTED_FIRST_CLEAN"
-        if status == "FAIL":
-            return "NOT_SELECTED_DQ_FAIL"
         if decision.selected_symbol is not None:
             return "NOT_SELECTED_EARLIER_CLEAN_IN_SLOT"
         return "NOT_SELECTED_NO_SLOT_ADMISSION"
@@ -118,4 +118,3 @@ def render_dq_report(
         ]
     )
     return "\n".join(lines)
-
