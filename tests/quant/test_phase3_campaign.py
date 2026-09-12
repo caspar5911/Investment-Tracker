@@ -293,6 +293,11 @@ def test_dq_report_covers_every_candidate_without_strategy_metrics(tmp_path: Pat
     assert "PROVIDER_ERROR" in report
     xle_row = next(line for line in report.splitlines() if line.startswith("| XLE |"))
     assert xle_row.endswith("| NOT_SELECTED_DQ_FAIL |")
+    assert "## Technical summary" in report
+    assert "15 `PASS` and 1 `FAIL`" in report
+    assert "## Fixed scope and admission definitions" in report
+    assert "## Validation and provenance method" in report
+    assert "## Limitations and governed next step" in report
     assert "DQ snapshot SHA-256" in report
     forbidden = ("CAGR", "Sharpe", "Sortino", "Calmar", "drawdown", "strategy score")
     assert all(term not in report for term in forbidden)

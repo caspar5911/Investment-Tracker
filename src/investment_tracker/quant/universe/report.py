@@ -28,6 +28,8 @@ def render_dq_report(
     snapshot_identity: ArtifactIdentity,
     selection: SelectionResult,
 ) -> str:
+    passed = sum(candidate.status == "PASS" for candidate in snapshot.candidates)
+    failed = len(snapshot.candidates) - passed
     lines = [
         "# Phase 3 ETF Universe Data-Quality Report",
         "",
@@ -40,6 +42,28 @@ def render_dq_report(
         "- Selection basis: frozen DQ dispositions and predefined exposure order only",
         "- Bars repaired: `0`",
         "- Decision grade: `false`",
+        "",
+        "## Technical summary",
+        "",
+        f"The complete frozen assessment contains {passed} `PASS` and {failed} `FAIL` "
+        f"dispositions across all {len(snapshot.candidates)} predeclared candidates. "
+        f"The deterministic selector admitted {len(selection.selected_symbols)} exposure "
+        f"slots and stopped with `{selection.stop_reason}`.",
+        "",
+        "## Fixed scope and admission definitions",
+        "",
+        f"Admission uses only daily QFQ provider rows requested for "
+        f"{snapshot.window_start.isoformat()} through {snapshot.window_end.isoformat()}. "
+        "A candidate passes only when its normalized OHLCV rows satisfy the versioned "
+        "schema, value, uniqueness, timezone, and exact XNYS-session checks. Historical "
+        "reference windows do not affect admission, and no later window is evaluated.",
+        "",
+        "## Validation and provenance method",
+        "",
+        "Each disposition links content-addressed raw provider pages to one normalized "
+        "dataset and its validator result. The complete 16-candidate snapshot was hashed, "
+        "written, and read back before the selection policy consumed it. Moomoo trading-day "
+        "results are retained only as diagnostic context; XNYS remains the admission authority.",
         "",
         "## Candidate assessment",
         "",
@@ -114,6 +138,14 @@ def render_dq_report(
             f"Selected symbols: `{', '.join(selection.selected_symbols) or 'NONE'}`",
             "",
             f"Stop reason: `{selection.stop_reason}`",
+            "",
+            "## Limitations and governed next step",
+            "",
+            "QFQ prices support the current normalized research simulation but do not "
+            "represent historical executable fills. This universe therefore remains "
+            "`decision_grade=false`; a future unadjusted-price implementation with explicit "
+            "corporate-action accounting is required before decision-grade reruns. No "
+            "subsequent research phase is initiated by this campaign.",
             "",
         ]
     )
