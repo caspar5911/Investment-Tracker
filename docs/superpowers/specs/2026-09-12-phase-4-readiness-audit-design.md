@@ -172,9 +172,25 @@ interval.
 
 ### Phase 2 observed result
 
-The cache-only audit reconstruction for the strongest recorded mechanical
-candidate, `risk_managed_trend-ee8a71fb71e3d80f`, contains 1,007 daily return
-observations:
+The authoritative source artifact for this bootstrap audit is fixed as:
+
+- kind: `phase2_experiment`;
+- normalized repository-relative path:
+  `results/experiments/risk_managed_trend-ee8a71fb71e3d80f-20260911T194002253141Z-bcabf074.json`;
+- exact-byte content SHA-256:
+  `438dda42ceacece3c7d3b73512d9898017a4c180e1b368cdc7c6dee299f5d4b5`;
+- canonical artifact identity:
+  `3e72fc05aa1c5d9e0ceca4a935ebb6672cd068d4bdf67b16c5d4fbbb121a797e`;
+  and
+- embedded candidate-manifest digest:
+  `378720494019e8904b50222a60f950c99307d57b27a4e40614f4641b8413cc3b`.
+
+No other experiment artifact, candidate, timestamp-selected file, or synthetic
+fixture may substitute for this source.
+
+The cache-only reconstruction from that artifact's exact strategy parameters,
+execution assumptions, split, and three embedded immutable dataset hashes
+contains 1,007 daily return observations:
 
 - 288 negative;
 - 368 exactly zero; and
@@ -183,6 +199,28 @@ observations:
 The observed sample median is exactly zero. With the frozen seed and 2,000
 resamples, all 2,000 resampled medians are exactly zero. The 5th and 95th
 percentiles are therefore both exactly `0.0`.
+
+The ordered input vector uses schema `BOOTSTRAP-INPUT-VECTOR-v1`. Every value is
+converted to its exact Python `float.hex()` representation of the IEEE-754
+binary64 value, preserving order, signed zero, and the precise binary value. The
+canonical vector payload is:
+
+```json
+{"dtype":"IEEE-754-binary64","schema_version":"BOOTSTRAP-INPUT-VECTOR-v1","values_hex":["<ordered float.hex() values>"]}
+```
+
+Its canonical JSON uses lexically sorted keys, separators `,` and `:` without
+additional whitespace, UTF-8, preserved Unicode, and rejection of non-finite
+numbers. The SHA-256 of the canonical payload bytes is frozen as:
+
+`878b8400fcf93776feda23c454182d36dca5efd4c32f51d2aa232abf003bf0b5`
+
+Readiness construction must reproduce all 1,007 values from the pinned source
+and its embedded dataset identities, verify this vector digest before
+bootstrapping, and persist the full canonical vector as new versioned readiness
+evidence. A missing source artifact, altered source bytes, unavailable embedded
+dataset, parameter mismatch, observation-count mismatch, or vector-digest
+mismatch fails closed. It must not fall back to a controlled fixture.
 
 The experiment JSON stores ordinary finite JSON numbers. The report displays
 those stored values without rounding them to zero. The calculation,
@@ -227,9 +265,21 @@ additional whitespace, Unicode preserved, and no non-finite numbers.
 Artifact digest, experiment ID, candidate-manifest digest, creation time, and
 path must not affect trial identity.
 
-Artifact identity is the SHA-256 of the exact serialized artifact bytes paired
-with its repository-relative path and artifact kind. Changing a representation
-therefore changes artifact identity without changing trial identity.
+Artifact identity is the lowercase hexadecimal SHA-256 of the UTF-8 bytes of
+the following canonical JSON envelope:
+
+```json
+{"content_sha256":"<sha256 of exact artifact bytes>","kind":"<artifact kind>","path":"<normalized repository-relative POSIX path>"}
+```
+
+The envelope uses lexically sorted keys, separators `,` and `:` without
+additional whitespace, preserved Unicode, and no non-finite numbers. The
+`content_sha256` field is the lowercase hexadecimal SHA-256 of the exact bytes
+stored at `path`. The path must be relative to the repository root, use `/`
+separators, contain no drive prefix, leading `/`, empty component, `.` or `..`,
+and resolve without symlink traversal. The kind is a versioned controlled
+identifier. Changing bytes, path, or kind therefore changes artifact identity
+without changing trial identity.
 
 ### Deterministic representation admission
 
@@ -259,6 +309,14 @@ remain in place.
 All search-aware consumers must operate on the authoritative 136-trial set,
 never raw artifact count.
 
+The 136 trials are historical Phase 2 multiplicity and research-lineage
+evidence. They do not consume, offset, reduce, seed, or otherwise alter the
+Phase 4 operational candidate budget. Phase 4 begins with exactly zero new
+candidate trials consumed and may add at most 3,000 new candidate trials under
+its own campaign identity. Reports and APIs must expose the two counts as
+separate named fields; they must never expose a combined `136 + new` value as
+Phase 4 budget consumption.
+
 The readiness layer may prepare deterministic, trial-keyed inputs for:
 
 - campaign trial count;
@@ -280,7 +338,10 @@ precision is permitted.
 Regression tests must prove that adding duplicate representations leaves the
 trial count, multiple-testing count, ordered Sharpe input identities, ordered
 PBO input identities, and search-budget count unchanged. Tests must also prove
-that DSR/PBO result requests fail closed as `UNKNOWN/NOT_IMPLEMENTED`.
+that DSR/PBO result requests fail closed as `UNKNOWN/NOT_IMPLEMENTED`. Separate
+budget tests must prove that the historical count remains 136 while Phase 4
+consumption starts at zero, and that the first Phase 4 trial consumes budget
+position one rather than position 137.
 
 ## Frozen Phase 4 Temporal Split
 
@@ -299,6 +360,40 @@ coverage within those partitions is:
 
 The 2019 calendar boundary remains 2019-01-01 even though the first validated
 XNYS/provider session is 2019-01-02. No row crosses the calendar partition.
+
+### Validation warm-up and reset semantics
+
+Phase 4 validation may expose observations strictly earlier than the first
+VALIDATION session only as read-only lagged-indicator warm-up. Earlier
+observations may initialize rolling windows, exponential state, or equivalent
+causal indicator state whose value at a VALIDATION session depends only on
+observations earlier than or equal to that session.
+
+Warm-up data must not:
+
+- fit, optimize, calibrate, select, or alter parameters;
+- contribute TRAIN returns, equity, P&L, fills, trades, positions, turnover,
+  exposure, or performance metrics to VALIDATION;
+- carry a TRAIN position, pending order, cash balance, cost basis, or portfolio
+  state into VALIDATION;
+- use TRAIN performance to select a candidate, parameter, warm-up length, or
+  validation treatment; or
+- emit a TRAIN-dated signal for execution in VALIDATION.
+
+Immediately before VALIDATION, the simulated portfolio resets to the frozen
+initial cash with zero positions, zero pending orders, zero turnover, zero
+realized P&L, and no inherited cost basis. The first signal eligible for scoring
+must be timestamped on an actual VALIDATION session. Execution may occur only
+on the next eligible VALIDATION session under the frozen
+`COMPLETED_BAR_SIGNAL_NEXT_BAR_OPEN` convention. If there is no next eligible
+VALIDATION session, no execution occurs.
+
+VALIDATION metrics begin from the reset initial capital and contain no TRAIN
+P&L. Tests must demonstrate that changing TRAIN prices outside the causal
+warm-up needed for the first VALIDATION indicator does not change reset
+portfolio state, that no TRAIN performance field reaches validation selection,
+and that signals/executions before their eligible VALIDATION sessions are
+rejected. This audit freezes these semantics but does not execute a strategy.
 
 The split manifest records:
 
@@ -327,6 +422,17 @@ Freeze these upper bounds before strategy research:
 - maximum candidate trials per family: 500; and
 - maximum aggregate new candidate trials: 3,000.
 
+Phase 4 operational budget state is initialized as:
+
+- `historical_phase2_trial_count: 136`;
+- `phase4_new_trials_consumed: 0`;
+- `phase4_new_trials_remaining: 3000`; and
+- `phase4_historical_trials_consume_budget: false`.
+
+Only future candidates created under the Phase 4 campaign identity may
+increment `phase4_new_trials_consumed`. Preliminary, final, or original Phase 2
+representations cannot increment it.
+
 The configuration also freezes:
 
 - frozen universe digest:
@@ -352,6 +458,7 @@ Use canonical SHA-256 and write-once/readback-verified storage under
 `results/phase4/readiness/` for:
 
 - bootstrap audit evidence;
+- the full canonical 1,007-observation bootstrap input-vector evidence;
 - Phase 2 trial-authority manifest;
 - Phase 4 split manifest;
 - Phase 4 campaign configuration;
@@ -437,7 +544,12 @@ Use test-driven implementation. Tests must cover:
 - sparse and non-finite observation rejection;
 - invalid draw and percentile rejection;
 - no rounding or serialization mutation; and
-- rejection of broader confidence claims in the audit model.
+- rejection of broader confidence claims in the audit model;
+- exact-byte and canonical-envelope verification of the pinned authoritative
+  source artifact;
+- exact reconstruction of the 1,007 ordered returns from its embedded inputs;
+- canonical `float.hex()` vector serialization and frozen vector digest; and
+- failure rather than fallback when the pinned artifact or vector mismatches.
 
 ### Trial authority
 
@@ -460,9 +572,16 @@ Use test-driven implementation. Tests must cover:
 - exact declared and actual session boundaries;
 - exact 1,258/1,008 per-symbol partition counts;
 - disjoint TRAIN/VALIDATION partitions;
+- TRAIN-only causal indicator warm-up without fitting or performance leakage;
+- portfolio reset to initial cash and zero positions before VALIDATION;
+- exclusion of TRAIN P&L from all VALIDATION metrics;
+- first scored signal on a VALIDATION session and execution only on the next
+  eligible VALIDATION session;
 - content-addressed split/config/readiness manifests;
 - immutable write collision, path-traversal, and symlink rejection;
 - fixed limits 10/500/3,000;
+- separate historical count 136 and Phase 4 consumed count zero;
+- first future Phase 4 trial consuming budget position one, not 137;
 - QFQ/QFQ_NORMALIZED and `decision_grade: false`;
 - no provider dependency or call;
 - FINAL_HOLDOUT and protected-symbol denial; and
