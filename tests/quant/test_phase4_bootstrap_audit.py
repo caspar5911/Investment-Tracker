@@ -100,6 +100,18 @@ def test_audit_rejects_mutated_surrounding_dataset_provenance(
         audit_bootstrap_vector(changed_vector, pinned_source)
 
 
+def test_audit_wraps_malformed_bypassed_dataset_provenance(
+    pinned_source,
+    pinned_vector,
+) -> None:
+    malformed_vector = pinned_vector.model_copy(
+        update={"datasets": ("not-a-dataset-identity",)}
+    )
+
+    with pytest.raises(BootstrapEvidenceError, match="vector is invalid"):
+        audit_bootstrap_vector(malformed_vector, pinned_source)
+
+
 def test_audit_reproduces_all_zero_medians_and_point_interval(
     pinned_source,
     pinned_vector,

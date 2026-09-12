@@ -430,6 +430,16 @@ def audit_bootstrap_vector(
     source: PinnedBootstrapSource,
 ) -> BootstrapAudit:
     record = _validate_pinned_source(source)
+    try:
+        raw_vector = {
+            field_name: getattr(vector, field_name)
+            for field_name in BootstrapInputVector.model_fields
+        }
+        verified = BootstrapInputVector.model_validate(raw_vector)
+    except (AttributeError, TypeError, ValidationError) as exc:
+        raise BootstrapEvidenceError(
+            "pinned bootstrap vector is invalid, including dataset provenance"
+        ) from exc
     pinned_paths = {
         item.symbol: item.path for item in PINNED_BOOTSTRAP_DATASETS
     }
@@ -445,14 +455,10 @@ def audit_bootstrap_vector(
             )
         )
     )
-    if _dataset_provenance(vector.datasets) != source_provenance:
+    if _dataset_provenance(verified.datasets) != source_provenance:
         raise BootstrapEvidenceError(
             "pinned bootstrap vector dataset provenance mismatch"
         )
-    try:
-        verified = BootstrapInputVector.model_validate(vector.model_dump(mode="python"))
-    except ValidationError as exc:
-        raise BootstrapEvidenceError("pinned bootstrap vector is invalid") from exc
     if (
         verified.sha256 != PINNED_BOOTSTRAP_VECTOR_SHA256
         or verified.source_artifact != source.artifact
