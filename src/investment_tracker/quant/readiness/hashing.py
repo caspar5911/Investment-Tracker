@@ -80,6 +80,7 @@ def normalize_repository_path(repository_root: Path, path: Path) -> str:
     if (
         not normalized
         or normalized.startswith("/")
+        or "\\" in normalized
         or relative.drive
         or any(component in {"", ".", ".."} for component in components)
     ):

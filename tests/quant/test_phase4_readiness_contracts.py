@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from hashlib import sha256
+import os
 from pathlib import Path
 
 import pytest
@@ -150,6 +151,17 @@ def test_artifact_paths_reject_empty_root_and_outside_absolute_paths(
         normalize_repository_path(repository, Path("."))
     with pytest.raises(ArtifactIdentityError):
         normalize_repository_path(repository, tmp_path / "outside.json")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="literal backslash is a Windows separator")
+def test_artifact_paths_reject_literal_backslash_on_posix(tmp_path: Path) -> None:
+    repository = tmp_path / "repo"
+    artifact = repository / "results" / "record\\name.json"
+    artifact.parent.mkdir(parents=True)
+    artifact.touch()
+
+    with pytest.raises(ArtifactIdentityError):
+        normalize_repository_path(repository, artifact)
 
 
 def test_artifact_paths_reject_existing_symlink_components(tmp_path: Path) -> None:
