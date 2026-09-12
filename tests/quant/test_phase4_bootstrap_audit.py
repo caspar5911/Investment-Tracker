@@ -80,6 +80,26 @@ def test_reconstructed_vector_matches_frozen_1007_value_digest(
     assert pinned_vector.sha256 == PINNED_BOOTSTRAP_VECTOR_SHA256
 
 
+def test_audit_rejects_mutated_surrounding_dataset_provenance(
+    pinned_source,
+    pinned_vector,
+) -> None:
+    changed_dataset = pinned_vector.datasets[0].model_copy(
+        update={
+            "path": "data/cache/moomoo/IEF/1d/qfq/substitute",
+            "content_hash": "0" * 64,
+        }
+    )
+    changed_vector = pinned_vector.model_copy(
+        update={"datasets": (changed_dataset, *pinned_vector.datasets[1:])}
+    )
+
+    assert changed_vector.values_hex == pinned_vector.values_hex
+    assert changed_vector.sha256 == pinned_vector.sha256
+    with pytest.raises(BootstrapEvidenceError, match="dataset provenance"):
+        audit_bootstrap_vector(changed_vector, pinned_source)
+
+
 def test_audit_reproduces_all_zero_medians_and_point_interval(
     pinned_source,
     pinned_vector,

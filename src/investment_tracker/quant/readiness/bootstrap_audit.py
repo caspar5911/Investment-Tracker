@@ -74,6 +74,24 @@ class BootstrapDatasetIdentity(FrozenReadinessModel):
     last_timestamp: datetime
 
 
+def _dataset_provenance(
+    datasets: tuple[BootstrapDatasetIdentity, ...],
+) -> tuple[tuple[str, str, str], ...]:
+    return tuple(
+        (item.symbol, item.path, item.content_hash)
+        for item in datasets
+    )
+
+
+def _frozen_dataset_provenance() -> tuple[tuple[str, str, str], ...]:
+    return tuple(
+        sorted(
+            (item.symbol, item.path, item.content_hash)
+            for item in PINNED_BOOTSTRAP_DATASETS
+        )
+    )
+
+
 class BootstrapInputVector(FrozenReadinessModel):
     schema_version: Literal["BOOTSTRAP-INPUT-VECTOR-v1"] = (
         "BOOTSTRAP-INPUT-VECTOR-v1"
@@ -120,6 +138,8 @@ class BootstrapInputVector(FrozenReadinessModel):
             raise ValueError("bootstrap vector digest does not match values")
         if tuple(item.symbol for item in self.datasets) != ("IEF", "QQQ", "TLT"):
             raise ValueError("bootstrap dataset identities must be symbol sorted")
+        if _dataset_provenance(self.datasets) != _frozen_dataset_provenance():
+            raise ValueError("bootstrap dataset provenance is not pinned")
         return self
 
 
@@ -410,6 +430,25 @@ def audit_bootstrap_vector(
     source: PinnedBootstrapSource,
 ) -> BootstrapAudit:
     record = _validate_pinned_source(source)
+    pinned_paths = {
+        item.symbol: item.path for item in PINNED_BOOTSTRAP_DATASETS
+    }
+    source_provenance = tuple(
+        sorted(
+            (
+                symbol,
+                pinned_paths[symbol],
+                content_digest,
+            )
+            for symbol, content_digest in (
+                record.candidate_manifest.data_manifest_hashes.items()
+            )
+        )
+    )
+    if _dataset_provenance(vector.datasets) != source_provenance:
+        raise BootstrapEvidenceError(
+            "pinned bootstrap vector dataset provenance mismatch"
+        )
     try:
         verified = BootstrapInputVector.model_validate(vector.model_dump(mode="python"))
     except ValidationError as exc:
