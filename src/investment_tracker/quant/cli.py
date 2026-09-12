@@ -58,6 +58,13 @@ def parser() -> argparse.ArgumentParser:
     phase3.add_argument("--evidence-root", type=Path, default=Path("data/cache"))
     phase3.add_argument("--results-root", type=Path, default=Path("results"))
     phase3.add_argument("--campaign-id")
+
+    phase4 = subparsers.add_parser(
+        "phase4-readiness",
+        help="audit fixed local Phase 4 readiness evidence without providers",
+    )
+    phase4.add_argument("--repository-root", type=Path, required=True)
+    phase4.add_argument("--results-root", type=Path, required=True)
     return root
 
 
@@ -84,6 +91,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _export_moomoo(args)
         if args.command == "phase3-universe":
             return _phase3_universe(args)
+        if args.command == "phase4-readiness":
+            return _phase4_readiness(args)
     except Exception as exc:
         print(json.dumps({"status": "FAILED", "error": str(exc)}, sort_keys=True))
         return 2
@@ -203,6 +212,14 @@ def _phase3_universe(args: argparse.Namespace) -> int:
     payload["status"] = outcome.stop_reason
     print(json.dumps(payload, sort_keys=True))
     return 0 if outcome.stop_reason == "PHASE_3_UNIVERSE_FROZEN" else 2
+
+
+def _phase4_readiness(args: argparse.Namespace) -> int:
+    from .readiness import run_phase4_readiness
+
+    outcome = run_phase4_readiness(args.repository_root, args.results_root)
+    print(json.dumps(outcome.model_dump(mode="json"), sort_keys=True))
+    return 0 if outcome.status == "PHASE_4_READY" else 2
 
 
 if __name__ == "__main__":
