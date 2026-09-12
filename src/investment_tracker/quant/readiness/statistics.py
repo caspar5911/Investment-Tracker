@@ -62,6 +62,22 @@ class SearchAwareStatisticResult(FrozenReadinessModel):
     reason: str = Field(min_length=1)
 
 
+class Phase4FamilyConsumption(FrozenReadinessModel):
+    strategy_family: str = Field(min_length=1)
+    consumed_candidate_ids: tuple[str, ...] = Field(min_length=1, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_candidate_ids(self) -> "Phase4FamilyConsumption":
+        if len(set(self.consumed_candidate_ids)) != len(self.consumed_candidate_ids):
+            raise ValueError("Phase 4 family candidate IDs must be unique")
+        if any(
+            not candidate_id.startswith("phase4-")
+            for candidate_id in self.consumed_candidate_ids
+        ):
+            raise ValueError("historical candidate IDs cannot consume Phase 4 budget")
+        return self
+
+
 class Phase4BudgetState(FrozenReadinessModel):
     schema_version: Literal["PHASE4-BUDGET-STATE-v1"] = "PHASE4-BUDGET-STATE-v1"
     historical_phase2_trial_count: Literal[136] = HISTORICAL_PHASE2_TRIAL_COUNT
@@ -72,6 +88,9 @@ class Phase4BudgetState(FrozenReadinessModel):
     maximum_candidate_trials_per_family: Literal[500] = 500
     maximum_aggregate_new_candidate_trials: Literal[3000] = 3000
     consumed_candidate_ids: tuple[str, ...] = ()
+    family_consumption: tuple[Phase4FamilyConsumption, ...] = Field(
+        default=(), max_length=10
+    )
     last_consumed_budget_position: int | None = Field(default=None, ge=1, le=3000)
 
     @model_validator(mode="after")
@@ -82,6 +101,23 @@ class Phase4BudgetState(FrozenReadinessModel):
             raise ValueError("Phase 4 candidate IDs must be unique")
         if any(not candidate_id.startswith("phase4-") for candidate_id in self.consumed_candidate_ids):
             raise ValueError("historical candidate IDs cannot consume Phase 4 budget")
+        family_names = tuple(item.strategy_family for item in self.family_consumption)
+        if family_names != tuple(sorted(family_names)):
+            raise ValueError("Phase 4 strategy families must be sorted")
+        if len(set(family_names)) != len(family_names):
+            raise ValueError("Phase 4 strategy families must be unique")
+        family_candidate_ids = tuple(
+            candidate_id
+            for item in self.family_consumption
+            for candidate_id in item.consumed_candidate_ids
+        )
+        if (
+            len(family_candidate_ids) != len(self.consumed_candidate_ids)
+            or set(family_candidate_ids) != set(self.consumed_candidate_ids)
+        ):
+            raise ValueError(
+                "Phase 4 family consumption must match consumed candidate IDs"
+            )
         expected_remaining = (
             self.maximum_aggregate_new_candidate_trials
             - self.phase4_new_trials_consumed
@@ -101,13 +137,60 @@ class Phase4BudgetState(FrozenReadinessModel):
     def initial(cls) -> "Phase4BudgetState":
         return cls()
 
-    def consume(self, candidate_id: str) -> "Phase4BudgetState":
+    def consume(
+        self,
+        candidate_id: str,
+        strategy_family: str,
+    ) -> "Phase4BudgetState":
         if not isinstance(candidate_id, str) or not candidate_id.startswith("phase4-"):
             raise Phase4BudgetError("only Phase 4 candidate IDs may consume budget")
+        if not isinstance(strategy_family, str) or not strategy_family.strip():
+            raise Phase4BudgetError("strategy family must be explicit")
         if candidate_id in self.consumed_candidate_ids:
             raise Phase4BudgetError(f"candidate budget already consumed: {candidate_id}")
         if self.phase4_new_trials_consumed >= self.maximum_aggregate_new_candidate_trials:
             raise Phase4BudgetError("Phase 4 aggregate candidate budget exhausted")
+
+        family_index = next(
+            (
+                index
+                for index, item in enumerate(self.family_consumption)
+                if item.strategy_family == strategy_family
+            ),
+            None,
+        )
+        if family_index is None:
+            if len(self.family_consumption) >= self.maximum_new_strategy_families:
+                raise Phase4BudgetError("Phase 4 strategy family budget exhausted")
+            updated_families = (
+                *self.family_consumption,
+                Phase4FamilyConsumption(
+                    strategy_family=strategy_family,
+                    consumed_candidate_ids=(candidate_id,),
+                ),
+            )
+        else:
+            family = self.family_consumption[family_index]
+            if (
+                len(family.consumed_candidate_ids)
+                >= self.maximum_candidate_trials_per_family
+            ):
+                raise Phase4BudgetError(
+                    "Phase 4 per-family candidate budget exhausted"
+                )
+            updated_families = tuple(
+                Phase4FamilyConsumption(
+                    strategy_family=item.strategy_family,
+                    consumed_candidate_ids=(
+                        *item.consumed_candidate_ids,
+                        candidate_id,
+                    ),
+                )
+                if index == family_index
+                else item
+                for index, item in enumerate(self.family_consumption)
+            )
+
         consumed = self.phase4_new_trials_consumed + 1
         return Phase4BudgetState(
             phase4_new_trials_consumed=consumed,
@@ -115,6 +198,9 @@ class Phase4BudgetState(FrozenReadinessModel):
                 self.maximum_aggregate_new_candidate_trials - consumed
             ),
             consumed_candidate_ids=(*self.consumed_candidate_ids, candidate_id),
+            family_consumption=tuple(
+                sorted(updated_families, key=lambda item: item.strategy_family)
+            ),
             last_consumed_budget_position=consumed,
         )
 

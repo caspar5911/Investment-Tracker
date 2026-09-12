@@ -276,6 +276,28 @@ def test_duplicate_representations_do_not_inflate_search_inputs(
     assert duplicated.ordered_pbo_trial_ids == base.ordered_pbo_trial_ids
 
 
+def test_unassociated_out_of_scope_evidence_is_retained_only_as_lineage(
+    experiment_fixtures: tuple[ExperimentEvidence, ...],
+) -> None:
+    extra = evidence("unassociated-candidate", "out_of_scope", ordinal=7)
+    authority = build_authority_from_records((*experiment_fixtures, extra))
+    records = authoritative_records(experiment_fixtures)
+    search_inputs = build_search_aware_inputs(authority, records)
+
+    assert extra.artifact in authority.non_authoritative_artifacts
+    assert len(authority.non_authoritative_artifacts) == 141
+    assert authority.non_authoritative_artifacts == tuple(
+        sorted(
+            authority.non_authoritative_artifacts,
+            key=lambda item: (item.kind, item.path, item.content_sha256, item.sha256),
+        )
+    )
+    assert len(authority.trials) == 136
+    assert search_inputs.historical_trial_count == 136
+    assert search_inputs.multiple_testing_count == 136
+    assert Phase4BudgetState.initial().phase4_new_trials_consumed == 0
+
+
 def test_search_inputs_require_exact_trial_keyed_authoritative_records(
     experiment_fixtures: tuple[ExperimentEvidence, ...],
 ) -> None:
@@ -293,19 +315,67 @@ def test_phase4_budget_starts_at_zero_and_first_trial_is_position_one() -> None:
     assert state.phase4_new_trials_remaining == 3000
     assert state.phase4_historical_trials_consume_budget is False
 
-    first = state.consume("phase4-candidate-0001")
+    first = state.consume(
+        candidate_id="phase4-candidate-0001",
+        strategy_family="family-01",
+    )
     assert first.phase4_new_trials_consumed == 1
     assert first.phase4_new_trials_remaining == 2999
     assert first.last_consumed_budget_position == 1
+    assert first.family_consumption[0].strategy_family == "family-01"
+    assert first.family_consumption[0].consumed_candidate_ids == (
+        "phase4-candidate-0001",
+    )
+
+
+def test_phase4_budget_rejects_family_eleven() -> None:
+    state = Phase4BudgetState.initial()
+    for index in range(10):
+        state = state.consume(
+            candidate_id=f"phase4-candidate-{index:04d}",
+            strategy_family=f"family-{index:02d}",
+        )
+
+    assert len(state.family_consumption) == 10
+    with pytest.raises(Phase4BudgetError, match="strategy family budget exhausted"):
+        state.consume(
+            candidate_id="phase4-candidate-0010",
+            strategy_family="family-10",
+        )
+
+
+def test_phase4_budget_rejects_trial_501_for_one_family() -> None:
+    state = Phase4BudgetState.initial()
+    for index in range(500):
+        state = state.consume(
+            candidate_id=f"phase4-candidate-{index:04d}",
+            strategy_family="family-00",
+        )
+
+    assert len(state.family_consumption[0].consumed_candidate_ids) == 500
+    with pytest.raises(Phase4BudgetError, match="candidate budget exhausted"):
+        state.consume(
+            candidate_id="phase4-candidate-0500",
+            strategy_family="family-00",
+        )
 
 
 def test_phase4_budget_rejects_historical_duplicate_and_combined_counts() -> None:
     state = Phase4BudgetState.initial()
     with pytest.raises(Phase4BudgetError, match="Phase 4"):
-        state.consume("risk_managed_trend-ee8a71fb71e3d80f")
-    first = state.consume("phase4-candidate-0001")
+        state.consume(
+            candidate_id="risk_managed_trend-ee8a71fb71e3d80f",
+            strategy_family="family-01",
+        )
+    first = state.consume(
+        candidate_id="phase4-candidate-0001",
+        strategy_family="family-01",
+    )
     with pytest.raises(Phase4BudgetError, match="already consumed"):
-        first.consume("phase4-candidate-0001")
+        first.consume(
+            candidate_id="phase4-candidate-0001",
+            strategy_family="family-02",
+        )
     with pytest.raises(ValidationError):
         Phase4BudgetState(
             phase4_new_trials_consumed=136,

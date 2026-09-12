@@ -57,6 +57,15 @@ class ExperimentEvidence(FrozenReadinessModel):
         return self
 
 
+def _artifact_key(identity: ReadinessArtifactIdentity) -> tuple[str, str, str, str]:
+    return (
+        identity.kind,
+        identity.path,
+        identity.content_sha256,
+        identity.sha256,
+    )
+
+
 class TrialAuthorityManifest(FrozenReadinessModel):
     schema_version: Literal["PHASE4-TRIAL-AUTHORITY-v1"] = (
         "PHASE4-TRIAL-AUTHORITY-v1"
@@ -76,6 +85,9 @@ class TrialAuthorityManifest(FrozenReadinessModel):
     )
     out_of_scope_representation_count: int = Field(ge=0)
     source_revisions: tuple[str, ...] = Field(min_length=1)
+    non_authoritative_artifacts: tuple[ReadinessArtifactIdentity, ...] = Field(
+        min_length=136
+    )
     trials: tuple[AuthoritativeTrial, ...] = Field(min_length=136, max_length=136)
 
     @model_validator(mode="after")
@@ -100,6 +112,26 @@ class TrialAuthorityManifest(FrozenReadinessModel):
             raise ValueError("authoritative trial campaign mismatch")
         if self.source_revisions != tuple(sorted(set(self.source_revisions))):
             raise ValueError("source revisions must be unique and sorted")
+        non_authoritative_keys = tuple(
+            _artifact_key(identity)
+            for identity in self.non_authoritative_artifacts
+        )
+        if non_authoritative_keys != tuple(sorted(non_authoritative_keys)):
+            raise ValueError("non-authoritative artifacts must be sorted")
+        if len(set(non_authoritative_keys)) != len(non_authoritative_keys):
+            raise ValueError("non-authoritative artifact identities must be unique")
+        if len(non_authoritative_keys) != (
+            self.total_representation_count
+            - self.final_authoritative_representation_count
+        ):
+            raise ValueError("non-authoritative lineage does not match counts")
+        trial_lineage_keys = {
+            _artifact_key(identity)
+            for trial in self.trials
+            for identity in trial.non_authoritative_artifacts
+        }
+        if not trial_lineage_keys.issubset(set(non_authoritative_keys)):
+            raise ValueError("per-trial lineage is absent from complete lineage")
         return self
 
 
@@ -132,15 +164,6 @@ def classify_representation(record: ExperimentRecord) -> RepresentationClass:
     if matches:
         return matches[0]
     return "OUT_OF_SCOPE"
-
-
-def _artifact_key(identity: ReadinessArtifactIdentity) -> tuple[str, str, str, str]:
-    return (
-        identity.kind,
-        identity.path,
-        identity.content_sha256,
-        identity.sha256,
-    )
 
 
 def build_authority_from_records(
@@ -189,6 +212,17 @@ def build_authority_from_records(
             (item, category)
         )
 
+    all_non_authoritative = tuple(
+        sorted(
+            (
+                item.artifact
+                for item, category in classified
+                if category != "FINAL_AUTHORITATIVE"
+            ),
+            key=_artifact_key,
+        )
+    )
+
     trials = []
     for candidate_id in sorted(preliminary_ids):
         authoritative = finals[candidate_id][0]
@@ -227,6 +261,7 @@ def build_authority_from_records(
                 }
             )
         ),
+        non_authoritative_artifacts=all_non_authoritative,
         trials=tuple(trials),
     )
 
