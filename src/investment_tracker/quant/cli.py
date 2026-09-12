@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 from typing import Sequence
@@ -47,6 +48,16 @@ def parser() -> argparse.ArgumentParser:
     export.add_argument("--snapshot", type=Path, required=True)
     export.add_argument("--output", type=Path, required=True)
     export.add_argument("--symbol")
+
+    phase3 = subparsers.add_parser(
+        "phase3-universe",
+        help="run fixed-window quote-only Phase 3 ETF data-quality campaign",
+    )
+    phase3.add_argument("--host", default="127.0.0.1")
+    phase3.add_argument("--port", type=int, default=11111)
+    phase3.add_argument("--evidence-root", type=Path, default=Path("data/cache"))
+    phase3.add_argument("--results-root", type=Path, default=Path("results"))
+    phase3.add_argument("--campaign-id")
     return root
 
 
@@ -71,6 +82,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _optimize(args)
         if args.command == "export-moomoo":
             return _export_moomoo(args)
+        if args.command == "phase3-universe":
+            return _phase3_universe(args)
     except Exception as exc:
         print(json.dumps({"status": "FAILED", "error": str(exc)}, sort_keys=True))
         return 2
@@ -170,6 +183,26 @@ def _export_moomoo(args: argparse.Namespace) -> int:
     path = export_strategy(snapshot, args.output, symbol=args.symbol)
     print(json.dumps({"status": "OK", "output": str(path)}, sort_keys=True))
     return 0
+
+
+def _phase3_universe(args: argparse.Namespace) -> int:
+    from .data.moomoo_client import MoomooHistoricalDataSource
+    from .universe.artifacts import Phase3ArtifactStore
+    from .universe.campaign import run_phase3_campaign
+
+    campaign_id = args.campaign_id
+    if campaign_id is None:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        campaign_id = f"PHASE3-ETF-DQ-2014-2022-{stamp}"
+    outcome = run_phase3_campaign(
+        MoomooHistoricalDataSource(host=args.host, port=args.port),
+        Phase3ArtifactStore(args.evidence_root, args.results_root),
+        campaign_id=campaign_id,
+    )
+    payload = outcome.model_dump(mode="json")
+    payload["status"] = outcome.stop_reason
+    print(json.dumps(payload, sort_keys=True))
+    return 0 if outcome.stop_reason == "PHASE_3_UNIVERSE_FROZEN" else 2
 
 
 if __name__ == "__main__":
