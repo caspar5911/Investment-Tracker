@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 from pydantic import ValidationError
 
+import investment_tracker.quant.readiness.validation as validation_module
 from investment_tracker.quant.backtest.models import ExecutionAssumptions
 from investment_tracker.quant.readiness.validation import (
     ValidationBoundaryError,
@@ -120,13 +121,21 @@ def test_train_rows_are_visible_only_to_lagged_indicator_initialization() -> Non
     assert tuple(inputs.scored_targets.index) == tuple(validation_index())
     assert inputs.selection_inputs == ()
     assert inputs.warmup_policy.performance_fields_used is False
+    assert inputs.split_version == split_fixture().version
+    assert inputs.split_digest == split_fixture().digest
+    assert inputs.train_start == split_fixture().train_start
+    assert inputs.train_end == split_fixture().train_end
+    assert inputs.validation_start == split_fixture().validation_start
+    assert inputs.validation_end == split_fixture().validation_end
 
 
-def test_returned_indicator_warmup_values_are_read_only() -> None:
+def test_returned_indicator_warmup_is_a_defensive_copy() -> None:
     inputs = prepare_fixture_inputs()
+    original = inputs.indicator_warmup
 
-    with pytest.raises(ValueError, match="read-only"):
-        inputs.indicator_warmup.iloc[0, 0] = -1.0
+    original["close"] = -1.0
+
+    assert (inputs.indicator_warmup["close"] >= 0.0).all()
 
 
 def test_prices_before_declared_causal_warmup_cannot_change_validation_result() -> None:
@@ -209,6 +218,49 @@ def test_train_dated_scored_targets_fail_before_backtest() -> None:
 
     with pytest.raises(ValidationBoundaryError, match="VALIDATION"):
         run_validation_from_reset(bypassed, assumptions())
+
+
+@pytest.mark.parametrize("invalid_partition", ["TRAIN", "POST_VALIDATION"])
+def test_matching_nonvalidation_bars_and_targets_fail_before_backtest(
+    invalid_partition: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prepared = prepare_validation_inputs(
+        bars=bars_fixture(),
+        target_builder=fixed_validation_targets(),
+        split=split_fixture(),
+        warmup_sessions=0,
+        initial_cash=100_000.0,
+    )
+    if invalid_partition == "TRAIN":
+        invalid_index = train_index()
+        invalid_bars = bars_fixture().loc[invalid_index].copy(deep=True)
+    else:
+        invalid_index = pd.date_range(
+            "2024-01-08", periods=4, freq="B", tz="UTC"
+        )
+        invalid_bars = prepared.execution_bars.copy(deep=True)
+        invalid_bars.index = invalid_index
+    invalid_targets = pd.Series(0.0, index=invalid_index)
+    bypassed = prepared.model_copy(
+        update={
+            "execution_bars": invalid_bars,
+            "scored_targets": invalid_targets,
+        }
+    )
+    engine_called = False
+
+    def reject_engine_call(*args: object, **kwargs: object) -> None:
+        nonlocal engine_called
+        engine_called = True
+        raise AssertionError("run_backtest must not receive non-VALIDATION rows")
+
+    monkeypatch.setattr(validation_module, "run_backtest", reject_engine_call)
+
+    with pytest.raises(ValidationBoundaryError, match="VALIDATION"):
+        run_validation_from_reset(bypassed, assumptions())
+
+    assert engine_called is False
 
 
 def test_warmup_policy_rejects_performance_derived_fields() -> None:

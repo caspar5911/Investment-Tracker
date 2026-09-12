@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, datetime
 from typing import Literal, Protocol
 
 import numpy as np
@@ -48,6 +49,41 @@ class ValidationResetState(FrozenReadinessModel):
     inherited_train_state: Literal[False] = False
 
 
+class ValidationWarmupSnapshot(FrozenReadinessModel):
+    schema_version: Literal["PHASE4-VALIDATION-WARMUP-SNAPSHOT-v1"] = (
+        "PHASE4-VALIDATION-WARMUP-SNAPSHOT-v1"
+    )
+    columns: tuple[str, ...]
+    index: tuple[datetime, ...]
+    values: tuple[tuple[float, ...], ...]
+
+    @classmethod
+    def capture(cls, frame: pd.DataFrame) -> "ValidationWarmupSnapshot":
+        return cls(
+            columns=tuple(str(column) for column in frame.columns),
+            index=tuple(timestamp.to_pydatetime() for timestamp in frame.index),
+            values=tuple(
+                tuple(float(value) for value in row)
+                for row in frame.to_numpy(copy=True)
+            ),
+        )
+
+    @model_validator(mode="after")
+    def validate_shape(self) -> "ValidationWarmupSnapshot":
+        if len(self.values) != len(self.index) or any(
+            len(row) != len(self.columns) for row in self.values
+        ):
+            raise ValueError("indicator warm-up snapshot shape is inconsistent")
+        return self
+
+    def to_frame(self) -> pd.DataFrame:
+        return pd.DataFrame(
+            self.values,
+            columns=self.columns,
+            index=pd.DatetimeIndex(self.index),
+        )
+
+
 class ValidationExecutionInputs(FrozenReadinessModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -58,27 +94,50 @@ class ValidationExecutionInputs(FrozenReadinessModel):
     schema_version: Literal["PHASE4-VALIDATION-EXECUTION-INPUTS-v1"] = (
         "PHASE4-VALIDATION-EXECUTION-INPUTS-v1"
     )
+    split_version: str = Field(min_length=1)
+    split_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    train_start: date
+    train_end: date
+    validation_start: date
+    validation_end: date
     warmup_policy: ValidationWarmupPolicy
-    indicator_warmup: pd.DataFrame
+    indicator_warmup_snapshot: ValidationWarmupSnapshot
     execution_bars: pd.DataFrame
     scored_targets: pd.Series
     reset_state: ValidationResetState
     selection_inputs: tuple[object, ...] = Field(default=(), max_length=0)
 
+    @property
+    def indicator_warmup(self) -> pd.DataFrame:
+        return self.indicator_warmup_snapshot.to_frame()
+
     @model_validator(mode="after")
     def validate_boundary(self) -> "ValidationExecutionInputs":
-        if not isinstance(self.indicator_warmup.index, pd.DatetimeIndex):
-            raise ValueError("indicator warm-up requires a timestamp index")
+        if not (
+            self.train_start <= self.train_end
+            < self.validation_start <= self.validation_end
+        ):
+            raise ValueError("declared TRAIN and VALIDATION bounds are invalid")
         if not isinstance(self.execution_bars.index, pd.DatetimeIndex):
             raise ValueError("VALIDATION execution requires a timestamp index")
         if self.execution_bars.empty:
             raise ValueError("VALIDATION execution bars must not be empty")
-        if len(self.indicator_warmup) != self.warmup_policy.warmup_sessions:
+        warmup = self.indicator_warmup
+        if len(warmup) != self.warmup_policy.warmup_sessions:
             raise ValueError("indicator warm-up count differs from policy")
-        if len(self.indicator_warmup) and not (
-            self.indicator_warmup.index[-1] < self.execution_bars.index[0]
-        ):
-            raise ValueError("indicator warm-up must be strictly before VALIDATION")
+        if len(warmup):
+            warmup_dates = warmup.index.date
+            if not bool(
+                (
+                    (warmup_dates >= self.train_start)
+                    & (warmup_dates <= self.train_end)
+                ).all()
+            ):
+                raise ValueError("indicator warm-up must contain only TRAIN rows")
+            if warmup.index[-1] >= self.execution_bars.index[0]:
+                raise ValueError(
+                    "indicator warm-up must be strictly before VALIDATION"
+                )
         if not self.execution_bars.index.equals(self.scored_targets.index):
             raise ValueError("scored targets must be VALIDATION-only")
         if (
@@ -86,6 +145,16 @@ class ValidationExecutionInputs(FrozenReadinessModel):
             or self.execution_bars.index.has_duplicates
         ):
             raise ValueError("VALIDATION sessions must be unique and increasing")
+        execution_dates = self.execution_bars.index.date
+        if not bool(
+            (
+                (execution_dates >= self.validation_start)
+                & (execution_dates <= self.validation_end)
+            ).all()
+        ):
+            raise ValueError(
+                "execution bars and scored targets must be within VALIDATION"
+            )
         targets = self.scored_targets.to_numpy(dtype=float)
         if (
             not np.isfinite(targets).all()
@@ -113,13 +182,6 @@ def _reject_stateful_builder(target_builder: ValidationTargetBuilder) -> None:
             raise ValidationBoundaryError(
                 f"target builder cannot expose {method_name}"
             )
-
-
-def _make_values_read_only(frame: pd.DataFrame) -> pd.DataFrame:
-    frozen = frame.copy(deep=True)
-    for block in frozen._mgr.blocks:
-        block.values.flags.writeable = False
-    return frozen
 
 
 def prepare_validation_inputs(
@@ -168,11 +230,18 @@ def prepare_validation_inputs(
             "target builder must return targets for the causal input index"
         )
     scored_targets = targets.loc[execution_bars.index].astype(float).copy(deep=True)
-    indicator_warmup = _make_values_read_only(indicator_warmup)
     try:
         return ValidationExecutionInputs(
+            split_version=split.version,
+            split_digest=split.digest,
+            train_start=split.train_start,
+            train_end=split.train_end,
+            validation_start=split.validation_start,
+            validation_end=split.validation_end,
             warmup_policy=policy,
-            indicator_warmup=indicator_warmup,
+            indicator_warmup_snapshot=ValidationWarmupSnapshot.capture(
+                indicator_warmup
+            ),
             execution_bars=execution_bars,
             scored_targets=scored_targets,
             reset_state=reset,
