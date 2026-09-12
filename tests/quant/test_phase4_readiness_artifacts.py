@@ -1,0 +1,145 @@
+from __future__ import annotations
+
+from hashlib import sha256
+from pathlib import Path
+
+import pytest
+
+from investment_tracker.quant.readiness.artifacts import (
+    ReadinessArtifactIntegrityError,
+    ReadinessArtifactStore,
+)
+from investment_tracker.quant.readiness.hashing import (
+    canonical_json_bytes,
+    canonical_sha256,
+)
+from investment_tracker.quant.readiness.models import ReadinessArtifactIdentity
+
+
+def readiness_store(tmp_path: Path) -> ReadinessArtifactStore:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    return ReadinessArtifactStore(repository, repository / "results")
+
+
+def test_store_uses_exact_content_hash_path_and_envelope_identity(
+    tmp_path: Path,
+) -> None:
+    store = readiness_store(tmp_path)
+    identity = store.write_json("phase4_split_manifest", "manifest.json", {"a": 1})
+    assert identity.content_sha256 == sha256(b'{"a":1}').hexdigest()
+    assert identity.path == (
+        f"results/phase4/readiness/phase4_split_manifest/sha256/"
+        f"{identity.content_sha256}/manifest.json"
+    )
+    assert identity.sha256 == canonical_sha256(
+        {
+            "content_sha256": identity.content_sha256,
+            "kind": identity.kind,
+            "path": identity.path,
+        }
+    )
+    assert Path(tmp_path / "repo", identity.path).read_bytes() == b'{"a":1}'
+    assert store.read_json(identity) == {"a": 1}
+
+
+def test_text_store_hashes_and_reads_exact_utf8_bytes(tmp_path: Path) -> None:
+    store = readiness_store(tmp_path)
+    text = "Readiness caf\N{LATIN SMALL LETTER E WITH ACUTE}\n"
+    identity = store.write_text("phase4_readiness_report", "report.md", text)
+
+    assert identity.content_sha256 == sha256(text.encode("utf-8")).hexdigest()
+    assert Path(tmp_path / "repo", identity.path).read_bytes() == text.encode("utf-8")
+    assert store.read_text(identity) == text
+
+
+def test_store_reuses_only_exactly_identical_bytes(tmp_path: Path) -> None:
+    store = readiness_store(tmp_path)
+    first = store.write_json("phase4_split_manifest", "manifest.json", {"a": 1})
+    second = store.write_json("phase4_split_manifest", "manifest.json", {"a": 1})
+    assert first == second
+
+    Path(tmp_path / "repo", first.path).write_bytes(b"tampered")
+    with pytest.raises(ReadinessArtifactIntegrityError, match="collision"):
+        store.write_json("phase4_split_manifest", "manifest.json", {"a": 1})
+
+
+@pytest.mark.parametrize(
+    "filename",
+    ["../manifest.json", "/manifest.json", "nested/manifest.json", "", "."],
+)
+def test_store_rejects_unsafe_filenames(tmp_path: Path, filename: str) -> None:
+    store = readiness_store(tmp_path)
+    with pytest.raises(ReadinessArtifactIntegrityError, match="filename"):
+        store.write_json("phase4_split_manifest", filename, {"a": 1})
+
+
+def test_store_rejects_results_root_outside_repository(tmp_path: Path) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    with pytest.raises(ReadinessArtifactIntegrityError, match="results root"):
+        ReadinessArtifactStore(repository, tmp_path / "outside")
+
+
+def test_store_rejects_kind_and_path_mismatch_on_verify(tmp_path: Path) -> None:
+    store = readiness_store(tmp_path)
+    identity = store.write_json("phase4_split_manifest", "manifest.json", {"a": 1})
+    envelope = {
+        "content_sha256": identity.content_sha256,
+        "kind": "bootstrap_audit",
+        "path": identity.path,
+    }
+    mismatched = ReadinessArtifactIdentity(
+        **envelope,
+        sha256=canonical_sha256(envelope),
+    )
+
+    with pytest.raises(ReadinessArtifactIntegrityError, match="kind or content path"):
+        store.verify(mismatched)
+
+
+def test_store_rejects_non_regular_destination(tmp_path: Path) -> None:
+    store = readiness_store(tmp_path)
+    content_sha256 = sha256(canonical_json_bytes({"a": 1})).hexdigest()
+    destination = (
+        tmp_path
+        / "repo"
+        / "results"
+        / "phase4"
+        / "readiness"
+        / "phase4_split_manifest"
+        / "sha256"
+        / content_sha256
+        / "manifest.json"
+    )
+    destination.mkdir(parents=True)
+
+    with pytest.raises(ReadinessArtifactIntegrityError, match="non-regular"):
+        store.write_json("phase4_split_manifest", "manifest.json", {"a": 1})
+
+
+def test_verify_rejects_changed_exact_bytes(tmp_path: Path) -> None:
+    store = readiness_store(tmp_path)
+    identity = store.write_json("phase4_split_manifest", "manifest.json", {"a": 1})
+    Path(tmp_path / "repo", identity.path).write_bytes(b'{"a":1}\n')
+
+    with pytest.raises(ReadinessArtifactIntegrityError, match="content hash mismatch"):
+        store.verify(identity)
+
+
+def test_store_rejects_symlinked_output_parent_when_supported(tmp_path: Path) -> None:
+    repository = tmp_path / "repo"
+    results = repository / "results"
+    repository.mkdir()
+    store = ReadinessArtifactStore(repository, results)
+    (results / "phase4").mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    readiness = results / "phase4" / "readiness"
+    try:
+        readiness.symlink_to(outside, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+
+    with pytest.raises(ReadinessArtifactIntegrityError, match="symlink"):
+        store.write_json("phase4_split_manifest", "manifest.json", {"a": 1})
