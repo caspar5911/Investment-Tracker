@@ -84,6 +84,16 @@ class ValidationWarmupSnapshot(FrozenReadinessModel):
         )
 
 
+def _revalidate_split(split: SplitDefinition) -> SplitDefinition:
+    try:
+        values = {
+            name: getattr(split, name) for name in SplitDefinition.model_fields
+        }
+    except AttributeError as exc:
+        raise ValueError("declared split is malformed") from exc
+    return SplitDefinition.model_validate(values)
+
+
 class ValidationExecutionInputs(FrozenReadinessModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -94,12 +104,7 @@ class ValidationExecutionInputs(FrozenReadinessModel):
     schema_version: Literal["PHASE4-VALIDATION-EXECUTION-INPUTS-v1"] = (
         "PHASE4-VALIDATION-EXECUTION-INPUTS-v1"
     )
-    split_version: str = Field(min_length=1)
-    split_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    train_start: date
-    train_end: date
-    validation_start: date
-    validation_end: date
+    split: SplitDefinition
     warmup_policy: ValidationWarmupPolicy
     indicator_warmup_snapshot: ValidationWarmupSnapshot
     execution_bars: pd.DataFrame
@@ -111,13 +116,33 @@ class ValidationExecutionInputs(FrozenReadinessModel):
     def indicator_warmup(self) -> pd.DataFrame:
         return self.indicator_warmup_snapshot.to_frame()
 
+    @property
+    def split_version(self) -> str:
+        return self.split.version
+
+    @property
+    def split_digest(self) -> str:
+        return self.split.digest
+
+    @property
+    def train_start(self) -> date:
+        return self.split.train_start
+
+    @property
+    def train_end(self) -> date:
+        return self.split.train_end
+
+    @property
+    def validation_start(self) -> date:
+        return self.split.validation_start
+
+    @property
+    def validation_end(self) -> date:
+        return self.split.validation_end
+
     @model_validator(mode="after")
     def validate_boundary(self) -> "ValidationExecutionInputs":
-        if not (
-            self.train_start <= self.train_end
-            < self.validation_start <= self.validation_end
-        ):
-            raise ValueError("declared TRAIN and VALIDATION bounds are invalid")
+        split = _revalidate_split(self.split)
         if not isinstance(self.execution_bars.index, pd.DatetimeIndex):
             raise ValueError("VALIDATION execution requires a timestamp index")
         if self.execution_bars.empty:
@@ -129,8 +154,8 @@ class ValidationExecutionInputs(FrozenReadinessModel):
             warmup_dates = warmup.index.date
             if not bool(
                 (
-                    (warmup_dates >= self.train_start)
-                    & (warmup_dates <= self.train_end)
+                    (warmup_dates >= split.train_start)
+                    & (warmup_dates <= split.train_end)
                 ).all()
             ):
                 raise ValueError("indicator warm-up must contain only TRAIN rows")
@@ -148,8 +173,8 @@ class ValidationExecutionInputs(FrozenReadinessModel):
         execution_dates = self.execution_bars.index.date
         if not bool(
             (
-                (execution_dates >= self.validation_start)
-                & (execution_dates <= self.validation_end)
+                (execution_dates >= split.validation_start)
+                & (execution_dates <= split.validation_end)
             ).all()
         ):
             raise ValueError(
@@ -196,15 +221,21 @@ def prepare_validation_inputs(
     if isinstance(warmup_sessions, bool) or not isinstance(warmup_sessions, int):
         raise ValidationBoundaryError("warm-up sessions must be a predeclared integer")
     try:
+        verified_split = _revalidate_split(split)
         policy = ValidationWarmupPolicy(warmup_sessions=warmup_sessions)
         reset = ValidationResetState(initial_cash=initial_cash)
-    except ValidationError as exc:
-        raise ValidationBoundaryError("invalid validation policy or reset state") from exc
+    except (TypeError, ValueError) as exc:
+        raise ValidationBoundaryError(
+            "invalid validation split, policy, or reset state"
+        ) from exc
 
     dates = bars.index.date
-    train_mask = (dates >= split.train_start) & (dates <= split.train_end)
+    train_mask = (
+        (dates >= verified_split.train_start) & (dates <= verified_split.train_end)
+    )
     validation_mask = (
-        (dates >= split.validation_start) & (dates <= split.validation_end)
+        (dates >= verified_split.validation_start)
+        & (dates <= verified_split.validation_end)
     )
     accepted_mask = train_mask | validation_mask
     if not bool(accepted_mask.all()):
@@ -232,12 +263,7 @@ def prepare_validation_inputs(
     scored_targets = targets.loc[execution_bars.index].astype(float).copy(deep=True)
     try:
         return ValidationExecutionInputs(
-            split_version=split.version,
-            split_digest=split.digest,
-            train_start=split.train_start,
-            train_end=split.train_end,
-            validation_start=split.validation_start,
-            validation_end=split.validation_end,
+            split=verified_split,
             warmup_policy=policy,
             indicator_warmup_snapshot=ValidationWarmupSnapshot.capture(
                 indicator_warmup

@@ -263,6 +263,57 @@ def test_matching_nonvalidation_bars_and_targets_fail_before_backtest(
     assert engine_called is False
 
 
+def test_shifted_split_with_stale_digest_fails_before_backtest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prepared = prepare_validation_inputs(
+        bars=bars_fixture(),
+        target_builder=fixed_validation_targets(),
+        split=split_fixture(),
+        warmup_sessions=0,
+        initial_cash=100_000.0,
+    )
+    shifted_split = split_fixture().model_copy(
+        update={
+            "train_start": date(2030, 1, 1),
+            "train_end": date(2030, 1, 4),
+            "validation_start": date(2030, 1, 7),
+            "validation_end": date(2030, 1, 10),
+            "final_holdout_start": date(2030, 1, 14),
+            "final_holdout_end": date(2030, 1, 17),
+        }
+    )
+    shifted_index = pd.date_range(
+        "2030-01-07", periods=4, freq="B", tz="UTC"
+    )
+    shifted_bars = prepared.execution_bars.copy(deep=True)
+    shifted_bars.index = shifted_index
+    bypassed = prepared.model_copy(
+        update={
+            "split": shifted_split,
+            "train_start": shifted_split.train_start,
+            "train_end": shifted_split.train_end,
+            "validation_start": shifted_split.validation_start,
+            "validation_end": shifted_split.validation_end,
+            "execution_bars": shifted_bars,
+            "scored_targets": pd.Series(0.0, index=shifted_index),
+        }
+    )
+    engine_called = False
+
+    def reject_engine_call(*args: object, **kwargs: object) -> None:
+        nonlocal engine_called
+        engine_called = True
+        raise AssertionError("run_backtest must not receive a stale split")
+
+    monkeypatch.setattr(validation_module, "run_backtest", reject_engine_call)
+
+    with pytest.raises(ValidationBoundaryError, match="VALIDATION"):
+        run_validation_from_reset(bypassed, assumptions())
+
+    assert engine_called is False
+
+
 def test_warmup_policy_rejects_performance_derived_fields() -> None:
     with pytest.raises(ValidationError, match="performance_field"):
         ValidationWarmupPolicy(
