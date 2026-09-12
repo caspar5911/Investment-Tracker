@@ -93,6 +93,20 @@ def split_identity() -> ReadinessArtifactIdentity:
     )
 
 
+def _replace_interior_session(dataset: object) -> object:
+    sessions = list(dataset.sessions)
+    sessions[sessions.index(date(2015, 12, 31))] = date(2016, 1, 2)
+    replaced = tuple(sessions)
+    return dataset.model_copy(
+        update={
+            "sessions": replaced,
+            "sessions_sha256": canonical_sha256(
+                tuple(session.isoformat() for session in replaced)
+            ),
+        }
+    )
+
+
 def test_split_uses_only_frozen_phase3_inputs_and_exact_symbol_order() -> None:
     verified = verify_phase3_dependencies(REPOSITORY_ROOT)
     split = build_split_manifest(verified)
@@ -165,6 +179,7 @@ def test_verified_datasets_retain_exact_ordered_sessions_and_byte_identities() -
         assert actual.metadata_artifact.path == f"{expected.path}/metadata.json"
         assert actual.metadata_artifact.content_sha256 == expected.sha256
         assert actual.bars_artifact.path == f"{expected.path}/bars.parquet"
+        assert actual.bars_artifact.content_sha256 == expected.bars_sha256
         assert len(actual.sessions) == 2266
         assert actual.sessions[0].isoformat() == "2014-01-02"
         assert actual.sessions[-1].isoformat() == "2022-12-30"
@@ -338,6 +353,53 @@ def test_bypassed_session_evidence_is_revalidated_before_manifest(
             ),
         }
     )
+    bypassed = verified.model_copy(
+        update={"datasets": (mutated, *verified.datasets[1:])}
+    )
+
+    with pytest.raises(Phase3DependencyError):
+        build_split_manifest(bypassed)
+
+
+def test_one_dataset_cannot_substitute_an_interior_frozen_session() -> None:
+    verified = verify_phase3_dependencies(REPOSITORY_ROOT)
+    mutated = _replace_interior_session(verified.datasets[0])
+    bypassed = verified.model_copy(
+        update={"datasets": (mutated, *verified.datasets[1:])}
+    )
+
+    with pytest.raises(Phase3DependencyError):
+        build_split_manifest(bypassed)
+
+
+def test_all_datasets_cannot_substitute_the_same_interior_frozen_session() -> None:
+    verified = verify_phase3_dependencies(REPOSITORY_ROOT)
+    bypassed = verified.model_copy(
+        update={
+            "datasets": tuple(
+                _replace_interior_session(dataset)
+                for dataset in verified.datasets
+            )
+        }
+    )
+
+    with pytest.raises(Phase3DependencyError):
+        build_split_manifest(bypassed)
+
+
+def test_bars_byte_identity_cannot_be_replaced_by_valid_foreign_envelope() -> None:
+    verified = verify_phase3_dependencies(REPOSITORY_ROOT)
+    dataset = verified.datasets[0]
+    envelope = {
+        "content_sha256": "b" * 64,
+        "kind": "phase3_normalized_dataset",
+        "path": dataset.bars_artifact.path,
+    }
+    foreign_artifact = ReadinessArtifactIdentity(
+        **envelope,
+        sha256=canonical_sha256(envelope),
+    )
+    mutated = dataset.model_copy(update={"bars_artifact": foreign_artifact})
     bypassed = verified.model_copy(
         update={"datasets": (mutated, *verified.datasets[1:])}
     )

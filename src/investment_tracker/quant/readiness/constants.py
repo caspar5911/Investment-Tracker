@@ -90,41 +90,73 @@ class PinnedPhase3Dataset(NamedTuple):
     symbol: str
     path: str
     sha256: str
+    bars_sha256: str
 
 
-def _phase3_dataset(symbol: str, sha256: str) -> PinnedPhase3Dataset:
+def _phase3_dataset(
+    symbol: str,
+    sha256: str,
+    bars_sha256: str,
+) -> PinnedPhase3Dataset:
     return PinnedPhase3Dataset(
         symbol=symbol,
         path=f"data/cache/phase3/normalized/sha256/{sha256}",
         sha256=sha256,
+        bars_sha256=bars_sha256,
     )
 
 
 PHASE3_DATASETS = (
     _phase3_dataset(
-        "SPY", "1d52b313f43dcbe35ded7ab88d403b97e40e82b822b4eaa4aa29552cca5dc0c5"
+        "SPY",
+        "1d52b313f43dcbe35ded7ab88d403b97e40e82b822b4eaa4aa29552cca5dc0c5",
+        "a4a4f1b5a8450fa924ddadc706aec1101bdf2b495b29151de09e73178e511d05",
     ),
     _phase3_dataset(
-        "QQQ", "ee3379ac167c4403044c1b36196bf3b2f7e6a85f72ec2f2a8fd5a5dd6b812ed2"
+        "QQQ",
+        "ee3379ac167c4403044c1b36196bf3b2f7e6a85f72ec2f2a8fd5a5dd6b812ed2",
+        "ca2757d1a036ad2722d21456253856b8b92eaeeaad4af3af868ceeb1dba3758e",
     ),
     _phase3_dataset(
-        "IWM", "f4095f49b54455e6fcde42b8dedea58f3723973998fd298d685c49ff991dbb03"
+        "IWM",
+        "f4095f49b54455e6fcde42b8dedea58f3723973998fd298d685c49ff991dbb03",
+        "0325881a86265152fb7b034711867d963f1d473946cffad513244fbbef1a3c0d",
     ),
     _phase3_dataset(
-        "TLT", "0e52e47f1dacbc01060ff8178429065d1bf02c8181d705ca8fa5e908e2660ab7"
+        "TLT",
+        "0e52e47f1dacbc01060ff8178429065d1bf02c8181d705ca8fa5e908e2660ab7",
+        "69318a0e60b0dbe0505c4994caeffc28c4f35ff92f706e0be8770db20a8b0c7c",
     ),
     _phase3_dataset(
-        "IEF", "a6e7573713d114ef171a43f9c6d4fca9911af0b9dcb39093adb210176fc686e4"
+        "IEF",
+        "a6e7573713d114ef171a43f9c6d4fca9911af0b9dcb39093adb210176fc686e4",
+        "68faebff989ae5dcb34eee7ad0502bd5bb84d23212e45c5c625d36b37092887c",
     ),
     _phase3_dataset(
-        "GLD", "faa0bff3a8afa09f5bd16c7fd21c0b93b6a4dfbc01e9f7567f70b68f7aeb523b"
+        "GLD",
+        "faa0bff3a8afa09f5bd16c7fd21c0b93b6a4dfbc01e9f7567f70b68f7aeb523b",
+        "5e0b465a2b4e15311b98632f1c27f6dea147d4df40ee1e22ca18f9788b2823e3",
     ),
     _phase3_dataset(
-        "VNQ", "104349e90a0b823f3980d2df25f88fcd291395e6986addc65eecabf90a17acba"
+        "VNQ",
+        "104349e90a0b823f3980d2df25f88fcd291395e6986addc65eecabf90a17acba",
+        "cd06e2a58c78c88684ab7a2cee20922a6c29747e49d1af3f994370cd47d1e683",
     ),
     _phase3_dataset(
-        "XLP", "986b5949ddef81d603de79e664b63c9ce69d0ba4cbe1a984ef736cbafe16785f"
+        "XLP",
+        "986b5949ddef81d603de79e664b63c9ce69d0ba4cbe1a984ef736cbafe16785f",
+        "1e4689611200bd6c9a2725c860898575ceb9eaded6358daab74a05e829f8fb7c",
     ),
+)
+
+PHASE3_ALL_SESSION_SHA256 = (
+    "56535e937fab729abdea5c5ebc644de1cf254bb2cce998f8c0d9595fc0e889ba"
+)
+PHASE3_TRAIN_SESSION_SHA256 = (
+    "7d932a1e45637404e2460107ab0f09b33d74d8a28360533bdb9fdaa96416d995"
+)
+PHASE3_VALIDATION_SESSION_SHA256 = (
+    "330dc026e62cea178fc1f28df18ce6479726b4662838bf9454d354c2d00c13d6"
 )
 
 PHASE4_SPLIT_POLICY_VERSION = "PHASE4-TEMPORAL-SPLIT-v1"

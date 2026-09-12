@@ -19,12 +19,15 @@ from investment_tracker.quant.universe.models import (
 )
 
 from .constants import (
+    PHASE3_ALL_SESSION_SHA256,
     PHASE3_DATASETS,
     PHASE3_DQ_SNAPSHOT_PATH,
     PHASE3_DQ_SNAPSHOT_SHA256,
     PHASE3_SYMBOLS,
+    PHASE3_TRAIN_SESSION_SHA256,
     PHASE3_UNIVERSE_PATH,
     PHASE3_UNIVERSE_SHA256,
+    PHASE3_VALIDATION_SESSION_SHA256,
     PHASE4_SPLIT_POLICY_VERSION,
     PHASE4_TRAIN_END,
     PHASE4_TRAIN_ROW_COUNT,
@@ -66,6 +69,21 @@ def _artifact_identity_from_bytes(
     envelope = {
         "content_sha256": content_sha256,
         "kind": kind,
+        "path": repository_path,
+    }
+    return ReadinessArtifactIdentity(
+        **envelope,
+        sha256=canonical_sha256(envelope),
+    )
+
+
+def _pinned_dataset_artifact(
+    repository_path: str,
+    content_sha256: str,
+) -> ReadinessArtifactIdentity:
+    envelope = {
+        "content_sha256": content_sha256,
+        "kind": "phase3_normalized_dataset",
         "path": repository_path,
     }
     return ReadinessArtifactIdentity(
@@ -152,21 +170,27 @@ class VerifiedPhase3Dataset(FrozenReadinessModel):
             self.phase3_dataset_path,
         ) != (expected.sha256, expected.path):
             raise ValueError("verified dataset does not match frozen identity")
-        if self.metadata_artifact.kind != "phase3_normalized_dataset" or (
-            self.metadata_artifact.path,
-            self.metadata_artifact.content_sha256,
-        ) != (f"{expected.path}/metadata.json", expected.sha256):
+        expected_metadata_artifact = _pinned_dataset_artifact(
+            f"{expected.path}/metadata.json",
+            expected.sha256,
+        )
+        if self.metadata_artifact != expected_metadata_artifact:
             raise ValueError("normalized metadata byte identity mismatch")
-        if self.bars_artifact.kind != "phase3_normalized_dataset" or (
-            self.bars_artifact.path != f"{expected.path}/bars.parquet"
-        ):
+        expected_bars_artifact = _pinned_dataset_artifact(
+            f"{expected.path}/bars.parquet",
+            expected.bars_sha256,
+        )
+        if self.bars_artifact != expected_bars_artifact:
             raise ValueError("normalized Parquet byte identity mismatch")
         if (
             len(set(self.sessions)) != len(self.sessions)
             or tuple(sorted(self.sessions)) != self.sessions
         ):
             raise ValueError("dataset sessions must be unique and increasing")
-        if self.sessions_sha256 != _sessions_sha256(self.sessions):
+        if (
+            self.sessions_sha256 != PHASE3_ALL_SESSION_SHA256
+            or self.sessions_sha256 != _sessions_sha256(self.sessions)
+        ):
             raise ValueError("dataset session digest mismatch")
         return self
 
@@ -199,6 +223,12 @@ class VerifiedPhase3Inputs(FrozenReadinessModel):
             raise ValueError("selected symbol order differs from frozen universe")
         if tuple(item.symbol for item in self.datasets) != self.symbols:
             raise ValueError("dataset dependencies differ from selected symbols")
+        reference_sessions = self.datasets[0].sessions
+        if any(
+            dataset.sessions != reference_sessions
+            for dataset in self.datasets[1:]
+        ):
+            raise ValueError("dataset sessions differ across frozen dependencies")
         if (
             self.universe_artifact.kind != "phase3_universe_manifest"
             or self.universe_artifact.path != PHASE3_UNIVERSE_PATH
@@ -234,6 +264,7 @@ class SplitPartition(FrozenReadinessModel):
                 PHASE4_TRAIN_START,
                 PHASE4_TRAIN_END,
                 PHASE4_TRAIN_ROW_COUNT,
+                PHASE3_TRAIN_SESSION_SHA256,
             ),
             "VALIDATION": (
                 PHASE4_VALIDATION_START,
@@ -241,6 +272,7 @@ class SplitPartition(FrozenReadinessModel):
                 date(2019, 1, 2),
                 PHASE4_VALIDATION_END,
                 PHASE4_VALIDATION_ROW_COUNT,
+                PHASE3_VALIDATION_SESSION_SHA256,
             ),
         }[self.stage]
         actual = (
@@ -249,6 +281,7 @@ class SplitPartition(FrozenReadinessModel):
             self.actual_start,
             self.actual_end,
             self.row_count,
+            self.sessions_sha256,
         )
         if actual != expected:
             raise ValueError(f"{self.stage} partition boundary or count mismatch")
@@ -286,12 +319,25 @@ class DatasetPartition(FrozenReadinessModel):
         )
         if expected is None or self.phase3_dataset_sha256 != expected.sha256:
             raise ValueError("partition dataset identity mismatch")
+        if self.metadata_artifact != _pinned_dataset_artifact(
+            f"{expected.path}/metadata.json",
+            expected.sha256,
+        ):
+            raise ValueError("partition metadata byte identity mismatch")
+        if self.bars_artifact != _pinned_dataset_artifact(
+            f"{expected.path}/bars.parquet",
+            expected.bars_sha256,
+        ):
+            raise ValueError("partition Parquet byte identity mismatch")
         if self.train.stage != "TRAIN" or self.validation.stage != "VALIDATION":
             raise ValueError("dataset partitions have invalid stages")
         if set(self.train.sessions).intersection(self.validation.sessions):
             raise ValueError("TRAIN and VALIDATION sessions must be disjoint")
         joined = (*self.train.sessions, *self.validation.sessions)
-        if self.sessions_sha256 != _sessions_sha256(joined):
+        if (
+            self.sessions_sha256 != PHASE3_ALL_SESSION_SHA256
+            or self.sessions_sha256 != _sessions_sha256(joined)
+        ):
             raise ValueError("complete dataset session digest mismatch")
         return self
 
@@ -323,6 +369,16 @@ class Phase4SplitManifest(FrozenReadinessModel):
             raise ValueError("split symbol order differs from frozen universe")
         if tuple(item.symbol for item in self.partitions) != self.symbols:
             raise ValueError("split partitions differ from selected symbols")
+        reference_sessions = (
+            self.partitions[0].train.sessions,
+            self.partitions[0].validation.sessions,
+        )
+        if any(
+            (partition.train.sessions, partition.validation.sessions)
+            != reference_sessions
+            for partition in self.partitions[1:]
+        ):
+            raise ValueError("split sessions differ across frozen dependencies")
         return self
 
 
@@ -440,6 +496,8 @@ def _verify_dataset(
 
     bars_path = f"{expected.path}/bars.parquet"
     _, bars_bytes = _exact_file(repository_root, bars_path)
+    if sha256(bars_bytes).hexdigest() != expected.bars_sha256:
+        raise Phase3DependencyError(f"normalized Parquet digest mismatch: {symbol}")
     bars_artifact = _artifact_identity_from_bytes(
         bars_path, "phase3_normalized_dataset", bars_bytes
     )
