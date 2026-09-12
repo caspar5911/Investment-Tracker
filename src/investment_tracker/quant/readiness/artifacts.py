@@ -12,7 +12,7 @@ from .hashing import (
     ArtifactIdentityError,
     artifact_identity,
     canonical_json_bytes,
-    exact_file_sha256,
+    canonical_sha256,
     normalize_repository_path,
 )
 from .models import ReadinessArtifactIdentity
@@ -25,6 +25,12 @@ class ReadinessArtifactIntegrityError(RuntimeError):
 class ReadinessArtifactStore:
     def __init__(self, repository_root: Path, results_root: Path) -> None:
         repository = Path(repository_root)
+        try:
+            normalize_repository_path(repository, Path(".readiness-root-check"))
+        except ArtifactIdentityError as exc:
+            raise ReadinessArtifactIntegrityError(
+                f"repository root is invalid: {exc}"
+            ) from exc
         try:
             repository = repository.resolve(strict=True)
         except OSError as exc:
@@ -116,8 +122,6 @@ class ReadinessArtifactStore:
             raise ReadinessArtifactIntegrityError(
                 f"artifact identity verification failed: {path}"
             ) from exc
-        if identity.content_sha256 != exact_file_sha256(path):
-            raise ReadinessArtifactIntegrityError("artifact content hash mismatch")
         try:
             actual_bytes = path.read_bytes()
         except OSError as exc:
@@ -181,7 +185,11 @@ class ReadinessArtifactStore:
                         f"immutable artifact destination is non-regular: {destination}"
                     )
                 return self._identity_for(destination, guarded_kind, payload)
-            os.replace(temporary, destination)
+            try:
+                os.link(temporary, destination)
+            except FileExistsError:
+                return self._identity_for(destination, guarded_kind, payload)
+            temporary.unlink()
             temporary = None
         except ReadinessArtifactIntegrityError:
             raise
@@ -226,7 +234,10 @@ class ReadinessArtifactStore:
             raise ReadinessArtifactIntegrityError("readiness artifact text must be a string")
         return self._write_bytes(kind, filename, text.encode("utf-8"))
 
-    def verify(self, identity: ReadinessArtifactIdentity) -> Path:
+    def _read_verified_bytes(
+        self,
+        identity: ReadinessArtifactIdentity,
+    ) -> tuple[Path, bytes]:
         logical = PurePosixPath(identity.path)
         path = self._repository_root.joinpath(*logical.parts)
         expected = self._destination(
@@ -246,39 +257,46 @@ class ReadinessArtifactStore:
                 f"artifact is missing or non-regular: {path}"
             )
         try:
-            actual_content_sha256 = exact_file_sha256(path)
-            actual_identity = artifact_identity(
-                self._repository_root,
-                path,
-                identity.kind,
-            )
-        except (ArtifactIdentityError, OSError, ValueError) as exc:
+            payload = path.read_bytes()
+        except OSError as exc:
             raise ReadinessArtifactIntegrityError(
-                f"artifact verification failed: {path}"
+                f"artifact is unreadable: {path}"
             ) from exc
+        actual_content_sha256 = sha256(payload).hexdigest()
         if actual_content_sha256 != identity.content_sha256:
             raise ReadinessArtifactIntegrityError(
                 "artifact content hash mismatch: "
                 f"expected {identity.content_sha256}, got {actual_content_sha256}"
             )
-        if actual_identity != identity:
+        actual_envelope_sha256 = canonical_sha256(
+            {
+                "content_sha256": actual_content_sha256,
+                "kind": identity.kind,
+                "path": normalized,
+            }
+        )
+        if actual_envelope_sha256 != identity.sha256:
             raise ReadinessArtifactIntegrityError("artifact envelope identity mismatch")
+        return path, payload
+
+    def verify(self, identity: ReadinessArtifactIdentity) -> Path:
+        path, _ = self._read_verified_bytes(identity)
         return path
 
     def read_json(self, identity: ReadinessArtifactIdentity) -> Any:
-        path = self.verify(identity)
+        path, payload = self._read_verified_bytes(identity)
         try:
-            return json.loads(path.read_bytes())
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            return json.loads(payload)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise ReadinessArtifactIntegrityError(
                 f"artifact JSON is unreadable or invalid: {path}"
             ) from exc
 
     def read_text(self, identity: ReadinessArtifactIdentity) -> str:
-        path = self.verify(identity)
+        path, payload = self._read_verified_bytes(identity)
         try:
-            return path.read_bytes().decode("utf-8")
-        except (OSError, UnicodeDecodeError) as exc:
+            return payload.decode("utf-8")
+        except UnicodeDecodeError as exc:
             raise ReadinessArtifactIntegrityError(
                 f"artifact text is unreadable or not UTF-8: {path}"
             ) from exc
