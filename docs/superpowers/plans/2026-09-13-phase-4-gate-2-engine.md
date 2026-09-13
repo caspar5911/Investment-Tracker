@@ -63,8 +63,12 @@ at approved commit `4449bedbd80ec52bce0363f0c6df4768c4818a08`.
 - Write new evidence only under `results/phase4/gate2/`; publish the engine
   manifest last. Do not modify or weaken the Windows symlink test.
 - Every task is sequential: failing tests, intended RED, minimal
-  implementation, focused GREEN, relevant regressions, independent task
-  review, commit, then the next task.
+  implementation, focused GREEN, relevant regressions, self-review, task
+  commit, independent task review/fix loop, then the next task. The controller
+  always reviews the full committed task range before allowing its dependent
+  task to start.
+- Imports of a not-yet-created module must occur inside the first test body so
+  RED is an intended test-execution failure, not a pytest collection error.
 
 ---
 
@@ -122,8 +126,9 @@ at approved commit `4449bedbd80ec52bce0363f0c6df4768c4818a08`.
   python -m pytest tests/quant/test_phase4_gate2_authority.py tests/quant/test_phase4_gate2_contracts.py -q
   ```
 
-  Expected: collection fails because `investment_tracker.quant.phase4.engine`
-  and the declared authority/models do not exist.
+  Expected: the dynamic-import test fails because
+  `investment_tracker.quant.phase4.engine` and the declared authority/models
+  do not exist.
 
 - [ ] **Step 4: Implement the finite terminal authority**
 
@@ -142,15 +147,17 @@ at approved commit `4449bedbd80ec52bce0363f0c6df4768c4818a08`.
   python -m pytest tests/quant/test_phase4_gate1_contracts.py tests/quant/test_phase4_gate1_seal.py tests/quant/test_phase4_readiness_contracts.py tests/quant/test_phase4_trial_authority.py -q
   ```
 
-- [ ] **Step 6: Review and commit**
+- [ ] **Step 6: Self-review and commit**
 
-  Review the diff against the approved specification, obtain independent task
-  review with both spec-compliance and code-quality verdicts, resolve all
-  Critical/Important findings, then commit:
+  Review the diff against the approved specification, then commit:
 
   ```text
   feat: add Gate 2 authority boundary
   ```
+
+  The controller must then package the complete task range, obtain independent
+  spec-compliance and code-quality verdicts, and resolve every
+  Critical/Important finding through reviewed fix commits before Task 2.
 
 ### Task 2: Immutable Synthetic Market Boundary
 
@@ -187,11 +194,12 @@ at approved commit `4449bedbd80ec52bce0363f0c6df4768c4818a08`.
   python -m pytest tests/quant/test_phase4_gate2_market.py -q
   ```
 
-  Expected: import failure for the missing market types.
+  Expected: the dynamic-import test fails for the missing market types.
 
 - [ ] **Step 3: Implement minimal immutable panels**
 
-  Normalize columns by ascending symbol, require exact UTC-midnight `DatetimeIndex`,
+  Require columns already equal their ascending-symbol canonical order and
+  preserve that order; require an exact UTC-midnight `DatetimeIndex`,
   coerce once to `float64`, reject values whose exact admitted representation
   is invalid, mark internal arrays read-only, and derive canonical identities
   from role, symbols, ISO session labels, and `float.hex()` open/close rows.
@@ -202,13 +210,16 @@ at approved commit `4449bedbd80ec52bce0363f0c6df4768c4818a08`.
   python -m pytest tests/quant/test_phase4_gate2_market.py tests/quant/test_phase4_validation_boundary.py tests/quant/test_data_validation.py -q
   ```
 
-- [ ] **Step 5: Independently review and commit**
+- [ ] **Step 5: Self-review and commit, then independent gate**
 
-  Resolve review findings and commit:
+  Self-review and commit:
 
   ```text
   feat: validate Gate 2 market inputs
   ```
+
+  The controller independently reviews the committed range and completes any
+  reviewed fix loop before Task 3.
 
 ### Task 3: Fixed Strategy Bindings, Allocations, and Four Target Algorithms
 
@@ -274,13 +285,16 @@ at approved commit `4449bedbd80ec52bce0363f0c6df4768c4818a08`.
   python -m pytest tests/quant/test_phase4_gate2_allocation.py tests/quant/test_phase4_gate2_strategies.py tests/quant/test_phase4_gate1_grids.py tests/quant/test_strategies.py -q
   ```
 
-- [ ] **Step 6: Independently review and commit**
+- [ ] **Step 6: Self-review and commit, then independent gate**
 
-  Resolve findings and commit:
+  Self-review and commit:
 
   ```text
   feat: implement Gate 2 strategy targets
   ```
+
+  The controller independently reviews the committed range and completes any
+  reviewed fix loop before Task 4.
 
 ### Task 4: Next-Session-Open Portfolio Ledger and Benchmarks
 
@@ -308,8 +322,9 @@ at approved commit `4449bedbd80ec52bce0363f0c6df4768c4818a08`.
   `t+1`; strict timestamp order; a final signal never fills; old units receive
   close-to-next-open movement; new units receive only open-to-close movement;
   sells precede buys; one-way friction uses reference-open notional; fractional
-  units and residual cash; buy scaling under high friction; zero/negative
-  cash, units, targets, and exposure are impossible.
+  units and residual cash; buy scaling under high friction; zero cash, units,
+  targets, and exposure remain valid where the reset/cash contract requires
+  them, while every negative value is impossible.
 
 - [ ] **Step 2: Write rebalance and benchmark RED tests**
 
@@ -340,13 +355,16 @@ at approved commit `4449bedbd80ec52bce0363f0c6df4768c4818a08`.
   python -m pytest tests/quant/test_phase4_gate2_execution.py tests/quant/test_phase4_gate2_benchmarks.py tests/quant/test_backtest_engine.py tests/quant/test_metrics_and_benchmarks.py -q
   ```
 
-- [ ] **Step 6: Independently review and commit**
+- [ ] **Step 6: Self-review and commit, then independent gate**
 
-  Resolve findings and commit:
+  Self-review and commit:
 
   ```text
   feat: add Gate 2 portfolio execution
   ```
+
+  The controller independently reviews the committed range and completes any
+  reviewed fix loop before Task 5.
 
 ### Task 5: Supported Metrics and Durability Evidence
 
@@ -409,13 +427,16 @@ at approved commit `4449bedbd80ec52bce0363f0c6df4768c4818a08`.
   python -m pytest tests/quant/test_phase4_gate2_metrics.py tests/quant/test_phase4_gate2_durability.py tests/quant/test_phase4_gate1_policies.py tests/quant/test_metrics_and_benchmarks.py -q
   ```
 
-- [ ] **Step 6: Independently review and commit**
+- [ ] **Step 6: Self-review and commit, then independent gate**
 
-  Resolve findings and commit:
+  Self-review and commit:
 
   ```text
   feat: add Gate 2 metrics and durability
   ```
+
+  The controller independently reviews the committed range and completes any
+  reviewed fix loop before Task 6.
 
 ### Task 6: Friction, Bootstrap, Neighborhood, Fold, Regime, and Budget Plumbing
 
@@ -480,13 +501,16 @@ at approved commit `4449bedbd80ec52bce0363f0c6df4768c4818a08`.
   python -m pytest tests/quant/test_phase4_gate2_robustness.py tests/quant/test_phase4_gate2_budget.py tests/quant/test_robustness_scoring.py tests/quant/test_phase4_gate1_policies.py tests/quant/test_phase4_gate1_grids.py -q
   ```
 
-- [ ] **Step 6: Independently review and commit**
+- [ ] **Step 6: Self-review and commit, then independent gate**
 
-  Resolve findings and commit:
+  Self-review and commit:
 
   ```text
   feat: add Gate 2 robustness and budget
   ```
+
+  The controller independently reviews the committed range and completes any
+  reviewed fix loop before Task 7.
 
 ### Task 7: Evaluation Identities and Immutable Gate 2 Artifact Store
 
@@ -546,13 +570,16 @@ at approved commit `4449bedbd80ec52bce0363f0c6df4768c4818a08`.
   python -m pytest tests/quant/test_phase4_gate2_evidence.py tests/quant/test_phase4_gate2_artifacts.py tests/quant/test_phase4_gate1_artifacts.py tests/quant/test_cache_repository.py -q
   ```
 
-- [ ] **Step 6: Independently review and commit**
+- [ ] **Step 6: Self-review and commit, then independent gate**
 
-  Resolve findings and commit:
+  Self-review and commit:
 
   ```text
   feat: add Gate 2 evidence storage
   ```
+
+  The controller independently reviews the committed range and completes any
+  reviewed fix loop before Task 8.
 
 ### Task 8: Implementation Bundles and Synthetic Conformance
 
@@ -568,8 +595,10 @@ at approved commit `4449bedbd80ec52bce0363f0c6df4768c4818a08`.
 - Produces `source_bundle_identity(repository_root, producing_revision,
   paths) -> SourceBundleIdentity`, requiring each worktree byte to equal its
   Git blob and hashing the ordered POSIX path to `{git_blob,content_sha256}`.
-- Produces per-family, execution, metric, durability, robustness, budget,
-  evidence, authority, artifact, conformance, and seal bundle identities.
+- Produces bundle-membership rules and identities for every source that exists
+  through Task 8. A temporary-Git fixture proves the seal-bundle rule; the
+  production seal and CLI bundle identities are first finalized in Task 9,
+  after those source files exist and are committed.
 - Produces `run_synthetic_conformance(authority, bundle_set) ->
   SyntheticConformanceRecord` labeled `SYNTHETIC_CONFORMANCE_ONLY` with
   `phase4_trials_consumed=0`, fixture/configuration digests, invariant results,
@@ -612,13 +641,16 @@ at approved commit `4449bedbd80ec52bce0363f0c6df4768c4818a08`.
   python -m pytest tests/quant/test_phase4_gate2_source_identity.py tests/quant/test_phase4_gate2_conformance.py tests/quant/test_phase4_gate2_authority.py tests/quant/test_phase4_gate2_market.py tests/quant/test_phase4_gate2_strategies.py tests/quant/test_phase4_gate2_execution.py tests/quant/test_phase4_gate2_metrics.py tests/quant/test_phase4_gate2_durability.py tests/quant/test_phase4_gate2_robustness.py tests/quant/test_phase4_gate2_budget.py -q
   ```
 
-- [ ] **Step 6: Independently review and commit**
+- [ ] **Step 6: Self-review and commit, then independent gate**
 
-  Resolve findings and commit:
+  Self-review and commit:
 
   ```text
   feat: add Gate 2 synthetic conformance
   ```
+
+  The controller independently reviews the committed range and completes any
+  reviewed fix loop before Task 9.
 
 ### Task 9: Engine Seal, Report, and Provider-Free CLI
 
@@ -681,13 +713,16 @@ at approved commit `4449bedbd80ec52bce0363f0c6df4768c4818a08`.
   python -m pytest -q
   ```
 
-- [ ] **Step 6: Independently review and commit**
+- [ ] **Step 6: Self-review and commit, then independent gate**
 
-  Resolve findings and commit:
+  Self-review and commit:
 
   ```text
   feat: seal Phase 4 Gate 2 engine
   ```
+
+  The controller independently reviews the committed range and completes any
+  reviewed fix loop before executing Task 10.
 
 ### Task 10: Execute the Fixed Gate 2 Seal and Independently Verify It
 
