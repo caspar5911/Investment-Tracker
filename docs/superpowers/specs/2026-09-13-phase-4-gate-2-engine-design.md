@@ -66,11 +66,32 @@ The exact Gate 1 authority is:
 
 The Gate 2 preflight must load the manifest by this exact path, validate its
 exact bytes and canonical envelope, model-validate it with unknown fields
-forbidden, and verify every linked artifact by exact content digest, kind,
-portable repository-relative POSIX path, and envelope identity. It must
-rederive all family, rule-set, parameter-tuple, candidate, trial, population,
-and budget identities. It must verify that the Gate 1 producing revision and
-readiness-revalidation revision are ancestors of the Gate 2 source revision.
+forbidden, and verify the following finite direct-read allowlist by exact
+content digest, kind, portable repository-relative POSIX path, and envelope
+identity:
+
+- the Gate 1 manifest itself;
+- its direct `baseline_definitions`, `deterministic_grids`,
+  `durability_policy`, `family_budget_policy`, `information_access_policy`,
+  `research_report`, `strategy_family_definitions`, and `survivor_policy`
+  artifacts;
+- its direct `hypothesis_journal` and `source_journal` exact-byte identities;
+  and
+- its direct `readiness_manifest`, `split_manifest`, and `trial_authority`
+  artifacts.
+
+This allowlist is terminal. The verifier must not recursively open any
+resource referenced by the readiness manifest, split manifest, trial
+authority, journals, or other allowlisted artifact. In particular, Phase 3
+dataset identities, bootstrap source/vector identities, Phase 3 evidence
+identities, and protected-tree digests are verified as already-sealed metadata
+fields only. Their referenced resources are not traversed, rehashed, opened,
+or enumerated by Gate 2. Duplicate direct references must agree exactly.
+
+From the finite allowlist, the preflight rederives all family, rule-set,
+parameter-tuple, candidate, trial, population, and budget identities. It must
+verify that the Gate 1 producing revision and readiness-revalidation revision
+are ancestors of the Gate 2 source revision.
 
 No timestamp, filesystem order, modification time, directory enumeration,
 glob, or “latest” lookup may select an authority. A missing, substituted,
@@ -145,9 +166,9 @@ src/investment_tracker/quant/phase4/engine/
 
 Responsibilities are deliberately narrow:
 
-- `authority.py` verifies the exact sealed Gate 1 dependency graph and
-  produces a read-only implementation authority. It has no generic file,
-  cache, data, network, provider, or discovery API.
+- `authority.py` verifies exactly the finite direct-read allowlist above and
+  produces a read-only implementation authority. It has no recursive walker
+  and no generic file, cache, data, network, provider, or discovery API.
 - `models.py` contains frozen, extra-forbidden domain and evidence schemas.
 - `market.py` validates caller-supplied in-memory multi-asset `open` and
   `close` panels and separates read-only warm-up history from scored sessions.
@@ -188,7 +209,9 @@ cash and allocation semantics.
 
 `MarketPanel` is an immutable defensive copy with:
 
-- one unique, strictly increasing, timezone-aware session index;
+- one unique, strictly increasing UTC-midnight session-label index, where each
+  label is the canonical date of one admitted XNYS session rather than a
+  representation of the exchange's wall-clock open or close;
 - a stable ordered symbol tuple;
 - one `open` and one `close` binary64 column per symbol;
 - finite, strictly positive prices;
@@ -205,6 +228,11 @@ governed next-session-open execution convention.
 Duplicate sessions or symbols, missing or extra values, nonfinite or
 nonpositive prices, timezone-naive indices, mismatched columns, noncanonical
 symbol order, or mutation after construction fail before any strategy call.
+Any non-midnight label, non-UTC timezone, or duplicate canonical session date
+also fails. Evidence records pair each canonical label with an event phase
+(`OPEN` or `CLOSE`); their `signal_timestamp` and `fill_timestamp` fields are
+the UTC session labels. The phase and distinct ordered labels make the daily
+event order explicit without fabricating intraday provider timestamps.
 
 `ScoredMarketInput` contains two separately identified panels:
 
@@ -257,9 +285,12 @@ may evolve only its causal lagged indicator state and fixed rebalance clock.
 Rebalance clocks are anchored on the first scored session. A family with a
 parameterized interval recomputes on scored offsets `0, interval, 2*interval,
 ...`; volatility-managed relative momentum uses its sealed structural
-interval of 21 sessions. Between eligible rebalances the previous target is
-held. An unavailable required indicator at an eligible rebalance admits no
-risky asset and targets cash.
+interval of 21 sessions. An eligible rebalance creates one fresh target
+instruction after that session's close. Between eligible rebalances the last
+target remains the fixed reporting intent, but units are preserved and no
+fresh instruction or fill is generated. An unavailable required indicator at
+an eligible rebalance admits no risky asset and creates a target-cash
+instruction.
 
 ## Strategy Algorithms
 
@@ -360,10 +391,21 @@ At each scored session:
 The reference price recorded in every fill is exactly the QFQ-normalized open.
 Turnover is the sum of absolute fill notional. Target and realized weights are
 distinct: friction can leave a small additional cash residual, but it cannot
-create leverage. A target identical within absolute tolerance `1e-12` creates
-no fill.
+create leverage. At a scheduled open execution, pre-cost open equity is
+`cash + sum(units[symbol] * open[symbol])`. Desired risky notional is the
+pending target weight multiplied by that open equity. Trade deltas compare
+those desired notionals with the current units marked at that same open; they
+must never be compared merely with the previous requested target. A delta is
+zero only when its absolute notional is no greater than
+`1e-12 * max(1.0, pre_cost_open_equity)`. If every delta is zero, no fill is
+recorded. Thus an unchanged requested target still rebalances on its next
+scheduled execution when price drift changed realized weights. A
+non-rebalance session preserves units and cannot create a fill.
 
-The first close-equity observation equals initial cash when there was no
+Phase 4 uses initial cash exactly `100000.0`, matching the committed governed
+research default and readiness reset fixtures. It permits fractional units,
+earns no cash interest, and is bound into every evaluation context. The first
+close-equity observation equals initial cash when there was no
 eligible prior fill. Daily scored returns are `close_equity.pct_change()` and
 therefore a 1,008-session scored panel produces 1,007 daily returns. No return
 is synthesized for the reset boundary.
@@ -382,6 +424,15 @@ performance, alter a rebalance date, or change an identity. The engine records
 fill-level friction, total turnover, and close equity separately for each
 case. Gate 2 tests this behavior with synthetic inputs but publishes no Phase
 4 candidate performance.
+
+The authoritative `PRIMARY` case is exactly total one-way friction of 3 basis
+points. Primary metrics, daily-return bootstrap input, durability evidence,
+walk-forward fold evidence, regime evidence, neighbor evaluation, benchmark
+excess used by family-stop state, and every survivor input not explicitly
+named as another friction case must derive from this same 3-basis-point return
+series. The 25-basis-point hard gate and 0/10/25/50-basis-point diagnostics are
+separate cases. The friction-retention ratio remains 25-basis-point total
+return divided by 3-basis-point total return.
 
 ## Benchmarks and Cash
 
@@ -419,6 +470,23 @@ From one scored close-equity series, Gate 2 supports:
 - average and session-level target and realized gross exposure; and
 - time in market.
 
+Sampling is frozen as follows. Each scored session records post-fill,
+close-marked equity and realized gross exposure
+`sum(units * close) / close_equity`. The average gross exposure is the
+arithmetic mean of those values over every scored close, including the reset
+session. The session-level target exposure is the sum of the last fixed target
+intent, starting at zero before the first scored close creates a target; it is
+carried for reporting between rebalances but does not instruct a trade.
+Time in market is the fraction of all scored closes whose risky market value
+is strictly positive. Annualized one-way turnover uses mean close equity over
+all scored closes in its denominator and `len(scored_closes) - 1` scored
+return sessions in its annualization factor:
+
+```text
+(sum(abs(fill_notional)) / mean(all scored close equity))
+* (252 / (number of scored close observations - 1))
+```
+
 Nonfinite inputs, a nonpositive equity observation, insufficient observations,
 or a zero denominator produce an explicit `UNKNOWN` with a reason where the
 metric is not mathematically defined. Missing values are never replaced by
@@ -450,7 +518,12 @@ session authority. It reports ordered calendar-month and calendar-year
 returns, positive-period percentages, average positive and negative month,
 worst month and year, longest strictly negative monthly sequence with zero
 breaking a sequence, rolling 12- and 36-calendar-month returns, positive year
-concentration, and top-three-positive-month concentration.
+and positive month concentration, and top-three-positive-month concentration.
+For each 12- and 36-calendar-month rolling series it also reports the ordered
+anchor/endpoint/return observations, minimum, median, and strictly
+positive-window percentage. The generic downstream 60-calendar-month path is
+implemented and tested for Phase 5 compatibility but is not a required Phase
+4 candidate field.
 
 A calendar period is complete only when its scored sessions exactly equal the
 expected admitted sessions for that period. An incomplete period is retained
@@ -524,11 +597,22 @@ phase4_new_trials_remaining = 3000
 first_phase4_budget_position = 1
 ```
 
-Only an exact sealed Phase 4 `trial_id` at its next contiguous preassigned
-position can transition the state. The transition occurs before a future
-evaluation starts. A repeated representation of the same trial returns the
-existing position without additional consumption. A baseline or Phase 2 trial
-cannot transition the state. Candidate 1 consumes position 1, not 137.
+Three counters are distinct:
+
+- immutable `population_position` is the sealed candidate's position 1 through
+  180 and is never renumbered;
+- `traversal_cursor` advances through sealed family/grid order and may pass
+  terminally skipped population positions; and
+- `phase4_new_trials_consumed` counts attempted unique Phase 4 trial IDs only.
+
+Only the exact sealed Phase 4 `trial_id` at the current traversal cursor may
+transition from `UNATTEMPTED` to `CONSUMED`. Consumption occurs before a future
+evaluation starts. A repeated representation of the same trial returns its
+existing immutable population position and consumption ordinal without
+additional consumption. A baseline or Phase 2 trial cannot transition the
+state. Candidate at population position 1 has consumption ordinal 1, not 137.
+Skipped population positions never consume budget and never receive a
+consumption ordinal.
 
 Family-stop state accepts candidate outcomes only in sealed family/grid order.
 Exactly 50 consecutive nonpositive or unavailable VALIDATION benchmark-excess
@@ -538,6 +622,28 @@ absolute-return, exposure, turnover, or other robustness failures do not
 increment the streak and cannot terminate a family. System errors produce
 `CAMPAIGN_EXECUTION_FAILED`, not a research stop reason.
 
+Each allowed terminal transition is deterministic:
+
+- `PERSISTENT_OOS_FAILURE` marks every remaining `UNATTEMPTED` row in that
+  family `SKIPPED_FAMILY_STOP`, advances the cursor to the first row of the
+  next family, and leaves consumption unchanged for skipped rows;
+- `EXHAUSTED_GRID` is recorded only after every non-skipped row in the family
+  was attempted and advances to the next family without creating skipped
+  rows;
+- `PER_FAMILY_BUDGET_EXHAUSTED` marks unattempted rows in that family skipped
+  and advances to the next family; it is unreachable for the sealed 54/36/36/54
+  grids but remains fail-closed plumbing for a future preregistered population;
+- `AGGREGATE_BUDGET_EXHAUSTED` marks every remaining unattempted campaign row
+  skipped and terminates traversal; it is unreachable for this 180-candidate
+  population starting from zero; and
+- `CAMPAIGN_EXECUTION_FAILED` terminates the campaign after the already-started
+  candidate remains consumed and creates no research stop reason.
+
+A mandatory fixture consumes positions 1 through 50 as consecutive OOS
+failures, marks positions 51 through 54 skipped without consumption, then
+allows population position 55 to consume ordinal 51. Identity and population
+positions remain unchanged.
+
 Gate 2 tests these pure transitions with synthetic outcomes. It does not
 consume or persist an operational Phase 4 trial position.
 
@@ -546,6 +652,25 @@ consume or persist an operational Phase 4 trial position.
 Every future evaluation case is identified independently from its artifact:
 
 ```text
+evaluation_context_sha256 = SHA-256(canonical_json({
+  schema_version: "PHASE4-EVALUATION-CONTEXT-v1",
+  campaign_id,
+  market_panel_sha256,
+  warmup_panel_sha256,
+  scored_panel_sha256,
+  scored_reset_configuration_sha256,
+  expected_sessions_authority_sha256,
+  fold_authority_sha256,
+  fold_authority_status,
+  regime_authority_sha256,
+  regime_authority_status,
+  initial_cash_float64_hex,
+  primary_friction_bps,
+  execution_convention,
+  execution_series,
+  decision_grade
+}))
+
 evaluation_case_sha256 = SHA-256(canonical_json({
   schema_version: "PHASE4-EVALUATION-CASE-v1",
   candidate_id,
@@ -553,6 +678,7 @@ evaluation_case_sha256 = SHA-256(canonical_json({
   rule_set_sha256,
   parameter_tuple_sha256,
   engine_implementation_sha256,
+  evaluation_context_sha256,
   evidence_kind,
   case_id
 }))
@@ -563,6 +689,16 @@ bootstrap configuration ID, or `PRIMARY`. It never contains an observed
 metric. Artifact identity remains SHA-256 of the canonical envelope containing
 the exact-byte content digest, normalized repository-relative POSIX path, and
 artifact kind.
+
+Panel identities bind canonical symbol order, UTC session labels, exact
+binary64 open/close values, and warm-up/scored role. Reset configuration binds
+the validation boundary and zero-position/zero-pending/zero-turnover reset.
+The expected-session authority binds its exact ordered labels. Before exact
+fold or regime authorities exist, the corresponding digest is `null` and the
+status is respectively `FOLD_AUTHORITY_MISSING` or
+`REGIME_AUTHORITY_MISSING`; fold/regime cases cannot execute. Once those
+authorities are separately approved, their digests create a different context
+identity rather than reusing synthetic or primary evidence identities.
 
 Evidence models reject extra fields. They require identity agreement across
 all cases and distinguish numeric zero from unavailable evidence. Gate 2 does
@@ -616,7 +752,8 @@ existing bytes fail closed. The manifest is the final fallible write.
 - producing Git revision and runtime dependency identity;
 - exact starting revision;
 - exact Gate 1 manifest content and envelope identities;
-- all verified linked Gate 1/readiness artifact identities;
+- all identities in the finite Gate 1 direct-read allowlist, plus terminal
+  readiness metadata identities without recursive traversal;
 - candidate-population digest, four family identities, and exactly 180
   candidate bindings;
 - engine source-bundle and per-family implementation-bundle identities;
@@ -695,14 +832,19 @@ manifest after any failure. Required codes include:
 
 No failure handler repairs, deletes, truncates, substitutes, downloads,
 discovers a newer artifact, changes a rule, retries with a different parameter,
-or relaxes an invariant. Historical artifacts are hashed before and after the
-operation and must remain byte-identical.
+or relaxes an invariant. Every file in the finite direct-read allowlist is
+hashed before and after the operation and must remain byte-identical. Terminal
+dataset, Phase 2/3, bootstrap, and protected-tree metadata identities remain
+recorded but their referenced files and trees are not traversed. Repository
+status must show no mutation outside the newly created Gate 2 artifact root.
 
 ## Required Tests
 
 ### Authority and isolation
 
 - exact Gate 1 and linked artifact identities validate;
+- reads cannot escape the explicit terminal direct-read allowlist or recurse
+  through dataset, bootstrap, Phase 2/3, or protected-tree references;
 - missing, substituted, malformed, symlinked, noncanonical, or nonancestor
   authority fails before engine invocation;
 - regenerated family/grid/candidate/trial/population identities reproduce;
@@ -741,6 +883,8 @@ operation and must remain byte-identical.
 - targets and realized exposures remain long-only and unlevered;
 - high friction proportionally scales buys and cannot create negative cash;
 - residual allocation remains cash;
+- unchanged targets still rebalance against drifted open holdings on scheduled
+  executions, while non-rebalance sessions preserve units and create no fill;
 - first scored equity equals reset initial cash and 1,008 sessions imply 1,007
   daily returns;
 - mutation, NaN, infinity, nonpositive prices, misalignment, duplicates, and
@@ -772,22 +916,31 @@ operation and must remain byte-identical.
 - Gregorian 12/36/60-month anchoring handles weekends, holidays, month ends,
   and leap years without fixed-session proxies;
 - concentration and empty-denominator `UNKNOWN` behavior reproduce;
+- monthly and yearly positive-return concentration and rolling 12/36-month
+  minimum, median, and positive-window percentage all reproduce;
 - bootstrap uses exactly 2,000 draws, seed 0, the median-daily-return
   statistic, and 5th/95th percentiles;
 - neighbors come only from adjacent sealed grid values;
 - missing fold or regime authority fails closed rather than inferring one;
-- friction cases are exactly 0/3/10/25/50 bps and cannot alter signals.
+- friction cases are exactly 0/3/10/25/50 bps and cannot alter signals;
+- `PRIMARY` is exactly 3 bps and primary, bootstrap, fold, regime, neighbor,
+  durability, benchmark-excess stop, and survivor inputs use that series.
 
 ### Budget, evidence, and sealing
 
 - 136 historical trials never consume Phase 4 budget;
 - initial Phase 4 consumption is zero and first candidate position is one;
+- population position, traversal cursor, and consumption ordinal remain
+  distinct; a stop at position 50 skips 51-54 and consumes position 55 as
+  ordinal 51 without renumbering;
 - duplicate representations cannot consume twice;
 - baseline identities cannot enter the Phase 4 budget ledger;
 - isolated robustness failures cannot increment or terminate the OOS streak;
 - exactly 50 consecutive nonpositive/unavailable benchmark-excess outcomes
   stop a family and a positive outcome resets the streak;
-- candidate and implementation identities bind every synthetic evidence case;
+- candidate, implementation, panel, reset, session-authority, and available or
+  explicitly missing fold/regime identities bind every synthetic evidence
+  case;
 - evidence cannot contain a rank, winner, eligibility result, or unsealed
   metric;
 - content-addressed artifacts reject collision, symlink, path escape,
