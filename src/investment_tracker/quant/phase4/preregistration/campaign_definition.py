@@ -1,0 +1,333 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+from .canonical import source_identity
+from .policy import HypothesisRecord, ResearchSource, SourceTier
+
+
+RETRIEVED_AT = datetime(2026, 9, 13, 8, 0, tzinfo=timezone.utc)
+
+
+def _source(**values: object) -> ResearchSource:
+    bibliographic = ResearchSource.bibliographic_identity(values)
+    return ResearchSource(
+        source_id=source_identity(bibliographic),
+        retrieved_at=RETRIEVED_AT,
+        citation_verified=True,
+        phase4_validation_information_used=False,
+        missing_fact_explanations={},
+        **values,
+    )
+
+
+RESEARCH_SOURCES = (
+    _source(
+        title="Time Series Momentum",
+        authors=["Tobias J. Moskowitz", "Yao Hua Ooi", "Lasse Heje Pedersen"],
+        publication="Journal of Financial Economics",
+        year=2012,
+        canonical_url="https://doi.org/10.1016/j.jfineco.2011.11.003",
+        source_type=SourceTier.PEER_REVIEWED_ACADEMIC,
+        evidence_role="SUPPORT",
+        methodology="Tests an asset's own lagged excess return as a directional signal across liquid futures.",
+        asset_classes="Equity indices, currencies, commodities, and sovereign bonds via futures.",
+        test_period="Multiple decades ending before publication; exact samples vary by contract.",
+        strategy_concept="Time-series momentum and trend following.",
+        reported_parameters_horizons="Signals and holding periods spanning approximately one to twelve months.",
+        mechanism="Persistent information diffusion and position adjustment can create continuation followed by longer-horizon reversal.",
+        claimed_findings="The paper reports return continuation from an instrument's own past return across several asset classes.",
+        limitations="Uses futures, includes long and short positions, and does not establish ETF execution economics or QFQ fill realism.",
+        frozen_universe_relevance="Supports own-history directional signals, subject to long-only ETF and common-history transfer limits.",
+        primary_evidence_eligible=True,
+        primary_evidence_eligibility_reason="Peer-reviewed direct empirical evidence for the signal mechanism.",
+    ),
+    _source(
+        title="Value and Momentum Everywhere",
+        authors=["Clifford S. Asness", "Tobias J. Moskowitz", "Lasse Heje Pedersen"],
+        publication="The Journal of Finance",
+        year=2013,
+        canonical_url="https://doi.org/10.1111/jofi.12021",
+        source_type=SourceTier.PEER_REVIEWED_ACADEMIC,
+        evidence_role="SUPPORT",
+        methodology="Compares value and cross-sectional momentum premia across markets and asset classes.",
+        asset_classes="Individual equities, equity indices, currencies, government bonds, and commodities.",
+        test_period="Long international samples with availability varying by asset class.",
+        strategy_concept="Cross-sectional relative momentum.",
+        reported_parameters_horizons="Conventional multi-month momentum ranking horizons; no values are imported as performance-selected settings.",
+        mechanism="Behavioral underreaction and common risk exposures may generate momentum across markets.",
+        claimed_findings="The paper reports broadly related value and momentum effects across asset classes.",
+        limitations="Many tests are long-short and use broader instrument sets; an eight-ETF long-only rotation is a constrained transfer.",
+        frozen_universe_relevance="Supports predeclaring relative ranking while requiring cash rather than short exposure for weak assets.",
+        primary_evidence_eligible=True,
+        primary_evidence_eligibility_reason="Peer-reviewed direct evidence for cross-sectional momentum.",
+    ),
+    _source(
+        title="A Quantitative Approach to Tactical Asset Allocation",
+        authors=["Mebane T. Faber"],
+        publication="The Journal of Wealth Management",
+        year=2007,
+        canonical_url="https://doi.org/10.3905/jwm.2007.674809",
+        source_type=SourceTier.PEER_REVIEWED_ACADEMIC,
+        evidence_role="SUPPORT",
+        methodology="Applies a simple moving-average trend rule to broad asset classes.",
+        asset_classes="Broad equity, bond, commodity, and real-estate asset classes represented by liquid proxies.",
+        test_period="Long historical asset-class samples described by the article.",
+        strategy_concept="Long-only moving-average trend filter with cash defensive state.",
+        reported_parameters_horizons="A long moving-average horizon is studied; Gate 1 uses a bounded predeclared neighborhood rather than adopting fitted performance.",
+        mechanism="A slow trend filter may reduce exposure during persistent adverse regimes.",
+        claimed_findings="The article reports improved risk-adjusted characteristics for a simple tactical rule in its samples.",
+        limitations="Historical proxy series, simplified implementation, and publication-era costs do not prove current ETF results.",
+        frozen_universe_relevance="Directly motivates a simple long-only trend-filtered multi-asset allocation comparator.",
+        primary_evidence_eligible=True,
+        primary_evidence_eligibility_reason="Peer-reviewed practitioner-academic evidence directly describing the rule class.",
+    ),
+    _source(
+        title="The Properties of Equally Weighted Risk Contribution Portfolios",
+        authors=["Sébastien Maillard", "Thierry Roncalli", "Jérôme Teïletche"],
+        publication="The Journal of Portfolio Management",
+        year=2010,
+        canonical_url="https://doi.org/10.3905/JPM.2010.36.4.060",
+        source_type=SourceTier.PEER_REVIEWED_ACADEMIC,
+        evidence_role="SUPPORT",
+        methodology="Studies equal-risk-contribution portfolio construction and its diversification properties.",
+        asset_classes="Portfolio assets represented through return and covariance inputs.",
+        test_period="Analytical and empirical illustrations in the published article.",
+        strategy_concept="Risk-balanced allocation.",
+        reported_parameters_horizons="No empirical horizon is imported to choose Gate 1 values.",
+        mechanism="Balancing risk contributions can limit concentration that capital weighting may conceal.",
+        claimed_findings="The article characterizes risk-contribution portfolios between minimum-variance and equal-weight constructions.",
+        limitations="Full equal-risk contribution requires covariance optimization; inverse-volatility weighting is only a simpler related approximation.",
+        frozen_universe_relevance="Supports examining transparent risk balancing among admitted long-only ETFs.",
+        primary_evidence_eligible=True,
+        primary_evidence_eligibility_reason="Peer-reviewed primary evidence for the allocation mechanism.",
+    ),
+    _source(
+        title="Volatility-Managed Portfolios",
+        authors=["Alan Moreira", "Tyler Muir"],
+        publication="The Journal of Finance",
+        year=2017,
+        canonical_url="https://doi.org/10.1111/jofi.12513",
+        source_type=SourceTier.PEER_REVIEWED_ACADEMIC,
+        evidence_role="SUPPORT",
+        methodology="Scales portfolio exposure inversely with lagged realized variance.",
+        asset_classes="Equity and factor portfolios.",
+        test_period="Multi-decade factor and market samples reported by the article.",
+        strategy_concept="Volatility-managed exposure.",
+        reported_parameters_horizons="Lagged realized-volatility estimates; Gate 1 tests a fixed bounded grid.",
+        mechanism="Risk rises more than expected return in some high-volatility states, motivating lower exposure.",
+        claimed_findings="The paper reports improved risk-adjusted performance for several volatility-managed portfolios.",
+        limitations="Some applications imply leverage or factor portfolios; Gate 1 caps gross exposure at one and may hold cash.",
+        frozen_universe_relevance="Supports testing unlevered lagged volatility scaling of a long-only ETF selection.",
+        primary_evidence_eligible=True,
+        primary_evidence_eligibility_reason="Peer-reviewed direct evidence for volatility scaling.",
+    ),
+    _source(
+        title="Momentum Has Its Moments",
+        authors=["Pedro Barroso", "Pedro Santa-Clara"],
+        publication="Journal of Financial Economics",
+        year=2015,
+        canonical_url="https://doi.org/10.1016/j.jfineco.2014.11.010",
+        source_type=SourceTier.PEER_REVIEWED_ACADEMIC,
+        evidence_role="SUPPORT",
+        methodology="Conditions momentum exposure on an estimate of momentum volatility.",
+        asset_classes="Equity momentum portfolios.",
+        test_period="Long US equity sample reported by the article.",
+        strategy_concept="Volatility scaling intended to limit momentum crashes.",
+        reported_parameters_horizons="Uses lagged volatility estimates; no reported return determines the Gate 1 grid.",
+        mechanism="Momentum crash risk is state dependent and can be moderated by exposure scaling.",
+        claimed_findings="The paper reports substantial risk variation and improved outcomes from volatility management in its setting.",
+        limitations="Long-short equity momentum differs materially from unlevered ETF rotation and may not transfer.",
+        frozen_universe_relevance="Provides mechanism support and a warning to measure friction and crash robustness for momentum allocation.",
+        primary_evidence_eligible=True,
+        primary_evidence_eligibility_reason="Peer-reviewed direct evidence on momentum risk management.",
+    ),
+    _source(
+        title="Time Series Momentum: Is It There?",
+        authors=["Dashan Huang", "Jiangyuan Li", "Liyao Wang", "Guofu Zhou"],
+        publication="Journal of Financial Economics",
+        year=2020,
+        canonical_url="https://doi.org/10.1016/j.jfineco.2019.08.004",
+        source_type=SourceTier.PEER_REVIEWED_ACADEMIC,
+        evidence_role="COUNTEREVIDENCE",
+        methodology="Reassesses time-series momentum evidence and its statistical reliability.",
+        asset_classes="Futures across major asset classes.",
+        test_period="Historical futures samples examined in the published reassessment.",
+        strategy_concept="Counterevidence on time-series momentum inference.",
+        reported_parameters_horizons="Evaluates conventional horizons; Gate 1 imports no favorable performance number.",
+        mechanism="Apparent predictability may be sensitive to inference, specification, and sample construction.",
+        claimed_findings="The paper challenges whether conventional evidence establishes robust time-series momentum.",
+        limitations="Its futures tests do not directly settle long-only ETF behavior, but they weaken broad generalization.",
+        frozen_universe_relevance="Requires fail-closed validation, neighboring-parameter stability, and no assumption that trend must work.",
+        primary_evidence_eligible=True,
+        primary_evidence_eligibility_reason="Peer-reviewed counterevidence directly addressing the signal.",
+    ),
+    _source(
+        title="On the Performance of Volatility-Managed Portfolios",
+        authors=["Scott Cederburg", "Michael S. O'Doherty", "Feifei Wang", "Xuemin (Sterling) Yan"],
+        publication="Journal of Financial Economics",
+        year=2020,
+        canonical_url="https://doi.org/10.1016/j.jfineco.2020.04.015",
+        source_type=SourceTier.PEER_REVIEWED_ACADEMIC,
+        evidence_role="COUNTEREVIDENCE",
+        methodology="Evaluates volatility-managed portfolios across factors and samples with attention to inference.",
+        asset_classes="Market and factor portfolios.",
+        test_period="Broad historical factor samples reported in the published article.",
+        strategy_concept="Counterevidence on general volatility-management benefits.",
+        reported_parameters_horizons="Multiple specifications; no reported outcome is used for Gate 1 parameter choice.",
+        mechanism="Benefits can depend on whether expected return co-moves sufficiently with volatility and on the tested sample.",
+        claimed_findings="The article finds that volatility management is not uniformly beneficial across factors.",
+        limitations="Factor-portfolio evidence does not directly determine eight-ETF results, but defeats universal claims.",
+        frozen_universe_relevance="Requires an unlevered cap, friction tests, and explicit rejection if validation is fragile.",
+        primary_evidence_eligible=True,
+        primary_evidence_eligibility_reason="Peer-reviewed counterevidence directly testing volatility management.",
+    ),
+    _source(
+        title="A Century of Evidence on Trend-Following Investing",
+        authors=["Brian K. Hurst", "Yao Hua Ooi", "Lasse Heje Pedersen"],
+        publication="The Journal of Portfolio Management",
+        year=2017,
+        canonical_url="https://www.aqr.com/Insights/Research/Journal-Article/A-Century-of-Evidence-on-Trend-Following-Investing",
+        source_type=SourceTier.PEER_REVIEWED_ACADEMIC,
+        evidence_role="SUPPORT",
+        methodology="Extends trend-following evidence across a very long reconstructed futures history.",
+        asset_classes="Equity indices, fixed income, commodities, and currencies via futures.",
+        test_period="Approximately a century of reconstructed and modern futures evidence.",
+        strategy_concept="Long-run trend-following durability across regimes.",
+        reported_parameters_horizons="Multiple trend horizons; Gate 1 predeclares its own bounded ETF grid.",
+        mechanism="Trend behavior may recur as investors adjust slowly and manage risk under constraints.",
+        claimed_findings="The article reports positive trend-following evidence across many historical environments.",
+        limitations="Firm-authored reconstruction, futures leverage/shorting, and survivorship assumptions do not establish ETF executability.",
+        frozen_universe_relevance="Motivates regime and calendar durability reporting while preserving strict ETF transfer caveats.",
+        primary_evidence_eligible=True,
+        primary_evidence_eligibility_reason="Established quantitative-firm publication with a canonical journal-article landing page.",
+    ),
+)
+
+
+SOURCES = {source.title: source.source_id for source in RESEARCH_SOURCES}
+
+
+def _hypothesis(**values: object) -> HypothesisRecord:
+    values.setdefault("rule_set_mode", "FIXED")
+    values.setdefault("parameter_tuple_mode", "FIXED")
+    values.setdefault("annual_reoptimization", False)
+    values.setdefault("periodic_reoptimization", False)
+    values.setdefault("validation_data_accessed", False)
+    values.setdefault("validation_metrics_accessed", False)
+    values.setdefault("campaign_results_accessed", False)
+    values.setdefault("provider_calls", 0)
+    values.setdefault("strategy_search_executed", False)
+    values.setdefault("final_holdout_accessed", False)
+    values.setdefault("protected_symbols_accessed", ())
+    values["hypothesis_id"] = HypothesisRecord.identity_for(values)
+    return HypothesisRecord(**values)
+
+
+_COMMON = {
+    "expected_strengths": ("persistent directional regimes", "diversification across economically distinct ETFs"),
+    "named_failure_regimes": ("rapid reversals", "range-bound whipsaw", "correlation spikes"),
+    "rule_set_mode": "FIXED",
+    "parameter_tuple_mode": "FIXED",
+    "annual_reoptimization": False,
+    "periodic_reoptimization": False,
+    "regime_behavior_map": {
+        "broad_positive_trend": "participate subject to the fixed allocation rule",
+        "broad_negative_trend": "reduce exposure or hold cash under the fixed rule",
+        "mixed_cross_asset": "diversify only among mechanically admitted assets",
+    },
+    "regime_partition_rule": "Lagged signs and relative returns only; no boundary is fit from TRAIN or VALIDATION.",
+    "implementation_requirements": ("long-only", "gross exposure at most 1.0", "residual allocation remains cash"),
+    "anti_lookahead_requirements": ("signals use data available through session t", "orders execute on the next eligible session"),
+    "benchmark_expectations": "Compare with frozen buy-and-hold controls and cash without altering the fixed tuple.",
+    "falsification_conditions": ("fails a preregistered hard survivor gate", "lacks durable validation evidence"),
+    "lifecycle_state": "ADMITTED",
+    "family_slots_consumed": 1,
+    "rejection_reason": None,
+}
+
+
+ADMITTED_HYPOTHESES = (
+    _hypothesis(
+        **_COMMON,
+        display_name="Cross-sectional absolute momentum rotation",
+        supporting_source_ids=(SOURCES["Value and Momentum Everywhere"], SOURCES["Time Series Momentum: Is It There?"]),
+        economic_behavioral_rationale="Relative strength may persist, while a positive absolute-return filter avoids forced exposure to uniformly weak assets.",
+        signal_concept="Lagged trailing total return for all eight ETFs.",
+        entry_logic="At rebalance, admit ETFs with positive score and select the highest ranked top_k.",
+        exit_logic="Remove an ETF when it is no longer admitted or ranked in the fixed top_k.",
+        cross_sectional_ranking_logic="Descending lagged return, with a deterministic symbol tie-break.",
+        allocation_logic="Equal weight selected ETFs.", cash_rule="Unallocated and empty-selection weight remains cash.",
+        risk_rule="Long-only, no leverage, gross exposure no greater than one.",
+        rebalance_frequency="Every fixed rebalance_sessions observations.", expected_turnover_class="MEDIUM",
+        parameter_dimensions={"lookback_sessions": (63, 126, 252), "skip_sessions": (0, 21), "top_k": (1, 2, 3), "rebalance_sessions": (21, 42, 63)},
+        complete_grid_definition="Cartesian product of every declared value; no adaptive additions.", expected_candidate_count=54,
+        baseline_distinction="Adds cross-sectional ranking plus an absolute filter; no Phase 2 baseline has this rule set.",
+        simplicity_component_count=4, family_semantic_name="cross_sectional_absolute_momentum_rotation",
+    ),
+    _hypothesis(
+        **_COMMON,
+        display_name="Diversified time-series momentum",
+        supporting_source_ids=(SOURCES["Time Series Momentum"], SOURCES["The Properties of Equally Weighted Risk Contribution Portfolios"], SOURCES["Time Series Momentum: Is It There?"]),
+        economic_behavioral_rationale="Own-history continuation may identify favorable regimes while inverse volatility limits single-asset risk concentration.",
+        signal_concept="Positive lagged own-ETF trailing return.",
+        entry_logic="Admit every ETF with positive own-history score.", exit_logic="Exit when its score is non-positive.",
+        cross_sectional_ranking_logic="NOT_APPLICABLE",
+        allocation_logic="Inverse-volatility weighting with deterministic cap redistribution.", cash_rule="Residual and empty-selection weight remains cash.",
+        risk_rule="Per-asset maximum weight; long-only and unlevered.", rebalance_frequency="Every fixed rebalance_sessions observations.", expected_turnover_class="MEDIUM",
+        parameter_dimensions={"lookback_sessions": (63, 126, 252), "volatility_window": (20, 60, 120), "maximum_asset_weight": (0.25, 0.50), "rebalance_sessions": (5, 21)},
+        complete_grid_definition="Cartesian product of every declared value; no adaptive additions.", expected_candidate_count=36,
+        baseline_distinction="Combines per-ETF time-series admission with cross-asset inverse-volatility allocation.",
+        simplicity_component_count=4, family_semantic_name="diversified_time_series_momentum",
+    ),
+    _hypothesis(
+        **_COMMON,
+        display_name="Volatility-managed relative momentum",
+        supporting_source_ids=(SOURCES["Value and Momentum Everywhere"], SOURCES["Volatility-Managed Portfolios"], SOURCES["Momentum Has Its Moments"], SOURCES["On the Performance of Volatility-Managed Portfolios"]),
+        economic_behavioral_rationale="Relative momentum selection may capture persistence while lagged portfolio-volatility scaling limits exposure in unstable states.",
+        signal_concept="Positive lagged trailing return ranked across ETFs.",
+        entry_logic="Select positive-score ETFs in the fixed top_k.", exit_logic="Exit ETFs leaving the admitted top_k.",
+        cross_sectional_ranking_logic="Descending lagged return, deterministic symbol tie-break.",
+        allocation_logic="Equal weight selections before portfolio volatility scaling.", cash_rule="Scaling residual and empty-selection weight remains cash.",
+        risk_rule="Lagged covariance volatility target with gross exposure capped at one.", rebalance_frequency="Every 21 observations (structural).", expected_turnover_class="MEDIUM",
+        parameter_dimensions={"lookback_sessions": (63, 126, 252), "volatility_window": (20, 60), "target_portfolio_volatility": (0.08, 0.12, 0.16), "top_k": (1, 2, 3)},
+        complete_grid_definition="Cartesian product of every declared value; rebalance_sessions=21 is structural.", expected_candidate_count=54,
+        baseline_distinction="Adds relative ranking and portfolio-level volatility scaling under a hard unlevered cap.",
+        simplicity_component_count=5, family_semantic_name="volatility_managed_relative_momentum",
+    ),
+    _hypothesis(
+        **_COMMON,
+        display_name="Trend-filtered equal-risk allocation",
+        supporting_source_ids=(SOURCES["A Quantitative Approach to Tactical Asset Allocation"], SOURCES["The Properties of Equally Weighted Risk Contribution Portfolios"], SOURCES["A Century of Evidence on Trend-Following Investing"]),
+        economic_behavioral_rationale="A slow own-price trend filter may avoid prolonged declines while inverse volatility diversifies admitted exposures.",
+        signal_concept="Lagged close above lagged simple moving average.",
+        entry_logic="Admit ETFs above their fixed moving average.", exit_logic="Exit when no longer above the fixed moving average.",
+        cross_sectional_ranking_logic="NOT_APPLICABLE",
+        allocation_logic="Inverse-volatility weighting with deterministic cap redistribution.", cash_rule="Residual and empty-selection weight remains cash.",
+        risk_rule="Per-asset maximum weight; long-only and unlevered.", rebalance_frequency="Every fixed rebalance_sessions observations.", expected_turnover_class="LOW_TO_MEDIUM",
+        parameter_dimensions={"trend_window": (100, 150, 200), "volatility_window": (20, 60, 120), "maximum_asset_weight": (0.25, 0.50), "rebalance_sessions": (5, 21)},
+        complete_grid_definition="Cartesian product of every declared value; no adaptive additions.", expected_candidate_count=36,
+        baseline_distinction="Applies per-ETF trend admission plus diversified risk weighting, distinct from the single-series Phase 2 trend controls.",
+        simplicity_component_count=4, family_semantic_name="trend_filtered_equal_risk_allocation",
+    ),
+)
+
+
+REJECTED_HYPOTHESES = (
+    _hypothesis(
+        display_name="Short-horizon reversal",
+        lifecycle_state="REJECTED_BEFORE_TESTING",
+        supporting_source_ids=(),
+        economic_behavioral_rationale="Possible microstructure reversal was considered but is unsupported for this daily ETF campaign.",
+        signal_concept="Short-horizon reversal.", entry_logic="NOT_ADMITTED", exit_logic="NOT_ADMITTED",
+        cross_sectional_ranking_logic="NOT_ADMITTED", allocation_logic="NOT_ADMITTED", cash_rule="NOT_ADMITTED",
+        risk_rule="NOT_ADMITTED", rebalance_frequency="NOT_ADMITTED", expected_turnover_class="HIGH",
+        expected_strengths=(), named_failure_regimes=("transaction-cost dominance",),
+        regime_behavior_map={}, regime_partition_rule="NOT_ADMITTED",
+        parameter_dimensions={}, complete_grid_definition="NO_GRID", expected_candidate_count=0,
+        baseline_distinction="No family created.", implementation_requirements=(), anti_lookahead_requirements=(),
+        benchmark_expectations="NOT_APPLICABLE", falsification_conditions=("insufficient directly transferable support",),
+        simplicity_component_count=0, family_semantic_name=None, family_slots_consumed=0,
+        rejection_reason="Insufficient directly transferable support and expected friction sensitivity for this bounded campaign.",
+    ),
+)
