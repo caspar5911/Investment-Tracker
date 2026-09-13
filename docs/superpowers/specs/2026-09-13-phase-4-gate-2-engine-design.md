@@ -76,6 +76,9 @@ identity:
   `research_report`, `strategy_family_definitions`, and `survivor_policy`
   artifacts;
 - its direct `hypothesis_journal` and `source_journal` exact-byte identities;
+- its direct research notes at
+  `results/research/research_notes.md`, whose exact-byte SHA-256 is
+  `405e99adefe5d36321f029b9525a51c244950674e3e61ff9e2387f371be30e0f`;
   and
 - its direct `readiness_manifest`, `split_manifest`, and `trial_authority`
   artifacts.
@@ -286,10 +289,14 @@ Rebalance clocks are anchored on the first scored session. A family with a
 parameterized interval recomputes on scored offsets `0, interval, 2*interval,
 ...`; volatility-managed relative momentum uses its sealed structural
 interval of 21 sessions. An eligible rebalance creates one fresh target
-instruction after that session's close. Between eligible rebalances the last
-target remains the fixed reporting intent, but units are preserved and no
-fresh instruction or fill is generated. An unavailable required indicator at
-an eligible rebalance admits no risky asset and creates a target-cash
+instruction after that signal-generation session's close, due exactly at the
+next eligible scored-session open. A session whose close is not a
+signal-generation rebalance creates no fresh instruction; its open must still
+execute a target that was formed at the preceding close and is due there.
+After any due open execution, units are preserved until another pending target
+becomes due. Between signal-generation rebalances the last target remains the
+fixed reporting intent only. An unavailable required indicator at an eligible
+signal-generation rebalance admits no risky asset and creates a target-cash
 instruction.
 
 ## Strategy Algorithms
@@ -399,8 +406,9 @@ must never be compared merely with the previous requested target. A delta is
 zero only when its absolute notional is no greater than
 `1e-12 * max(1.0, pre_cost_open_equity)`. If every delta is zero, no fill is
 recorded. Thus an unchanged requested target still rebalances on its next
-scheduled execution when price drift changed realized weights. A
-non-rebalance session preserves units and cannot create a fill.
+scheduled execution when price drift changed realized weights. A session open
+with no pending target due preserves units and cannot create a fill; whether
+that session's close is a signal-generation rebalance is a separate question.
 
 Phase 4 uses initial cash exactly `100000.0`, matching the committed governed
 research default and readiness reset fixtures. It permits fractional units,
@@ -884,7 +892,9 @@ status must show no mutation outside the newly created Gate 2 artifact root.
 - high friction proportionally scales buys and cannot create negative cash;
 - residual allocation remains cash;
 - unchanged targets still rebalance against drifted open holdings on scheduled
-  executions, while non-rebalance sessions preserve units and create no fill;
+  executions; a session without a new close signal may execute a pending
+  target at its open, while an open with no target due preserves units and
+  creates no fill;
 - first scored equity equals reset initial cash and 1,008 sessions imply 1,007
   daily returns;
 - mutation, NaN, infinity, nonpositive prices, misalignment, duplicates, and
