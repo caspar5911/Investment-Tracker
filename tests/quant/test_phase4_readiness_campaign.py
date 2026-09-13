@@ -7,6 +7,7 @@ import shutil
 
 import pytest
 
+from investment_tracker.quant.readiness import campaign as campaign_module
 from investment_tracker.quant.readiness.artifacts import ReadinessArtifactStore
 from investment_tracker.quant.readiness.artifacts import (
     ReadinessArtifactIntegrityError,
@@ -51,7 +52,10 @@ def _copy_file(source_root: Path, destination_root: Path, relative: str) -> None
 
 
 @pytest.fixture
-def provider_free_repo(tmp_path: Path) -> ProviderFreeRepository:
+def provider_free_repo(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> ProviderFreeRepository:
     root = tmp_path / "repository"
     root.mkdir()
     for source in sorted((REPOSITORY_ROOT / "results/experiments").glob("*.json")):
@@ -65,6 +69,16 @@ def provider_free_repo(tmp_path: Path) -> ProviderFreeRepository:
     for dataset in PINNED_BOOTSTRAP_DATASETS:
         _copy_file(REPOSITORY_ROOT, root, f"{dataset.path}/metadata.json")
         _copy_file(REPOSITORY_ROOT, root, f"{dataset.path}/bars.parquet")
+    monkeypatch.setattr(
+        campaign_module,
+        "_runtime_source_revision",
+        lambda repository_root: SOURCE_REVISION,
+    )
+    monkeypatch.setattr(
+        campaign_module,
+        "_runtime_dependency_identity",
+        lambda: DEPENDENCY_IDENTITY,
+    )
     return ProviderFreeRepository(
         root=root,
         store=ReadinessArtifactStore(root, root / "results"),
@@ -88,8 +102,6 @@ def _run_readiness(provider_free_repo: ProviderFreeRepository):
     return run_phase4_readiness(
         provider_free_repo.root,
         provider_free_repo.root / "results",
-        source_revision=SOURCE_REVISION,
-        dependency_identity=DEPENDENCY_IDENTITY,
     )
 
 
@@ -100,6 +112,7 @@ def test_readiness_campaign_writes_complete_linked_evidence_last(
     writes: list[str] = []
     original_write_json = ReadinessArtifactStore.write_json
     original_write_text = ReadinessArtifactStore.write_text
+    original_commit_json = ReadinessArtifactStore.commit_json
 
     def tracked_json(self, kind, filename, payload):
         writes.append(kind)
@@ -109,8 +122,13 @@ def test_readiness_campaign_writes_complete_linked_evidence_last(
         writes.append(kind)
         return original_write_text(self, kind, filename, text)
 
+    def tracked_commit(self, kind, filename, payload):
+        writes.append(kind)
+        return original_commit_json(self, kind, filename, payload)
+
     monkeypatch.setattr(ReadinessArtifactStore, "write_json", tracked_json)
     monkeypatch.setattr(ReadinessArtifactStore, "write_text", tracked_text)
+    monkeypatch.setattr(ReadinessArtifactStore, "commit_json", tracked_commit)
     before = {
         relative: _tree_digest(provider_free_repo.root, relative)
         for relative in PROTECTED_TREES
@@ -171,6 +189,11 @@ def test_readiness_report_is_complete_and_non_circular(
     assert outcome.summary.bootstrap_lower_percentile == 5.0
     assert outcome.summary.bootstrap_upper_percentile == 95.0
     assert outcome.summary.bootstrap_percentile_method == "NUMPY_PERCENTILE_DEFAULTS"
+    assert outcome.summary.bootstrap_input_derivation == (
+        "PERCENTAGE_CHANGES_OF_AGGREGATE_VALIDATION_EQUITY_CURVE_"
+        "AFTER_DROPPING_FIRST_MISSING_CHANGE"
+    )
+    assert outcome.summary.bootstrap_random_generator == "numpy.random.default_rng(0)"
     assert outcome.summary.bootstrap_zero_resampled_medians == 2000
     assert outcome.summary.maximum_new_strategy_families == 10
     assert outcome.summary.maximum_candidate_trials_per_family == 500
@@ -186,6 +209,9 @@ def test_readiness_report_is_complete_and_non_circular(
         "PRNG seed: 0",
         "5th and 95th percentiles",
         "NumPy percentile defaults",
+        "percentage changes of the aggregate validation equity curve",
+        "dropping the first missing change",
+        "numpy.random.default_rng(0)",
         "All 2,000 resampled medians were exactly zero",
         "1,007",
         "[0.0, 0.0]",
@@ -262,14 +288,18 @@ def test_final_manifest_publication_is_the_last_fallible_commit_point(
     provider_free_repo: ProviderFreeRepository,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    original_read_json = ReadinessArtifactStore.read_json
+    original_read_bytes = Path.read_bytes
 
-    def reject_manifest_reopen(self, identity):
-        if identity.kind == "phase4_readiness_manifest":
-            raise ReadinessArtifactIntegrityError("post-publication read failed")
-        return original_read_json(self, identity)
+    def reject_published_manifest_reopen(self: Path):
+        if (
+            self.name == "manifest.json"
+            and "phase4_readiness_manifest" in self.parts
+            and ".tmp-" not in self.parent.name
+        ):
+            raise OSError("post-publication read failed")
+        return original_read_bytes(self)
 
-    monkeypatch.setattr(ReadinessArtifactStore, "read_json", reject_manifest_reopen)
+    monkeypatch.setattr(Path, "read_bytes", reject_published_manifest_reopen)
 
     outcome = _run_readiness(provider_free_repo)
     manifest_root = (
@@ -324,6 +354,26 @@ def test_manifest_persists_explicit_runtime_identities(
 
     assert manifest["source_revision"] == SOURCE_REVISION
     assert manifest["dependency_identity"] == DEPENDENCY_IDENTITY
+
+
+def test_runtime_identity_derivation_failure_is_machine_readable(
+    provider_free_repo: ProviderFreeRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_dependencies() -> str:
+        raise RuntimeError("runtime packages unavailable")
+
+    monkeypatch.setattr(
+        campaign_module,
+        "_runtime_dependency_identity",
+        fail_dependencies,
+    )
+
+    outcome = _run_readiness(provider_free_repo)
+
+    assert outcome.status == "READINESS_FAILED"
+    assert outcome.reason_code == "RUNTIME_IDENTITY_FAILED"
+    assert "runtime identity derivation failed" in outcome.reason
 
 
 def test_readiness_public_api_exposes_only_bounded_audit_entrypoints() -> None:

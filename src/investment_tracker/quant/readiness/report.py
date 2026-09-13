@@ -56,6 +56,16 @@ class Phase4ReadinessSummary(FrozenReadinessModel):
     bootstrap_percentile_method: Literal[
         "NUMPY_PERCENTILE_DEFAULTS"
     ] = "NUMPY_PERCENTILE_DEFAULTS"
+    bootstrap_input_derivation: Literal[
+        "PERCENTAGE_CHANGES_OF_AGGREGATE_VALIDATION_EQUITY_CURVE_"
+        "AFTER_DROPPING_FIRST_MISSING_CHANGE"
+    ] = (
+        "PERCENTAGE_CHANGES_OF_AGGREGATE_VALIDATION_EQUITY_CURVE_"
+        "AFTER_DROPPING_FIRST_MISSING_CHANGE"
+    )
+    bootstrap_random_generator: Literal[
+        "numpy.random.default_rng(0)"
+    ] = "numpy.random.default_rng(0)"
     bootstrap_zero_resampled_medians: Literal[2000] = 2000
     bootstrap_claim_scope: Literal[
         "MEDIAN_DAILY_EQUAL_WEIGHT_PORTFOLIO_RETURN_ONLY"
@@ -168,6 +178,8 @@ def render_readiness_report(summary: Phase4ReadinessSummary) -> str:
         "",
         "- Bootstrap statistic: median daily equal-weight portfolio return",
         "- Sampling: independently with replacement from daily equal-weight portfolio returns",
+        "- Input derivation: percentage changes of the aggregate validation equity curve after dropping the first missing change",
+        "- Random generator: numpy.random.default_rng(0)",
         "- Median statistic per resample",
         "- 2,000 bootstrap draws",
         "- PRNG seed: 0",

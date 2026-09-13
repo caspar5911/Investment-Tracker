@@ -203,20 +203,14 @@ def _runtime_dependency_identity() -> str:
 
 def _verified_runtime_identities(
     repository_root: Path,
-    *,
-    source_revision: str | None,
-    dependency_identity: str | None,
 ) -> tuple[str, str]:
-    revision = (
-        _runtime_source_revision(repository_root)
-        if source_revision is None
-        else source_revision
-    )
-    dependencies = (
-        _runtime_dependency_identity()
-        if dependency_identity is None
-        else dependency_identity
-    )
+    try:
+        revision = _runtime_source_revision(repository_root)
+        dependencies = _runtime_dependency_identity()
+    except Exception as exc:
+        raise ReadinessArtifactIntegrityError(
+            "runtime identity derivation failed"
+        ) from exc
     if not isinstance(revision, str) or re.fullmatch(
         r"[0-9a-f]{40,64}", revision
     ) is None:
@@ -361,9 +355,6 @@ def _verify_written_artifacts(
 def run_phase4_readiness(
     repository_root: Path,
     results_root: Path,
-    *,
-    source_revision: str | None = None,
-    dependency_identity: str | None = None,
 ) -> Phase4ReadinessOutcome:
     try:
         configured_repository = Path(repository_root)
@@ -382,11 +373,7 @@ def run_phase4_readiness(
 
     try:
         verified_source_revision, verified_dependency_identity = (
-            _verified_runtime_identities(
-                repository,
-                source_revision=source_revision,
-                dependency_identity=dependency_identity,
-            )
+            _verified_runtime_identities(repository)
         )
     except ReadinessArtifactIntegrityError as exc:
         return _failed("RUNTIME_IDENTITY_FAILED", exc)
@@ -633,7 +620,7 @@ def run_phase4_readiness(
             report=report_identity,
             summary=summary,
         )
-        store.write_json(
+        store.commit_json(
             "phase4_readiness_manifest",
             "manifest.json",
             manifest_payload,

@@ -53,6 +53,31 @@ def test_text_store_hashes_and_reads_exact_utf8_bytes(tmp_path: Path) -> None:
     assert store.read_text(identity) == text
 
 
+def test_final_json_commit_does_not_reopen_after_atomic_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = readiness_store(tmp_path)
+    original_read_bytes = Path.read_bytes
+
+    def reject_published_file(self: Path) -> bytes:
+        if self.name == "manifest.json" and ".tmp-" not in self.parent.name:
+            raise OSError("published file must not be reopened")
+        return original_read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", reject_published_file)
+    identity = store.commit_json(
+        "phase4_readiness_manifest",
+        "manifest.json",
+        {"status": "PHASE_4_READY"},
+    )
+
+    assert identity.kind == "phase4_readiness_manifest"
+    assert original_read_bytes(tmp_path / "repo" / identity.path) == (
+        b'{"status":"PHASE_4_READY"}'
+    )
+
+
 def test_store_reuses_only_exactly_identical_bytes(tmp_path: Path) -> None:
     store = readiness_store(tmp_path)
     first = store.write_json("phase4_split_manifest", "manifest.json", {"a": 1})

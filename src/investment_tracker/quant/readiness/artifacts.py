@@ -224,6 +224,105 @@ class ReadinessArtifactStore:
             ) from exc
         return self._write_bytes(kind, filename, encoded)
 
+    def commit_json(
+        self,
+        kind: ArtifactKind,
+        filename: str,
+        payload: object,
+    ) -> ReadinessArtifactIdentity:
+        """Publish a prevalidated final JSON artifact with no fallible post-commit I/O."""
+        guarded_kind = self._validate_kind(kind)
+        guarded_filename = self._validate_filename(filename)
+        try:
+            encoded = canonical_json_bytes(payload)
+        except (TypeError, ValueError) as exc:
+            raise ReadinessArtifactIntegrityError(
+                "readiness artifact payload is not canonical JSON"
+            ) from exc
+
+        content_sha256 = sha256(encoded).hexdigest()
+        destination = self._destination(
+            guarded_kind,
+            guarded_filename,
+            content_sha256,
+        )
+        normalized = self._normalize(destination)
+        identity = ReadinessArtifactIdentity(
+            kind=guarded_kind,
+            content_sha256=content_sha256,
+            path=normalized,
+            sha256=canonical_sha256(
+                {
+                    "content_sha256": content_sha256,
+                    "kind": guarded_kind,
+                    "path": normalized,
+                }
+            ),
+        )
+
+        final_directory = destination.parent
+        if final_directory.exists() or final_directory.is_symlink():
+            if final_directory.is_symlink() or not final_directory.is_dir():
+                raise ReadinessArtifactIntegrityError(
+                    f"immutable artifact destination is non-regular: {final_directory}"
+                )
+            return self._identity_for(destination, guarded_kind, encoded)
+
+        sha_root = final_directory.parent
+        try:
+            sha_root.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise ReadinessArtifactIntegrityError(
+                f"artifact destination parent cannot be created: {sha_root}"
+            ) from exc
+        self._normalize(sha_root)
+
+        staging_directory: Path | None = None
+        try:
+            staging_directory = Path(tempfile.mkdtemp(prefix=".tmp-", dir=sha_root))
+            staging_file = staging_directory / guarded_filename
+            with staging_file.open("xb") as stream:
+                stream.write(encoded)
+                stream.flush()
+                os.fsync(stream.fileno())
+            if staging_file.read_bytes() != encoded:
+                raise ReadinessArtifactIntegrityError(
+                    "staged final artifact does not match canonical bytes"
+                )
+        except ReadinessArtifactIntegrityError:
+            if staging_directory is not None:
+                try:
+                    (staging_directory / guarded_filename).unlink(missing_ok=True)
+                    staging_directory.rmdir()
+                except OSError:
+                    pass
+            raise
+        except OSError as exc:
+            if staging_directory is not None:
+                try:
+                    (staging_directory / guarded_filename).unlink(missing_ok=True)
+                    staging_directory.rmdir()
+                except OSError:
+                    pass
+            raise ReadinessArtifactIntegrityError(
+                f"final artifact staging failed: {destination}"
+            ) from exc
+
+        # Atomic directory publication is the commit point. There is deliberately
+        # no cleanup, readback, validation, or other fallible operation afterward.
+        try:
+            os.rename(staging_directory, final_directory)
+        except OSError as exc:
+            try:
+                (staging_directory / guarded_filename).unlink(missing_ok=True)
+                staging_directory.rmdir()
+            except OSError:
+                pass
+            raise ReadinessArtifactIntegrityError(
+                f"final artifact publication failed: {destination}"
+            ) from exc
+        return identity
+
     def write_text(
         self,
         kind: ArtifactKind,
