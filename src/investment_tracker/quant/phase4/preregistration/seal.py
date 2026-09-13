@@ -9,7 +9,7 @@ import subprocess
 from typing import Callable, Literal
 
 import pydantic
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from .artifacts import Gate1ArtifactStore
 from .baselines import VerifiedBaselines, build_verified_baselines
@@ -18,7 +18,7 @@ from .campaign_definition import (
     REJECTED_HYPOTHESES,
     RESEARCH_SOURCES,
 )
-from .canonical import canonical_sha256
+from .canonical import artifact_envelope_identity, canonical_json_bytes, canonical_sha256
 from .grids import PHASE4_CAMPAIGN_ID, build_preregistered_grids
 from .journal import Gate1Journal, Gate1JournalState
 from .models import FrozenGate1Model, Gate1ArtifactIdentity
@@ -34,8 +34,26 @@ from .policy import (
 from .report import build_gate1_report, build_research_notes
 
 
-RESEARCH_CUTOFF = datetime(2026, 9, 13, 8, 0, 0, tzinfo=timezone.utc)
-RECORDED_AT = "2026-09-13T08:00:00.000000Z"
+RESEARCH_CUTOFF = datetime(2026, 9, 13, 11, 9, 54, 62909, tzinfo=timezone.utc)
+RECORDED_AT = "2026-09-13T11:09:54.062909Z"
+READINESS_REVALIDATED_REVISION = "b116192d2f8bc814a0f7501b492b981a5ae8f8db"
+GATE1_SCHEMA_VERSIONS = (
+    "PHASE4-PREREGISTRATION-MANIFEST-v1",
+    "PHASE4-JOURNAL-RECORD-v1", "PHASE4-JOURNAL-STATE-v1",
+    "PHASE4-RESEARCH-SOURCE-v1", "PHASE4-HYPOTHESIS-v1",
+    "PHASE4-BASELINE-DEFINITION-v1", "PHASE4-BASELINE-DEFINITION-SET-v1",
+    "PHASE4-STRATEGY-FAMILY-DEFINITION-v1",
+    "PHASE4-STRATEGY-FAMILY-DEFINITION-SET-v1",
+    "PHASE4-STRATEGY-FAMILY-SEMANTIC-v1",
+    "PHASE4-FAMILY-DEFINITION-IDENTITY-v1",
+    "PHASE4-RULE-SET-IDENTITY-v1", "PHASE4-PARAMETER-TUPLE-IDENTITY-v1",
+    "PHASE4-DETERMINISTIC-GRIDS-v1", "PHASE4-GRID-CANDIDATE-v1",
+    "PHASE4-BUDGET-POLICY-v1", "PHASE4-FAMILY-STOP-POLICY-v1",
+    "PHASE4-DURABILITY-POLICY-v1", "PHASE4-SURVIVOR-POLICY-v1",
+    "PHASE4-GATE1-ACCESS-EVIDENCE-v1",
+    "PHASE4-GATE1-RUNTIME-v1",
+    "PHASE5-LONG-HISTORY-DURABILITY-CONTRACT-v1",
+)
 
 
 GATE1_FAILURE_CODES = (
@@ -77,6 +95,7 @@ class Phase4PreregistrationManifest(FrozenGate1Model):
     dq_snapshot_digest: str
     readiness_manifest: Gate1ArtifactIdentity
     trial_authority: Gate1ArtifactIdentity
+    split_manifest: Gate1ArtifactIdentity
     source_journal: Gate1JournalState
     research_cutoff: datetime
     research_notes_path: Literal["results/research/research_notes.md"]
@@ -89,6 +108,7 @@ class Phase4PreregistrationManifest(FrozenGate1Model):
     durability_policy: Gate1ArtifactIdentity
     survivor_policy: Gate1ArtifactIdentity
     information_access_policy: Gate1ArtifactIdentity
+    observed_read_set: tuple[str, ...]
     research_report: Gate1ArtifactIdentity
     family_rule_set_identities: tuple[FamilyRuleSetIdentity, ...]
     family_rule_set_identity_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -106,8 +126,21 @@ class Phase4PreregistrationManifest(FrozenGate1Model):
     fixed_deployment_objective: Literal["ONE_FIXED_LONG_ONLY_STRATEGY_NO_PERIODIC_RETUNING"] = (
         "ONE_FIXED_LONG_ONLY_STRATEGY_NO_PERIODIC_RETUNING"
     )
+    deployment_strategy_count: Literal[1] = 1
+    position_direction: Literal["LONG_ONLY"] = "LONG_ONLY"
+    rule_set_mode: Literal["FIXED"] = "FIXED"
+    parameter_tuple_mode: Literal["FIXED"] = "FIXED"
+    annual_reoptimization: Literal[False] = False
+    periodic_reoptimization: Literal[False] = False
+    cagr_hard_target: None = None
+    durability_precedes_fitted_cagr: Literal[True] = True
+    signal_series: Literal["QFQ"] = "QFQ"
     qfq_execution_methodology: Literal["QFQ_NORMALIZED"] = "QFQ_NORMALIZED"
+    qfq_methodology_identity: Literal[
+        "ffee9bac3fe329b14d5aebb0f6152f00fc0a86b28d9186c254b5c8f6f8a322fb"
+    ] = "ffee9bac3fe329b14d5aebb0f6152f00fc0a86b28d9186c254b5c8f6f8a322fb"
     decision_grade: Literal[False] = False
+    schema_versions: tuple[str, ...] = GATE1_SCHEMA_VERSIONS
     max_drawdown_status: Literal["UNKNOWN"] = "UNKNOWN"
     max_drawdown: None = None
     calmar_status: Literal["UNKNOWN"] = "UNKNOWN"
@@ -128,6 +161,56 @@ class Phase4PreregistrationManifest(FrozenGate1Model):
     live_trading_capability: Literal[False] = False
     gate2_authorized: Literal[False] = False
     gate3_authorized: Literal[False] = False
+
+    @model_validator(mode="after")
+    def validate_manifest_links(self) -> "Phase4PreregistrationManifest":
+        expected_kinds = {
+            "readiness_manifest": "phase4_readiness_manifest",
+            "trial_authority": "trial_authority",
+            "split_manifest": "phase4_split_manifest",
+            "baseline_definitions": "baseline_definitions",
+            "strategy_family_definitions": "strategy_family_definitions",
+            "deterministic_grids": "deterministic_grids",
+            "family_budget_policy": "family_budget_policy",
+            "durability_policy": "durability_policy",
+            "survivor_policy": "survivor_policy",
+            "information_access_policy": "information_access_policy",
+            "research_report": "research_report",
+        }
+        if any(getattr(self, field).kind != kind for field, kind in expected_kinds.items()):
+            raise ValueError("manifest artifact-kind cross-link mismatch")
+        if self.source_journal.path != "results/research/sources.jsonl" or self.source_journal.record_count != self.source_count:
+            raise ValueError("source journal cross-link mismatch")
+        if (
+            self.hypothesis_journal.path != "results/research/hypothesis_registry.jsonl"
+            or self.hypothesis_journal.record_count
+            != self.admitted_hypothesis_count + self.rejected_hypothesis_count
+        ):
+            raise ValueError("hypothesis journal cross-link mismatch")
+        if self.baseline_provenance_class_counts != {
+            "EXECUTED_PHASE2_BASELINE": 2,
+            "SOURCE_DEFINED_PHASE2_GRID_BASELINE": 2,
+        }:
+            raise ValueError("baseline provenance count mismatch")
+        if len(self.family_rule_set_identities) != self.family_count:
+            raise ValueError("family rule-set count mismatch")
+        if self.family_rule_set_identities != tuple(
+            sorted(self.family_rule_set_identities, key=lambda row: row.family_id)
+        ) or len({row.family_id for row in self.family_rule_set_identities}) != self.family_count:
+            raise ValueError("family rule-set identities must be unique and sorted")
+        expected_rule_sets = canonical_sha256(
+            tuple(row.model_dump(mode="json") for row in self.family_rule_set_identities)
+        )
+        if self.family_rule_set_identity_sha256 != expected_rule_sets:
+            raise ValueError("family rule-set aggregate identity mismatch")
+        from .access import Gate1AccessEvidence
+
+        access_payload = Gate1AccessEvidence(observed_reads=self.observed_read_set)
+        if sha256(canonical_json_bytes(access_payload.model_dump(mode="json"))).hexdigest() != self.information_access_policy.content_sha256:
+            raise ValueError("observed read set disagrees with access evidence artifact")
+        if self.schema_versions != GATE1_SCHEMA_VERSIONS:
+            raise ValueError("schema versions do not match the frozen exact set")
+        return self
 
 
 class Gate1SealResult(FrozenGate1Model):
@@ -167,6 +250,34 @@ def _write_immutable_research_file(root: Path, relative: str, payload: bytes) ->
         raise
     except OSError as exc:
         raise Gate1SealError("immutable research file write failed") from exc
+    try:
+        read_back = destination.read_bytes()
+    except OSError as exc:
+        raise Gate1SealError("research file read-back failed", "SOURCE_CHAIN_INVALID") from exc
+    if read_back != payload:
+        raise Gate1SealError("research file read-back mismatch", "SOURCE_CHAIN_INVALID")
+
+
+def verify_readiness_ancestry(
+    repository_root: Path,
+    head_revision: str,
+    *,
+    runner: Callable[..., object] = subprocess.run,
+) -> None:
+    completed = runner(
+        [
+            "git", "merge-base", "--is-ancestor",
+            READINESS_REVALIDATED_REVISION, head_revision,
+        ],
+        cwd=repository_root,
+        check=False,
+        capture_output=True,
+    )
+    if getattr(completed, "returncode", 1) != 0:
+        raise Gate1SealError(
+            "readiness revalidation revision is not an ancestor of HEAD",
+            "READINESS_MANIFEST_MISMATCH",
+        )
 
 
 def _runtime_identity() -> str:
@@ -205,6 +316,12 @@ def seal_preverified_gate1(
     write_observer: Callable[[str], None] | None = None,
 ) -> Gate1SealResult:
     root = Path(repository_root).resolve(strict=True)
+    if len(producing_revision) != 40 or any(
+        character not in "0123456789abcdef" for character in producing_revision
+    ):
+        raise Gate1SealError(
+            "producing revision is invalid", "READINESS_MANIFEST_MISMATCH"
+        )
     observer = write_observer or (lambda _: None)
     sources = enforce_research_cutoff(RESEARCH_SOURCES, RESEARCH_CUTOFF)
     hypotheses = validate_hypothesis_registry(
@@ -293,6 +410,7 @@ def seal_preverified_gate1(
         dq_snapshot_digest=first_baseline.dq_snapshot_digest,
         readiness_manifest=first_baseline.readiness_manifest,
         trial_authority=first_baseline.trial_authority,
+        split_manifest=first_baseline.split_manifest,
         source_journal=source_state,
         research_cutoff=RESEARCH_CUTOFF,
         research_notes_path=notes_path,
@@ -305,6 +423,7 @@ def seal_preverified_gate1(
         durability_policy=durability_identity,
         survivor_policy=survivor_identity,
         information_access_policy=access_identity,
+        observed_read_set=verified_baselines.access_evidence.observed_reads,
         research_report=report_identity,
         family_rule_set_identities=rule_sets,
         family_rule_set_identity_sha256=canonical_sha256(
@@ -317,12 +436,32 @@ def seal_preverified_gate1(
         family_count=len(grids.families),
         aggregate_candidate_count=len(grids.candidates),
         baseline_provenance_class_counts=verified_baselines.baseline_set.provenance_class_counts,
+        qfq_methodology_identity=first_baseline.qfq_methodology_identity,
     )
-    manifest_identity = store.commit_json(
-        "phase4_preregistration_manifest", "manifest.json", manifest.model_dump(mode="json")
+    manifest_payload = manifest.model_dump(mode="json")
+    manifest_content_sha256 = sha256(canonical_json_bytes(manifest_payload)).hexdigest()
+    manifest_path = (
+        "results/phase4/gate1/phase4_preregistration_manifest/sha256/"
+        f"{manifest_content_sha256}/manifest.json"
+    )
+    expected_manifest_identity = Gate1ArtifactIdentity(
+        kind="phase4_preregistration_manifest",
+        content_sha256=manifest_content_sha256,
+        path=manifest_path,
+        sha256=artifact_envelope_identity(
+            content_sha256=manifest_content_sha256,
+            kind="phase4_preregistration_manifest",
+            path=manifest_path,
+        ),
+    )
+    result = Gate1SealResult(
+        manifest=manifest, manifest_identity=expected_manifest_identity
     )
     observer("phase4_preregistration_manifest")
-    return Gate1SealResult(manifest=manifest, manifest_identity=manifest_identity)
+    store.commit_json(
+        "phase4_preregistration_manifest", "manifest.json", manifest.model_dump(mode="json")
+    )
+    return result
 
 
 def seal_gate1(repository_root: Path) -> Gate1SealResult:
@@ -334,6 +473,7 @@ def seal_gate1(repository_root: Path) -> Gate1SealResult:
         ).stdout.strip()
         if len(revision) != 40:
             raise Gate1SealError("producing revision is invalid")
+        verify_readiness_ancestry(root, revision)
         verified = build_verified_baselines(root)
         return seal_preverified_gate1(root, verified, revision)
     except Gate1SealError:

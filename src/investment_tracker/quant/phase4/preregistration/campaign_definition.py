@@ -6,7 +6,7 @@ from .canonical import source_identity
 from .policy import HypothesisRecord, ResearchSource, SourceTier
 
 
-RETRIEVED_AT = datetime(2026, 9, 13, 8, 0, tzinfo=timezone.utc)
+RETRIEVED_AT = datetime(2026, 9, 13, 11, 9, 54, 62909, tzinfo=timezone.utc)
 
 
 def _source(**values: object) -> ResearchSource:

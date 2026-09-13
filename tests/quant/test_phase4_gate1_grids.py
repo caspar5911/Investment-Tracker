@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 
 import pytest
+from pydantic import ValidationError
 
 from investment_tracker.quant.phase4.preregistration.campaign_definition import ADMITTED_HYPOTHESES
 from investment_tracker.quant.phase4.preregistration.canonical import (
@@ -146,3 +147,46 @@ def test_no_adaptive_generation_api_exists() -> None:
     assert not hasattr(grids, "generate_next_candidate")
     assert "validation_metric" not in source
     assert "optimizer" not in source
+
+
+def test_family_and_population_derived_identities_fail_on_tampering() -> None:
+    result = build_preregistered_grids(ADMITTED_HYPOTHESES)
+    family_payload = result.families[0].model_dump()
+    family_payload["signal_algorithm"] += " changed"
+    with pytest.raises(ValidationError, match="family identity|rule-set identity|definition identity"):
+        type(result.families[0]).model_validate(family_payload)
+    result_payload = result.model_dump()
+    result_payload["candidate_parameter_population_sha256"] = "0" * 64
+    with pytest.raises(ValidationError, match="population identity"):
+        type(result).model_validate(result_payload)
+    budget_payload = result.model_dump()
+    budget_payload["budget_policy"]["admitted_family_count"] = 999
+    with pytest.raises(ValidationError, match="family count"):
+        type(result).model_validate(budget_payload)
+
+
+def test_self_consistent_but_out_of_declared_grid_candidate_is_rejected() -> None:
+    result = build_preregistered_grids(ADMITTED_HYPOTHESES)
+    payload = result.model_dump()
+    family = payload["families"][0]
+    row = family["candidates"][0]
+    dimension = next(iter(row["raw_parameters"]))
+    row["raw_parameters"][dimension] = 999_999
+    from investment_tracker.quant.phase4.preregistration.canonical import canonical_parameter_map
+    row["parameters"] = canonical_parameter_map(row["raw_parameters"])
+    row["parameter_tuple_sha256"] = parameter_tuple_identity(row["family_id"], row["parameters"])
+    row["candidate_id"] = candidate_identity(
+        campaign_id=PHASE4_CAMPAIGN_ID, hypothesis_id=row["hypothesis_id"],
+        family_id=row["family_id"], parameters=row["parameters"],
+    )
+    row["trial_id"] = trial_identity(PHASE4_CAMPAIGN_ID, row["candidate_id"])
+    aggregate = list(payload["candidates"])
+    aggregate[0] = dict(row)
+    payload["candidates"] = tuple(aggregate)
+    payload["candidate_parameter_population_sha256"] = candidate_parameter_population_identity(
+        tuple({"candidate_id": item["candidate_id"],
+               "parameter_tuple_sha256": item["parameter_tuple_sha256"]}
+              for item in payload["candidates"])
+    )
+    with pytest.raises(ValidationError, match="declared Cartesian grid"):
+        type(result).model_validate(payload)

@@ -194,8 +194,19 @@ class Gate1ArtifactStore:
                 if destination.read_bytes() != payload:
                     raise Gate1ArtifactError("immutable artifact collision")
             else:
-                temporary.unlink()
-                temporary = None
+                if final_commit:
+                    # The manifest link is the final fallible publication.  A
+                    # denied best-effort cleanup must not turn a visible valid
+                    # seal into a reported failure.
+                    orphan = temporary
+                    temporary = None
+                    try:
+                        orphan.unlink()
+                    except OSError:
+                        pass
+                else:
+                    temporary.unlink()
+                    temporary = None
         except Gate1ArtifactError:
             raise
         except OSError as exc:

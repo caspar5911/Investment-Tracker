@@ -103,12 +103,48 @@ class StrategyFamilyDefinition(FrozenGate1Model):
 
     @model_validator(mode="after")
     def validate_definition(self) -> "StrategyFamilyDefinition":
+        semantic = _family_semantic_projection(self)
+        if self.family_id != family_identity(semantic):
+            raise ValueError("family identity mismatch")
+        expected_grid = canonical_sha256({
+            "parameter_dimensions": self.parameter_dimensions,
+            "structural_parameters": self.structural_parameters,
+            "structural_predicates": self.structural_predicates,
+        })
+        if self.grid_spec_sha256 != expected_grid:
+            raise ValueError("grid specification identity mismatch")
         if self.rule_set_sha256 != rule_set_identity(
             self.family_id, self.model_dump(mode="json")
         ):
             raise ValueError("rule-set identity mismatch")
+        definition_payload = self.model_dump(
+            mode="json", exclude={"candidates", "family_definition_sha256"}
+        )
+        expected_definition = canonical_sha256({
+            "schema_version": "PHASE4-FAMILY-DEFINITION-IDENTITY-v1",
+            "family_definition": definition_payload,
+        })
+        if self.family_definition_sha256 != expected_definition:
+            raise ValueError("family definition identity mismatch")
         if len(self.candidates) != self.expected_candidate_count:
             raise ValueError("expanded grid count mismatch")
+        names = tuple(self.parameter_dimensions)
+        values = tuple(
+            tuple(_decode_value(value) for value in self.parameter_dimensions[name])
+            for name in names
+        )
+        expected_rows = tuple(
+            dict(zip(names, combination, strict=True)) for combination in product(*values)
+        )
+        observed_rows = tuple(candidate.raw_parameters for candidate in self.candidates)
+        if observed_rows != expected_rows:
+            raise ValueError("candidates do not reproduce the declared Cartesian grid")
+        if any(
+            candidate.family_id != self.family_id
+            or candidate.hypothesis_id != self.hypothesis_id
+            for candidate in self.candidates
+        ):
+            raise ValueError("candidate family or hypothesis cross-link mismatch")
         return self
 
     def neighbors(self, parameter_tuple_sha256: str) -> tuple[GridCandidate, ...]:
@@ -162,6 +198,30 @@ class PreregisteredGrids(FrozenGate1Model):
     candidate_parameter_population_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     budget_policy: BudgetPolicy
 
+    @model_validator(mode="after")
+    def validate_population(self) -> "PreregisteredGrids":
+        if self.families != tuple(sorted(self.families, key=lambda row: row.family_id)):
+            raise ValueError("families must be family-ID sorted")
+        if tuple(row.budget_position for row in self.candidates) != tuple(
+            range(1, len(self.candidates) + 1)
+        ):
+            raise ValueError("budget positions must be contiguous from one")
+        flattened = tuple(item for family in self.families for item in family.candidates)
+        if flattened != self.candidates:
+            raise ValueError("family grids do not match aggregate candidate order")
+        population = tuple(
+            {"candidate_id": row.candidate_id,
+             "parameter_tuple_sha256": row.parameter_tuple_sha256}
+            for row in self.candidates
+        )
+        if self.candidate_parameter_population_sha256 != candidate_parameter_population_identity(population):
+            raise ValueError("candidate population identity mismatch")
+        if self.budget_policy.aggregate_candidate_count != len(self.candidates):
+            raise ValueError("budget aggregate count mismatch")
+        if self.budget_policy.admitted_family_count != len(self.families):
+            raise ValueError("budget admitted family count mismatch")
+        return self
+
 
 ALGORITHMS = {
     "cross_sectional_absolute_momentum_rotation": {
@@ -205,6 +265,34 @@ ALGORITHMS = {
         "rebalance_rule": "Recompute every parameterized rebalance_sessions from the first scored session.",
     },
 }
+
+
+def _family_semantic_projection(
+    family: StrategyFamilyDefinition,
+) -> dict[str, object]:
+    return {
+        "schema_version": "PHASE4-STRATEGY-FAMILY-SEMANTIC-v1",
+        "family_semantic_name": family.family_semantic_name,
+        "hypothesis_id": family.hypothesis_id,
+        "supporting_source_ids": family.supporting_source_ids,
+        "input_fields": family.input_fields,
+        "warmup_rule": family.warmup_rule,
+        "signal_algorithm": family.signal_algorithm,
+        "ranking_algorithm": family.ranking_algorithm,
+        "allocation_algorithm": family.allocation_algorithm,
+        "cash_rule": family.cash_rule,
+        "risk_rule": family.risk_rule,
+        "rebalance_rule": family.rebalance_rule,
+        "execution_timing_rule": family.execution_timing_rule,
+        "long_only_no_leverage_invariants": family.long_only_no_leverage_invariants,
+        "regime_partition_algorithm": family.regime_partition_algorithm,
+        "implementation_interface": family.implementation_interface,
+        "parameter_dimensions": family.parameter_dimensions,
+        "structural_parameters": family.structural_parameters,
+        "structural_predicates": family.structural_predicates,
+        "grid_spec_sha256": family.grid_spec_sha256,
+        "baseline_distinction": family.baseline_distinction,
+    }
 
 
 def _decode_value(value: dict[str, object]) -> int | float:
@@ -305,9 +393,10 @@ def _expand_family(hypothesis: HypothesisRecord) -> StrategyFamilyDefinition:
         "expected_candidate_count": hypothesis.expected_candidate_count,
     }
     payload["rule_set_sha256"] = rule_set_identity(family_id, payload)
-    payload["family_definition_sha256"] = canonical_sha256(
-        {"schema_version": "PHASE4-FAMILY-DEFINITION-IDENTITY-v1", **payload}
-    )
+    payload["family_definition_sha256"] = canonical_sha256({
+        "schema_version": "PHASE4-FAMILY-DEFINITION-IDENTITY-v1",
+        "family_definition": payload,
+    })
     return StrategyFamilyDefinition(**payload, candidates=tuple(candidates))
 
 
