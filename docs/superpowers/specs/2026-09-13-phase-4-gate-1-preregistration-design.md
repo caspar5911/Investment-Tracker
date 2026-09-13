@@ -25,6 +25,12 @@ Gate 1 is one of three sealed subprojects:
 Gate 1 implementation and execution require a separately approved plan. This
 design itself does not seal Gate 1.
 
+The intended deployed result of the campaign is **one fixed long-only
+strategy** with one fixed rule set and one fixed parameter tuple that can
+remain usable for many years without annual or periodic parameter retuning.
+The already-frozen Phase 4 TRAIN/VALIDATION split in Authoritative Frozen
+Inputs is unchanged by this deployment objective.
+
 ## Governing Principles
 
 - Research is long-only, unlevered, paper-only, and incapable of brokerage,
@@ -34,6 +40,12 @@ design itself does not seal Gate 1.
 - Missing decision-critical evidence fails closed to `UNKNOWN` or rejection.
 - The goal is falsifiable, economically defensible evidence rather than the
   highest historical CAGR.
+- Robustness and long-term durability take precedence over maximizing fitted
+  CAGR. High sustainable long-term CAGR, potentially around 15–20% or more,
+  is aspirational only; 20% is not an admission, eligibility, ranking, or
+  promotion threshold.
+- Annual or periodic parameter re-optimization is not part of the intended
+  deployed strategy.
 - At most one new Phase 4 candidate may eventually be selected.
 - `NO_CREDIBLE_STRATEGY_FOUND` is a valid final Gate 3 outcome.
 - QFQ inputs support normalized research comparison only. They are not
@@ -69,6 +81,10 @@ The Phase 4 readiness manifest was revalidated on `main` at revision
 `b116192d2f8bc814a0f7501b492b981a5ae8f8db`. Its producing revision
 `568ea5a35bb7acd88f9e79ad09a05788913872e4` is an ancestor of the current
 revision.
+
+No Gate 1 policy, implementation, or seal may change the frozen TRAIN or
+VALIDATION boundary, session count, date range, dataset identity, or warm-up
+semantics. A changed split is a prerequisite mismatch, not a new Gate 1 input.
 
 ## Architecture
 
@@ -106,7 +122,8 @@ Each unit has one responsibility:
 - `grids.py` expands complete declarative grids and assigns deterministic
   candidate and trial identities and Phase 4-only budget positions.
 - `policy.py` validates source admission, hypothesis lifecycle, family-stop
-  policy, survivor policy, and information-access policy.
+  policy, fixed-strategy durability policy, survivor policy, and
+  information-access policy.
 - `artifacts.py` writes immutable content-addressed evidence and rejects
   collisions, symlinks, path escape, and byte mismatches.
 - `seal.py` revalidates every dependency and publishes the final Gate 1
@@ -125,6 +142,9 @@ remain unchanged.
 The Gate 1 read capability admits only:
 
 - the exact committed Phase 4 readiness manifest path and bytes;
+- the exact committed Phase 4 readiness trial-authority artifact identified
+  below, parsed only for authority metadata, candidate IDs, and artifact
+  identities;
 - the exact Git commit and blob objects named by the baseline provenance
   policy;
 - the Gate 1 source and hypothesis journals being verified or appended;
@@ -152,9 +172,13 @@ The access policy rejects before filesystem, cache, provider, or parser access:
 - dynamic paths, globs, directory discovery, timestamps, or “latest file”
   selection for authoritative dependencies.
 
-The only permitted Phase 2 evidence is the fixed Git generator blob and, where
-available, explicitly pinned candidate-manifest artifact identities. Gate 1
-does not enumerate Phase 2 files and does not read Phase 2 performance fields.
+The only permitted Phase 2 evidence is the fixed Git generator blob, the exact
+pinned Phase 4 readiness trial-authority artifact, and the exact two executed
+experiment artifact identities named below. Gate 1 does not enumerate Phase 2
+files and does not read Phase 2 performance fields. The restricted
+trial-authority parser returns only the authority schema/version/count,
+candidate IDs, trial IDs, and artifact identity envelopes; it exposes no
+numeric strategy-result field to baseline selection or sealing.
 
 ### Technical enforcement
 
@@ -213,6 +237,7 @@ results/phase4/gate1/
   strategy_family_definitions/sha256/<content-sha256>/families.json
   deterministic_grids/sha256/<content-sha256>/grids.json
   family_budget_policy/sha256/<content-sha256>/policy.json
+  durability_policy/sha256/<content-sha256>/policy.json
   survivor_policy/sha256/<content-sha256>/policy.json
   information_access_policy/sha256/<content-sha256>/policy.json
   phase4_preregistration_manifest/sha256/<content-sha256>/manifest.json
@@ -245,10 +270,71 @@ Artifact identity remains distinct from domain identity:
 - `source_id = "source-" + SHA-256(canonical bibliographic identity)`.
 - `hypothesis_id = "phase4-hypothesis-" + SHA-256(canonical hypothesis
   payload excluding timestamp and journal fields)`.
-- `family_id = "phase4-family-" + SHA-256(canonical family definition)`.
+- `family_id = "phase4-family-" + SHA-256(canonical semantic family payload
+  excluding family_id, rule_set_sha256, timestamps, journal fields, artifact
+  fields, and observed evidence)`.
 - `candidate_id = "phase4-" + SHA-256(canonical_json({campaign_id,
   hypothesis_id, family_id, parameters}))`.
 - `trial_id = SHA-256(canonical_json({campaign_id, candidate_id}))`.
+
+The fixed-strategy identities use canonical projections rather than an
+implementation-defined pairing:
+
+```text
+rule_set_sha256 = SHA-256(canonical_json({
+  schema_version: "PHASE4-RULE-SET-IDENTITY-v1",
+  family_id,
+  input_fields,
+  warmup_rule,
+  signal_algorithm,
+  ranking_algorithm,
+  allocation_algorithm,
+  cash_rule,
+  risk_rule,
+  rebalance_rule,
+  execution_timing_rule,
+  long_only_no_leverage_invariants,
+  regime_partition_algorithm,
+  implementation_interface
+}))
+
+parameter_tuple_sha256 = SHA-256(canonical_json({
+  schema_version: "PHASE4-PARAMETER-TUPLE-IDENTITY-v1",
+  family_id,
+  parameters
+}))
+
+candidate_parameter_population_sha256 = SHA-256(canonical_json([
+  {candidate_id, parameter_tuple_sha256}, ...
+]))
+```
+
+The population array uses exact sealed family/grid/budget order and contains
+every Phase 4 candidate exactly once.
+
+`parameters` is the exact type-tagged, canonical parameter map stored in the
+sealed grid row; binary64 values use the already-required canonical hexadecimal
+representation. No default, environment value, runtime fit, or omitted
+parameter may enter this identity.
+
+The rule-set projection includes every field capable of changing signals,
+ranking, allocation, exposure, state transition, rebalance timing, or order
+eligibility. It excludes human labels, prose rationale, citations, expected
+results, failure-regime prose, timestamps, journal fields, artifact paths,
+expanded grid values, and observed metrics. Evaluation-only controls such as
+fold boundaries, friction scenarios, bootstrap settings, reporting horizons,
+and survivor ranking do not change strategy decisions and are excluded from
+`rule_set_sha256`; they are frozen independently by the split, durability, and
+survivor artifact identities and must remain constant within their declared
+evaluation case.
+
+Every family record stores and rederives `rule_set_sha256`. Every expanded grid
+row stores and rederives `parameter_tuple_sha256`; its candidate identity is
+also rederived from the same canonical parameters. Candidate evidence in Gate
+3 must bind both digests. A changed algorithmic field changes
+`rule_set_sha256`; a changed parameter changes `parameter_tuple_sha256` and
+`candidate_id`. No timestamp, filename, filesystem order, or observed result
+participates in either identity.
 
 The full 64 hexadecimal digits are stored even when a human-facing label uses
 a short prefix. Duplicate representations of one `trial_id` never consume
@@ -365,6 +451,12 @@ A `PHASE4-HYPOTHESIS-v1` payload contains:
 - allocation logic, cash rule, risk rule, and rebalance frequency;
 - expected turnover class;
 - expected strengths and named failure regimes;
+- an immutable deployment declaration with `rule_set_mode = FIXED`,
+  `parameter_tuple_mode = FIXED`, `annual_reoptimization = false`, and
+  `periodic_reoptimization = false`;
+- a preregistered, economically motivated regime-behavior map and any
+  deterministic regime partitions used for later diagnostics, with no
+  validation-derived boundaries;
 - bounded parameter dimensions and allowed typed values;
 - the complete deterministic grid definition and expected candidate count;
 - distinction from every Phase 2 baseline family;
@@ -388,26 +480,52 @@ create an empty readiness-to-implement seal.
 
 ## Fixed Phase 2 Comparison Baselines
 
-The proposed baseline labels and configurations are:
+The machine authority for Phase 2 trial membership is the already-sealed
+readiness artifact with this exact identity:
 
-| Baseline ID | Family | Exact parameters | Deterministic Phase 2 candidate ID |
-|---|---|---|---|
-| `baseline-trend-v1` | `trend` | `fast_window=20`, `slow_window=50`, `allocation=1.0` | `trend-c7473b1efeb67913` |
-| `baseline-momentum-v1` | `momentum` | `lookback=126`, `allocation=1.0` | `momentum-beed7614cb8af377` |
-| `baseline-trend-momentum-v1` | `trend_momentum` | `fast_window=20`, `slow_window=50`, `momentum_lookback=126`, `allocation=1.0` | `trend_momentum-83046debb18906e9` |
-| `baseline-risk-managed-trend-v1` | `risk_managed_trend` | `trend_window=150`, `volatility_window=40`, `target_volatility=0.10`, `maximum_exposure=1.0` | `risk_managed_trend-797646e3271d03bb` |
+```text
+kind            = trial_authority
+path            = results/phase4/readiness/trial_authority/sha256/fb88b52ceba1e53de0d3829a5dc995919bfec2711801700374bf25ce68cd7994/authority.json
+content_sha256  = fb88b52ceba1e53de0d3829a5dc995919bfec2711801700374bf25ce68cd7994
+sha256          = 2ab77e480a61c57f1c29395d4e93c2d9302533ab2f67ce364037965d1e1eb3f3
+schema_version  = PHASE4-TRIAL-AUTHORITY-EVIDENCE-v1
+authority_schema = PHASE4-TRIAL-AUTHORITY-v1
+trial_count     = 136
+```
+
+Its envelope is already linked by the exact Phase 4 readiness manifest. Gate 1
+must verify the authority artifact's exact bytes and envelope before parsing
+its identity-only projection. It must not rebuild the authority, enumerate
+`results/experiments`, choose a different readiness artifact, or parse Phase 2
+performance fields.
+
+The baseline labels, provenance classes, and configurations are:
+
+| Baseline ID | Provenance class | Family | Exact parameters | Deterministic Phase 2 candidate ID |
+|---|---|---|---|---|
+| `baseline-trend-v1` | `EXECUTED_PHASE2_BASELINE` | `trend` | `fast_window=20`, `slow_window=50`, `allocation=1.0` | `trend-c7473b1efeb67913` |
+| `baseline-momentum-v1` | `EXECUTED_PHASE2_BASELINE` | `momentum` | `lookback=126`, `allocation=1.0` | `momentum-beed7614cb8af377` |
+| `baseline-trend-momentum-v1` | `SOURCE_DEFINED_PHASE2_GRID_BASELINE` | `trend_momentum` | `fast_window=20`, `slow_window=50`, `momentum_lookback=126`, `allocation=1.0` | `trend_momentum-83046debb18906e9` |
+| `baseline-risk-managed-trend-v1` | `SOURCE_DEFINED_PHASE2_GRID_BASELINE` | `risk_managed_trend` | `trend_window=150`, `volatility_window=40`, `target_volatility=0.10`, `maximum_exposure=1.0` | `risk_managed_trend-797646e3271d03bb` |
+
+Both provenance classes are comparison-only controls. The four controls are
+not collectively described as “central Phase 2 configurations.” Exactly two
+are executed authoritative Phase 2 trials; exactly two are source-defined
+members of the committed Phase 2 generator grid that were not executed as
+authoritative Phase 2 trials.
 
 Each `PHASE4-BASELINE-DEFINITION-v1` record binds:
 
-- baseline ID, family, exact parameters, and deterministic Phase 2 candidate
-  ID;
+- baseline ID, provenance class, family, exact parameters, and deterministic
+  Phase 2 candidate ID;
 - Phase 2 generator revision
   `c33fb0757f0ea8147749130fed90d278aed4fafe`;
 - generator path
   `src/investment_tracker/quant/optimizer/candidate_generator.py`;
 - generator Git blob `39ae351c5b83d3f3477ed61f7f00a413fc1cb6d9` and exact-byte SHA-256
   `4db924185136c9ed702196407c62af37d9bdcb10bbbd486dc6984e33ff2e0cf0`;
-- the family implementation bundle identity;
+- the exact grid dimension definition and the family implementation bundle
+  identity;
 - frozen Phase 4 universe and split identities;
 - QFQ methodology identity
   `ffee9bac3fe329b14d5aebb0f6152f00fc0a86b28d9186c254b5c8f6f8a322fb`;
@@ -415,6 +533,15 @@ Each `PHASE4-BASELINE-DEFINITION-v1` record binds:
 - `phase4_candidate_trials_consumed = 0`;
 - `grid = null`, `eligible_for_selection = false`, and
   `validation_driven_selection = false`.
+
+An `EXECUTED_PHASE2_BASELINE` additionally binds one exact authoritative
+Phase 2 final-representation artifact path, kind, content digest, envelope
+identity, and candidate ID. A `SOURCE_DEFINED_PHASE2_GRID_BASELINE` requires
+those trial-artifact fields to be `null` and binds provenance only to the exact
+committed generator revision, generator blob and bytes, grid definition,
+parameter tuple, deterministic candidate ID, and implementation-bundle
+identity. Supplying or inferring a completed historical trial for a
+source-defined baseline is a provenance failure.
 
 The Phase 2 strategy files and shared base/indicator/registry files are
 byte-identical between the Phase 2 revision and current `main`. Canonical
@@ -430,41 +557,40 @@ implementation-bundle digests at the Phase 2 revision are:
 ### Provenance verification result
 
 The committed Phase 2 generator proves that all four exact configurations were
-predetermined members of the Phase 2 parameter grids before Phase 4. The
-window/lookback/volatility/target-volatility values are the middle values of
-their respective ordered dimensions. Allocation or maximum exposure `1.0` is
-an admitted Phase 2 value but is the maximum of `(0.25, 0.5, 1.0)`, not its
-middle value.
+predetermined members of the Phase 2 parameter grids before Phase 4. Signal
+and risk horizons use the pre-existing grid midpoint or central value where
+applicable. `allocation = 1.0` and `maximum_exposure = 1.0` are not midpoint
+values; they are frozen full-exposure comparator settings admitted by the
+pre-existing grid.
 
-The exact `trend` and `momentum` configurations each have one authoritative
-final Phase 2 trial artifact:
+The exact `trend` and `momentum` configurations each occur exactly once in the
+136-trial authority and bind these exact authoritative final artifacts:
 
-- `trend`: content digest
-  `556bc481d3978cf028edd19dec1fc05d6becb5d6e09e7e0c0f16ed80bc08846c`,
-  envelope identity
-  `330dd2c30e977376b844cbf50abfc9858f59a3df0b6ff53246ed5d13423174cb`.
-- `momentum`: content digest
-  `6495b221716f5f85a1b20fa16da79fe5521ee931119b8985aea9cafc30a6a8eb`,
-  envelope identity
-  `fb902a7fbb6f0824461c6b005325fcec6717989eb34513c173c37ccc486d9f13`.
+| Family | Kind | Repository-relative POSIX path | Content SHA-256 | Envelope SHA-256 |
+|---|---|---|---|---|
+| `trend` | `phase2_experiment` | `results/experiments/trend-c7473b1efeb67913-20260911T193719918435Z-d1014884.json` | `556bc481d3978cf028edd19dec1fc05d6becb5d6e09e7e0c0f16ed80bc08846c` | `330dd2c30e977376b844cbf50abfc9858f59a3df0b6ff53246ed5d13423174cb` |
+| `momentum` | `phase2_experiment` | `results/experiments/momentum-beed7614cb8af377-20260911T193737197057Z-42f3156e.json` | `6495b221716f5f85a1b20fa16da79fe5521ee931119b8985aea9cafc30a6a8eb` | `fb902a7fbb6f0824461c6b005325fcec6717989eb34513c173c37ccc486d9f13` |
 
-The exact `trend_momentum` and `risk_managed_trend` configurations have no
-Phase 2 experiment representation because the bounded Phase 2 family searches
-stopped before reaching them. Their prior definition is established by the
-committed generator blob, not by a completed trial artifact.
+The exact `trend_momentum` and `risk_managed_trend` candidate IDs are absent
+from the exact frozen 136-trial authority. They are therefore classified only as
+`SOURCE_DEFINED_PHASE2_GRID_BASELINE`; their prior definition is established
+by the exact committed generator source revision, grid definition, parameter
+tuple, deterministic candidate ID, and implementation identity. Gate 1 must
+not manufacture historical trial evidence for either control.
 
-Therefore the stronger claim that all four are fully central, previously
-evaluated Phase 2 evidence configurations is **not established**. Gate 1 must
-fail closed rather than label that claim verified. The baselines may be sealed
-only if specification approval explicitly accepts this narrower provenance:
+This narrower provenance classification is the approved authority. A baseline
+provenance set is `VERIFIED` only when all four identities reproduce, the class
+counts are exactly two `EXECUTED_PHASE2_BASELINE` and two
+`SOURCE_DEFINED_PHASE2_GRID_BASELINE`, executed controls bind their exact
+authoritative artifacts, and source-defined controls bind no trial artifact.
+Any broader historical-execution claim returns
+`BASELINE_PROVENANCE_UNRESOLVED` and prevents sealing.
 
-> Each baseline is a predetermined Phase 2 grid member using central signal and
-> risk horizons plus a frozen full-exposure comparator; two have authoritative
-> Phase 2 trial artifacts and two have source-definition provenance only.
-
-Without that explicit acceptance, baseline status is
-`BASELINE_PROVENANCE_UNRESOLVED`, no Gate 1 seal may be created, and Gate 2 may
-not begin.
+No baseline parameter was selected using Phase 4 validation performance. No
+Phase 2 numeric performance may be used to choose or alter a baseline. No
+baseline may be retuned, searched, optimized, or selected as the Phase 4
+winner. All four consume zero Phase 4 family slots and zero Phase 4 candidate
+budget.
 
 Any later modification of a baseline signal, filter, allocation, risk rule,
 parameter, or implementation bundle makes it a new Phase 4 hypothesis. It then
@@ -487,16 +613,22 @@ Each admitted hypothesis maps one-to-one to a
 - canonical declarative `grid_spec_digest`, computed from parameter dimensions
   and structural predicates before candidate expansion;
 - neighborhood definition based only on adjacent values in that grid;
-- component count and expected failure regimes; and
+- component count and expected failure regimes;
+- the same fixed-strategy deployment declaration and regime-behavior map
+  carried from the hypothesis;
+- canonically rederived `rule_set_sha256`; and
 - a canonical family-definition digest.
 
 Names alone do not establish novelty. The distinction field must compare the
 new family mechanically with each Phase 2 baseline. Adding any material filter
 or allocation rule to a baseline creates a new family and consumes budget.
-The semantic `family_id` excludes timestamps, artifact paths, the expanded
-candidate list, and artifact identities. This avoids a circular dependency:
-the family binds the declarative `grid_spec_digest`, while the expanded grid
-artifact binds the already-derived `family_id` and all candidate identities.
+The semantic `family_id` excludes its own derived value,
+`rule_set_sha256`, timestamps, artifact paths, the expanded candidate list,
+artifact identities, and observed evidence. This avoids a circular dependency:
+the family binds the declarative `grid_spec_digest`; `rule_set_sha256` then
+binds the already-derived `family_id` and algorithmic projection; and the
+expanded grid artifact binds the `family_id`, `parameter_tuple_sha256`, and all
+candidate identities.
 
 ## Deterministic Grid Construction
 
@@ -520,7 +652,9 @@ Grid expansion follows this fixed algorithm:
    order.
 
 The grid artifact stores both the declarative dimensions and the entire ordered
-expanded candidate list. Gate 2 must reproduce it byte-for-byte before any
+expanded candidate list. Each row includes the type-tagged canonical parameter
+map and its rederived `parameter_tuple_sha256`, `candidate_id`, `trial_id`, and
+budget position. Gate 2 must reproduce it byte-for-byte before any
 implementation verification. Gate 3 consumes that list; an LLM, optimizer, or
 human cannot choose candidate `N+1` from candidate `N` results.
 
@@ -577,6 +711,137 @@ An evaluation-system error fails the entire campaign as
 After all permitted evidence is evaluated, absence of an eligible survivor is
 the campaign outcome `NO_CREDIBLE_STRATEGY_FOUND`, not a family stop reason.
 
+## Fixed-Strategy Durability Policy
+
+Gate 1 freezes one `PHASE4-DURABILITY-POLICY-v1` authority. Its deployment
+objective is one long-only strategy with one immutable rule set and one exact
+parameter tuple, intended to remain usable for many years without annual or
+periodic parameter re-optimization. Strategy state may evolve only through
+the sealed rules; the rule set, parameter tuple, grid membership, and candidate
+identity may not change between calendar periods, validation folds, friction
+cases, robustness cases, or regimes.
+
+The primary fixed-strategy proof is:
+
+```text
+research/tune on permitted development data
+-> freeze the exact strategy and parameter tuple
+-> run that same strategy unchanged through later/unseen periods
+-> measure durability
+```
+
+Within the already-frozen Phase 4 architecture, “research/tune” means bounded
+source-based hypothesis and grid preregistration on permitted development
+information. It does not authorize parameter fitting to TRAIN performance:
+TRAIN observations remain usable only for lagged-indicator warm-up, and no
+TRAIN performance may influence VALIDATION. Every exact candidate tuple is
+sealed before any Phase 4 VALIDATION access, and VALIDATION results cannot
+generate a replacement tuple. Phase 4 is a bounded selection study rather than
+final decision-grade deployment proof; the unchanged downstream evaluation is
+still required.
+
+The four chronological Phase 4 walk-forward test folds are fixed-strategy
+subperiod evaluations of the same continuous VALIDATION replay. They do not
+fit, select, optimize, or replace parameters at a fold or calendar boundary.
+The validation portfolio resets once to initial cash and zero positions at the
+frozen VALIDATION boundary; folds do not introduce additional portfolio resets
+or TRAIN P&L. Strictly earlier TRAIN observations may be used only for the
+already-frozen lagged-indicator warm-up semantics. The first scored signal is
+on a VALIDATION session and executes on the next eligible VALIDATION session.
+
+Adaptive or re-optimized walk-forward research is not primary deployment
+evidence and is not permitted in this campaign. It may occur only as a
+separately identified, separately preregistered secondary experiment in a
+future campaign, and it cannot replace or modify the fixed-strategy proof.
+
+The durability-policy artifact makes this contract machine-verifiable with
+these exact fields:
+
+```text
+deployment_strategy_count       = 1
+position_direction              = LONG_ONLY
+rule_set_mode                    = FIXED
+parameter_tuple_mode             = FIXED
+parameter_fitting_from_train     = false
+annual_reoptimization            = false
+periodic_reoptimization          = false
+primary_proof_mode               = FIXED_PARAMETER_CHRONOLOGICAL
+adaptive_walk_forward_in_phase4  = false
+cagr_hard_target                 = null
+durability_precedes_fitted_cagr  = true
+```
+
+The survivor-policy artifact binds the durability-policy identity and exact
+ordered ranking-key list. A field mismatch, omitted identity, changed ranking
+order, or non-null CAGR hard target is `DURABILITY_POLICY_INVALID`.
+
+### Required durability evidence
+
+Where the frozen Phase 4 data supports the calculation, every candidate
+evidence record must include all of the following, derived from the same fixed
+VALIDATION return series:
+
+- ordered calendar-month returns and ordered calendar-year returns;
+- percentage of positive calendar months and calendar years;
+- average positive month and average negative month;
+- worst calendar month and worst calendar year;
+- longest consecutive sequence of losing calendar months;
+- ordered rolling 12-calendar-month returns;
+- ordered rolling 3-calendar-year returns;
+- calendar-month and calendar-year positive-return concentration;
+- top-three-positive-month return concentration;
+- parameter-neighborhood stability from the sealed grid;
+- friction sensitivity at the already-frozen 0, 3, 10, 25, and 50 basis-point
+  cases; and
+- performance by each preregistered deterministic regime partition, together
+  with a comparison to the hypothesis's economic mechanism and expected
+  failure regimes.
+
+Calendar-period return is the compounded return of every scored daily return
+whose session belongs to that calendar period. A period is complete only when
+the scored series contains every expected session inside the frozen
+VALIDATION boundary; an incomplete period is retained with
+`availability = UNKNOWN` and is excluded from aggregates. Positive percentage
+uses strictly positive complete-period returns divided by the count of complete
+periods. A losing month is strictly negative; zero breaks a losing sequence.
+Average positive and negative months are arithmetic means of the respective
+complete-month subsets and are `null / UNKNOWN` when the subset is empty.
+
+For each rolling horizon, subtract exactly 12 or 36 Gregorian calendar months
+from endpoint session date `t`, clamping an unavailable day to the last day of
+that target month. The anchor is the latest scored XNYS session on or before
+that date. Rolling return is `equity(t) / equity(anchor) - 1`. A window is
+available only when the target anchor date is within the frozen scored span and
+all expected sessions from the anchor through `t` are present. The evidence
+stores the ordered anchor/endpoint/return series or an immutable content
+identity for that exact series, plus the minimum, median, and positive-window
+percentage. When no complete window exists, that horizon is
+`UNKNOWN / INSUFFICIENT_DATA`; it is never approximated with a fixed session
+count or a shorter calendar window.
+
+For positive period returns `p_i`, positive-return concentration is
+`max(p_i) / sum(p_i)`. Top-three-positive-month concentration is the sum of the
+three largest positive month returns, or all positive months when fewer than
+three exist, divided by the sum of all positive month returns. A non-positive
+denominator produces `null / UNKNOWN`. These diagnostics answer whether
+performance depends disproportionately on a small number of periods; Gate 1
+does not invent a pass/fail threshold for them.
+
+The policy schema records exact formulas, horizon calendar offsets and anchor
+rules, period completeness rules, sign conventions, missing-value behavior,
+rank direction, and immutable policy identity. Required supported evidence
+that is absent or calculated under a different formula is `UNKNOWN` and fails
+evidence completeness; no value is imputed. The policy does not require every
+month or year to be profitable and creates no return threshold merely to
+manufacture a survivor.
+
+High CAGR remains desirable, including the aspirational possibility of a
+sustainable 15–20% or greater long-term CAGR, but robustness and durability
+take precedence over maximizing fitted CAGR. A candidate with slightly lower
+CAGR and stronger preregistered durability evidence may outrank a fragile
+higher-CAGR candidate. Robustness gates may not be weakened to cross any CAGR
+target.
+
 ## Survivor Policy Freeze
 
 The survivor policy is declarative, immutable, and applied only in Gate 3. It
@@ -617,8 +882,16 @@ A candidate is eligible for final ordering only when all are true:
    session-level target and realized gross exposure also remains in that range.
 10. The lower endpoint of the preregistered 2,000-draw, seed-0 bootstrap
     interval for median daily portfolio return is not negative.
-11. All strategy invariants, identity checks, and evidence completeness checks
-    pass.
+11. One exact candidate ID, family-definition digest, rule-set digest, and
+    parameter-tuple digest apply unchanged to every session, calendar period,
+    fold, regime, friction case, and robustness case. Any refit,
+    re-optimization, parameter substitution, or annual/periodic adaptation is
+    an invariant failure.
+12. Every supported monthly, yearly, rolling-period, concentration, regime,
+    neighborhood, and friction field required by
+    `PHASE4-DURABILITY-POLICY-v1` is present, formula-versioned, and linked to
+    the exact candidate return evidence; all other strategy invariants,
+    identity checks, and evidence completeness checks pass.
 
 Failure of any hard gate rejects the candidate. Missing required evidence is
 `UNKNOWN` and rejects; it never passes by omission.
@@ -642,26 +915,96 @@ If more than one candidate passes every hard gate, order candidates
 lexicographically by:
 
 1. walk-forward joint return/benchmark consistency, descending;
-2. parameter-neighborhood positive-return fraction, descending;
-3. 25-basis-point friction return retention ratio, descending;
-4. benchmark excess return, descending;
-5. Sharpe, descending;
-6. Sortino, descending;
-7. bootstrap lower endpoint, descending;
-8. annualized turnover, ascending;
-9. period concentration, ascending;
-10. preregistered signal-component count, ascending;
-11. VALIDATION total return, descending;
-12. CAGR, descending; and
-13. canonical candidate ID, ascending.
+2. percentage of positive calendar years, descending;
+3. minimum rolling 3-year return, descending;
+4. minimum rolling 12-month return, descending;
+5. longest losing-month sequence, ascending;
+6. worst calendar-year return, descending;
+7. worst calendar-month return, descending;
+8. positive calendar-year return concentration, ascending;
+9. top-three-positive-month return concentration, ascending;
+10. percentage of positive calendar months, descending;
+11. parameter-neighborhood positive-return fraction, descending;
+12. 25-basis-point friction return retention ratio, descending;
+13. benchmark excess return, descending;
+14. Sharpe, descending;
+15. Sortino, descending;
+16. bootstrap lower endpoint, descending;
+17. annualized turnover, ascending;
+18. walk-forward positive-return concentration, ascending;
+19. preregistered signal-component count, ascending;
+20. VALIDATION total return, descending;
+21. CAGR, descending; and
+22. canonical candidate ID, ascending.
 
-CAGR is therefore a late tie-breaker, not the primary objective. Economic
-rationale is an admission requirement established by source and hypothesis
-evidence, not a result-dependent numerical bonus.
+The comparison uses full-precision canonical metric values; display rounding
+never affects order. A metric that is supported but `UNKNOWN` has already
+failed evidence completeness. A structurally unsupported rolling horizon sorts
+after a supported value and otherwise continues to the next key, although the
+frozen 2019-01-02 through 2022-12-30 VALIDATION span supports both
+12-calendar-month and 3-calendar-year rolling horizons when return evidence is
+complete.
+
+CAGR is therefore a late tie-breaker rather than the primary objective.
+Calendar consistency, rolling-period stability, losing-streak control,
+concentration, neighboring-parameter stability, and friction robustness can
+cause a lower-CAGR candidate to outrank a fragile higher-CAGR candidate.
+Economic rationale and regime explainability are admission requirements
+established by source, hypothesis, and preregistered regime evidence, not
+result-dependent numerical bonuses.
 
 At most the first eligible candidate can receive
 `PHASE_4_CANDIDATE_SELECTED`. If none passes, the outcome is
 `NO_CREDIBLE_STRATEGY_FOUND`.
+
+## Downstream Phase 5 Long-History Requirement
+
+If and only if Phase 4 selects exactly one credible candidate, the Phase 4
+selection evidence must freeze that exact strategy implementation, rule-set
+digest, parameter tuple, candidate identity, and methodology identity before
+Phase 5 begins. Phase 5 must evaluate the **same frozen strategy unchanged** on
+the longest defensible clean historical dataset available for the frozen
+eight-ETF universe. The desired common history is approximately 15–20 years
+when reliable common history permits it; it is not a required length.
+
+If the frozen eight-ETF universe does not support the desired history, Phase 5
+reports the actual longest defensible common history. It must not:
+
+- alter, refit, or re-optimize parameters because of long-history results;
+- substitute an unavailable ETF to manufacture a longer common history;
+- create synthetic proxy history without a separately preregistered and
+  independently approved methodology; or
+- allow additional-history evidence to influence or revise the already
+  completed Phase 4 candidate selection.
+
+The Phase 5 evidence boundary is one-way: a committed Phase 4 selection may be
+an input to a future Phase 5 specification, but no Phase 5 dataset, result,
+metric, failure, or interpretation may flow back into Phase 4 ranking or
+selection. This requirement does not authorize Phase 5 execution, provider
+access, protected-symbol access, or release of `FINAL_HOLDOUT`.
+
+At minimum, the long-history durability evaluation reports:
+
+- CAGR;
+- calendar-year and calendar-month returns;
+- positive-year and positive-month percentages;
+- average winning month and average losing month;
+- worst year and worst month;
+- longest losing-month sequence;
+- rolling 12-month and rolling 3-year returns;
+- rolling 5-calendar-year returns when complete 60-calendar-month windows
+  exist;
+- return concentration and dependence on a small number of periods;
+- recovery characteristics;
+- consistency with the preregistered economic mechanism across regimes;
+- realistic cost and slippage sensitivity; and
+- drawdown metrics only after DQ-030 is formally resolved under separately
+  approved governance.
+
+The Phase 5 question is exactly: “Can this exact frozen strategy remain useful
+for many years without periodic retuning?” A long-history failure may prevent
+later promotion, but it does not authorize retroactive Phase 4 retuning or a
+different Phase 4 winner.
 
 ## Gate 1 Seal
 
@@ -672,6 +1015,7 @@ The final artifact is `PHASE4-PREREGISTRATION-MANIFEST-v1` with status
 - producing Git revision and canonical runtime dependency identity;
 - Phase 3 universe and DQ digests;
 - exact Phase 4 readiness manifest artifact identity;
+- exact Phase 4 readiness 136-trial-authority artifact identity;
 - source journal path, exact-byte digest, record count, and terminal digest;
 - research notes path and exact-byte digest;
 - hypothesis journal path, exact-byte digest, record count, and terminal
@@ -679,7 +1023,10 @@ The final artifact is `PHASE4-PREREGISTRATION-MANIFEST-v1` with status
 - baseline-definitions artifact identity;
 - strategy-family-definitions artifact identity;
 - deterministic-grids artifact identity;
+- the sorted `{family_id, rule_set_sha256}` set and a canonical aggregate
+  digest over the ordered `{candidate_id, parameter_tuple_sha256}` population;
 - budget and family-stop policy artifact identities;
+- fixed-strategy durability-policy artifact identity;
 - survivor-policy artifact identity;
 - information-access-policy artifact identity and exact observed-read set;
 - admitted source, hypothesis, family, and aggregate candidate counts;
@@ -687,7 +1034,15 @@ The final artifact is `PHASE4-PREREGISTRATION-MANIFEST-v1` with status
 - QFQ methodology identity and `decision_grade = false`;
 - DSR/PBO status;
 - all access/safety flags; and
-- `baseline_provenance_status = VERIFIED`.
+- `baseline_provenance_status = VERIFIED`, with exact provenance-class counts
+  `{EXECUTED_PHASE2_BASELINE: 2,
+  SOURCE_DEFINED_PHASE2_GRID_BASELINE: 2}`; and
+- the exact machine-verifiable deployment fields from
+  `PHASE4-DURABILITY-POLICY-v1`, including
+  `deployment_strategy_count = 1`, `position_direction = LONG_ONLY`,
+  `rule_set_mode = FIXED`, `parameter_tuple_mode = FIXED`,
+  `annual_reoptimization = false`, and
+  `periodic_reoptimization = false`.
 
 The manifest model recomputes every count and cross-link. It requires exact
 agreement between admitted hypotheses, families, grids, candidate identities,
@@ -700,8 +1055,8 @@ operation as the final fallible write. A failure cannot coexist with a newly
 published valid sealed manifest.
 
 After publication, source, note, hypothesis, baseline, family, grid, budget,
-stop, survivor, and access-policy mutation is forbidden. A new campaign/version
-must be created for any genuine correction.
+stop, durability, survivor, and access-policy mutation is forbidden. A new
+campaign/version must be created for any genuine correction.
 
 ## Failure Behavior
 
@@ -709,6 +1064,7 @@ Every Gate 1 entry point returns a machine-readable failure outcome and never a
 partial seal. Required failure codes include:
 
 - `READINESS_MANIFEST_MISMATCH`;
+- `FROZEN_SPLIT_MISMATCH`;
 - `BASELINE_PROVENANCE_UNRESOLVED`;
 - `SOURCE_CHAIN_INVALID`;
 - `SOURCE_EVIDENCE_INSUFFICIENT`;
@@ -718,6 +1074,7 @@ partial seal. Required failure codes include:
 - `GRID_INVALID`;
 - `FAMILY_BUDGET_EXCEEDED`;
 - `AGGREGATE_BUDGET_EXCEEDED`;
+- `DURABILITY_POLICY_INVALID`;
 - `SURVIVOR_POLICY_INVALID`;
 - `GATE1_INFORMATION_BOUNDARY_VIOLATION`;
 - `HISTORICAL_ARTIFACT_MUTATION`;
@@ -767,10 +1124,25 @@ bytes are hashed before and after the Gate 1 operation and must match.
 
 - the Phase 2 generator revision, blob, bytes, grid dimensions, and all four
   candidate IDs reproduce exactly;
+- the exact pinned readiness trial-authority envelope and bytes validate,
+  expose exactly 136 unique candidate identities, and are read without
+  filesystem enumeration;
+- provenance classes reproduce with exactly two
+  `EXECUTED_PHASE2_BASELINE` and two
+  `SOURCE_DEFINED_PHASE2_GRID_BASELINE` records;
 - the `trend` and `momentum` pinned artifact identities validate without reading
-  performance fields;
+  performance fields and each candidate ID occurs exactly once in the pinned
+  trial authority;
 - absence of exact Phase 2 trial artifacts for the other two baselines is
-  represented honestly and cannot be relabeled as completed trial evidence;
+  proven by candidate-ID absence from the pinned 136-trial authority, is
+  represented by required `null` artifact fields, and cannot be relabeled as
+  completed trial evidence;
+- the source-defined controls reproduce from the exact committed generator
+  revision, blob bytes, grid definition, tuple, candidate ID, and
+  implementation identity;
+- full exposure is labeled a comparator setting rather than a midpoint, and
+  no Phase 2 numeric performance or Phase 4 validation evidence is accepted as
+  baseline-selection input;
 - all baseline implementation bundles reproduce;
 - any baseline modification changes its identity and forces new-family budget
   treatment;
@@ -782,6 +1154,9 @@ bytes are hashed before and after the Gate 1 operation and must match.
 - dimension order and Cartesian expansion are stable across input mapping and
   filesystem order;
 - candidate and trial identities reproduce from canonical payloads;
+- rule-set, parameter-tuple, and ordered candidate/parameter-population
+  identities reproduce, and algorithm/parameter changes alter the appropriate
+  identities while timestamps, labels, and observed results do not;
 - budget positions start at 1 rather than 137;
 - duplicates do not consume budget;
 - family 11, candidate 501, or aggregate candidate 3,001 fails before append;
@@ -795,13 +1170,38 @@ bytes are hashed before and after the Gate 1 operation and must match.
 - `PERSISTENT_OOS_FAILURE` requires exactly 50 consecutive failures and a
   passing candidate resets the streak;
 - max drawdown, Calmar, DSR, and PBO remain unavailable and cannot affect rank;
+- the frozen TRAIN/VALIDATION split and warm-up semantics reproduce exactly and
+  cannot be replaced by a durability-policy field;
+- every candidate keeps one rule-set digest and parameter-tuple digest across
+  all sessions, periods, folds, regimes, friction cases, and robustness cases;
+- an annual, fold-level, or periodic refit/re-optimization attempt fails the
+  fixed-strategy invariant;
+- calendar month/year returns, positive percentages, positive/negative month
+  averages, worst periods, and longest losing-month sequence reproduce from
+  deterministic fixtures;
+- rolling 12-, 36-, and downstream 60-calendar-month anchor and completeness
+  rules reproduce exactly across weekends, exchange holidays, leap years, and
+  month ends, and insufficient history returns
+  `UNKNOWN / INSUFFICIENT_DATA` rather than a fixed-session or shorter proxy;
+- positive-period concentration and top-three-positive-month concentration
+  reproduce, including zero-denominator `UNKNOWN` behavior;
+- supported durability evidence cannot be omitted or calculated with a
+  different formula version;
 - every survivor hard gate and lexicographic tie-break is deterministic;
+- a lower-CAGR candidate with stronger earlier durability keys outranks a
+  fragile higher-CAGR candidate;
+- the fixed-strategy proof is primary and no adaptive walk-forward result can
+  enter the Phase 4 rank;
 - baselines cannot win even if their diagnostic result is strongest;
 - no qualifying candidate yields `NO_CREDIBLE_STRATEGY_FOUND`;
 - exactly one best eligible candidate yields one selection;
 - every seal dependency is exact, content-addressed, and read back;
 - report publication precedes the seal and the seal is the final write;
 - no failure result can coexist with a newly published valid seal;
+- the seal binds the durability-policy artifact, fixed-strategy deployment
+  fields, and exact two/two baseline provenance-class counts;
+- the downstream Phase 5 contract freezes the selected identity, prohibits
+  feedback into Phase 4, and cannot itself authorize data or provider access;
 - Phase 2/3/readiness artifacts remain byte-identical;
 - the complete existing test suite runs without weakening the Windows symlink
   test.
@@ -810,8 +1210,8 @@ bytes are hashed before and after the Gate 1 operation and must match.
 
 Gate 2 is forbidden until every condition is true:
 
-1. This specification is explicitly approved, including the narrower baseline
-   provenance statement or an approved replacement baseline policy.
+1. This specification and the approved two-class baseline provenance statement
+   are explicitly approved.
 2. A separate Gate 1 implementation plan is approved and implemented test-first.
 3. Gate 1 implementation and all regressions pass independent review.
 4. External research is complete through a recorded cutoff.
@@ -820,15 +1220,18 @@ Gate 2 is forbidden until every condition is true:
    and grids.
 7. Every grid and aggregate budget calculation reproduces and is within
    500/3,000 limits.
-8. Baseline provenance status is exactly `VERIFIED`; unresolved provenance
-   prevents sealing.
-9. Survivor, family-stop, budget, and access policies are immutable artifacts.
+8. Baseline provenance status is exactly `VERIFIED`, with exact two/two class
+   counts; unresolved or overstated provenance prevents sealing.
+9. Survivor, fixed-strategy durability, family-stop, budget, and access
+   policies are immutable artifacts.
 10. All Phase 2, Phase 3, and readiness artifact hashes are unchanged.
 11. All Gate 1 access flags remain false/zero/empty.
 12. The final manifest validates with status
     `PHASE4_PREREGISTRATION_SEALED` and is committed separately.
 13. Independent Audit or other governance authority has not imposed a new
     blocker.
+14. The manifest binds the one-strategy, long-only, fixed-rule,
+    fixed-parameter, no-periodic-reoptimization deployment objective.
 
 Gate 2 approval does not authorize Gate 3, validation execution, candidate
 evaluation, selection, promotion, export, or Phase 5.
@@ -869,5 +1272,15 @@ No Phase 4 validation data or metric was generated or inspected. No market-bar
 cache, provider, protected-symbol resource, `FINAL_HOLDOUT`, trading API, or
 canonical tracker state was accessed. Strategy search was not executed.
 
-Current design state is `DESIGN_COMPLETE_BASELINE_PROVENANCE_UNRESOLVED`.
+The approved provenance-and-durability clarification update inspected only
+this specification, repository Git metadata, and the identity-only projection
+of the already-sealed readiness manifest and 136-trial authority needed to pin
+baseline membership and artifact envelopes. It did not inspect any strategy
+performance metric, ranking, selection outcome, Phase 4 search result, Phase 4
+validation data or metric, market bar, provider state, protected-symbol
+resource, or `FINAL_HOLDOUT`. The disclosed non-performance Phase 2
+identity/classification projection was the only search-lineage evidence read.
+No strategy, search, backtest, or Gate 3 was executed.
+
+Current design state is `DESIGN_COMPLETE_PROVENANCE_AND_DURABILITY_APPROVED`.
 `PHASE4_PREREGISTRATION_SEALED` has not been produced.
