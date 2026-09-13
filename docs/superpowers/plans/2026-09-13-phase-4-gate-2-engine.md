@@ -181,8 +181,10 @@ at approved commit `4449bedbd80ec52bce0363f0c6df4768c4818a08`.
 
 - [ ] **Step 1: Write market-boundary RED tests**
 
-  Use hand-built UTC-midnight frames to verify stable symbol sorting, exact
-  binary64 value identity, defensive copying, warm-up strictly before scored,
+  Use hand-built UTC-midnight frames to verify preservation of already-canonical
+  ascending-symbol columns, rejection of noncanonical column order before
+  strategy invocation, exact binary64 value identity, defensive copying,
+  warm-up strictly before scored,
   and role-dependent hashes. Assert rejection of timezone-naive/non-UTC/
   non-midnight/duplicate/non-increasing sessions, duplicate or mismatched
   symbols, missing/extra/nonfinite/nonpositive values, non-binary64 coercion
@@ -333,7 +335,9 @@ at approved commit `4449bedbd80ec52bce0363f0c6df4768c4818a08`.
   scheduled execution. Prove an open without a due target preserves units,
   while a non-signal close may follow a due open fill. Verify notional tolerance
   `1e-12 * max(1, open_equity)`, first scored equity `100000.0`, zero-interest
-  cash, no reset leakage, cash benchmark, and one-fill equal-weight buy/hold.
+  cash, no reset leakage, cash benchmark, and one-rebalance equal-weight
+  buy/hold with one purchase fill per admitted symbol and no subsequent
+  rebalance.
 
 - [ ] **Step 3: Demonstrate RED**
 
@@ -700,9 +704,10 @@ at approved commit `4449bedbd80ec52bce0363f0c6df4768c4818a08`.
 - [ ] **Step 4: Implement report and final seal**
 
   Revalidate authority first; derive clean Git/source identities; run
-  synthetic conformance; build all payloads in memory; publish and verify each
-  non-final artifact; rehash the finite authority set; assert repository writes
-  are confined to Gate 2; build the report; commit the manifest last. Map every
+  synthetic conformance; build contract, binding, and conformance payloads;
+  publish and verify those artifacts; rehash the finite authority set and
+  verify confined writes; build, publish, and verify the report; then publish
+  the manifest last. Map every
   exception to a frozen machine-readable failure code and never repair,
   substitute, retry with altered inputs, or publish a success after failure.
 
@@ -744,7 +749,7 @@ at approved commit `4449bedbd80ec52bce0363f0c6df4768c4818a08`.
   Gate 2 tree absence, and safety fields. Fail closed on any mismatch; never
   delete or replace an existing artifact.
 
-- [ ] **Step 2: Run the provider-free seal once**
+- [ ] **Step 2: Run one provider-free seal attempt**
 
   ```powershell
   python -m investment_tracker.quant.phase4.engine.cli --repository-root .
@@ -791,8 +796,12 @@ at approved commit `4449bedbd80ec52bce0363f0c6df4768c4818a08`.
   commit boundaries, source/evidence immutability, and absence of Gate 3,
   validation metrics, ranking, survivor selection, providers, protected data,
   export, and trading. Resolve all Critical/Important or other load-bearing
-  findings, rerun affected tests, and revalidate the immutable seal without
-  overwriting it.
+  findings and rerun affected tests. A finding that requires any source change
+  invalidates the existing seal as evidence for the new revision: return to
+  the Task 9 reviewed fix loop, commit the source fix, rerun full pre-seal
+  verification, and publish a new content-addressed seal without deleting or
+  overwriting the prior artifacts. Repeat the final independent review against
+  that new seal. Never claim an older manifest attests changed source.
 
 - [ ] **Step 7: Stop at Gate 2**
 
