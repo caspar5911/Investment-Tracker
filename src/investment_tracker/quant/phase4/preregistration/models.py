@@ -10,6 +10,7 @@ from .canonical import artifact_envelope_identity
 
 ArtifactKind = Literal[
     "phase4_readiness_manifest",
+    "phase4_split_manifest",
     "trial_authority",
     "phase2_experiment",
     "baseline_definitions",
