@@ -3,8 +3,10 @@ from __future__ import annotations
 from hashlib import sha256
 import importlib
 import json
+import os
 from pathlib import Path, PurePosixPath
 import shutil
+import subprocess
 
 import pytest
 
@@ -75,6 +77,17 @@ def copy_allowlist(destination: Path) -> Path:
 
 def disable_ancestry(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(authority_module(), "_verify_ancestry", lambda *_: None)
+
+
+def create_junction(link: Path, target: Path) -> None:
+    completed = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        pytest.skip(f"junction creation unavailable: {completed.stderr}")
 
 
 def test_loads_the_exact_terminal_gate1_authority() -> None:
@@ -150,6 +163,29 @@ def test_loads_the_exact_terminal_gate1_authority() -> None:
     }
 
 
+def test_nested_gate1_dictionaries_cannot_mutate_returned_authority() -> None:
+    authority = load_authority(REPOSITORY_ROOT)
+    candidate_parameters = dict(authority.grids.candidates[0].raw_parameters)
+    family_dimensions = dict(authority.family_definitions[0].parameter_dimensions)
+    baseline_parameters = dict(authority.baselines.baselines[0].parameters)
+    provenance_counts = dict(authority.baselines.provenance_class_counts)
+    manifest_counts = dict(authority.manifest.baseline_provenance_class_counts)
+    population_digest = authority.grids.candidate_parameter_population_sha256
+
+    authority.grids.candidates[0].raw_parameters.clear()
+    authority.family_definitions[0].parameter_dimensions.clear()
+    authority.baselines.baselines[0].parameters.clear()
+    authority.baselines.provenance_class_counts.clear()
+    authority.manifest.baseline_provenance_class_counts.clear()
+
+    assert authority.grids.candidates[0].raw_parameters == candidate_parameters
+    assert authority.family_definitions[0].parameter_dimensions == family_dimensions
+    assert authority.baselines.baselines[0].parameters == baseline_parameters
+    assert authority.baselines.provenance_class_counts == provenance_counts
+    assert authority.manifest.baseline_provenance_class_counts == manifest_counts
+    assert authority.grids.candidate_parameter_population_sha256 == population_digest
+
+
 @pytest.mark.parametrize("mode", ["missing", "mutated"])
 def test_manifest_identity_fails_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
@@ -213,6 +249,42 @@ def test_symlinked_dependency_fails_before_read(
     with pytest.raises(authority_module().Gate2SealError) as caught:
         load_authority(repository, head_revision="a" * 40)
     assert caught.value.code == "GATE1_DEPENDENCY_MISMATCH"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction coverage")
+def test_junctioned_dependency_directory_fails_before_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = copy_allowlist(tmp_path / "repository")
+    disable_ancestry(monkeypatch)
+    junction = repository / "results" / "phase4" / "gate1" / "baseline_definitions"
+    target = tmp_path / "external-baseline-definitions"
+    shutil.move(junction, target)
+    create_junction(junction, target)
+    try:
+        with pytest.raises(authority_module().Gate2SealError) as caught:
+            load_authority(repository, head_revision="a" * 40)
+        assert caught.value.code == "GATE1_DEPENDENCY_MISMATCH"
+    finally:
+        junction.rmdir()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction coverage")
+def test_repository_root_ancestor_junction_fails_before_resolution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_parent = tmp_path / "real-parent"
+    real_parent.mkdir()
+    copy_allowlist(real_parent / "repository")
+    alias_parent = tmp_path / "alias-parent"
+    create_junction(alias_parent, real_parent)
+    disable_ancestry(monkeypatch)
+    try:
+        with pytest.raises(authority_module().Gate2SealError) as caught:
+            load_authority(alias_parent / "repository", head_revision="a" * 40)
+        assert caught.value.code == "GATE1_MANIFEST_MISMATCH"
+    finally:
+        alias_parent.rmdir()
 
 
 def test_terminal_metadata_links_are_not_traversed(

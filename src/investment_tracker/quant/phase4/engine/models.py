@@ -289,10 +289,8 @@ class Gate2Authority(FrozenGate2Model):
     starting_revision: Literal["fb1c30a6c9789bddf2033301977fc8e2f3ebc1a0"]
     head_revision: str = Field(pattern=r"^[0-9a-f]{40}$")
     manifest_identity: Gate1ArtifactIdentity
-    manifest: Phase4PreregistrationManifest
-    grids: PreregisteredGrids
-    family_definitions: tuple[StrategyFamilyDefinition, ...]
-    baselines: BaselineDefinitionSet
+    manifest_payload: bytes
+    deterministic_grids_payload: bytes
     family_definitions_payload: bytes
     baseline_definitions_payload: bytes
     direct_dependencies: tuple[DirectDependencyIdentity, ...] = Field(
@@ -313,18 +311,37 @@ class Gate2Authority(FrozenGate2Model):
     unavailable_statistics: UnavailableStatistics
     safety: SafetyAccessState
 
+    @property
+    def manifest(self) -> Phase4PreregistrationManifest:
+        return Phase4PreregistrationManifest.model_validate_json(self.manifest_payload)
+
+    @property
+    def grids(self) -> PreregisteredGrids:
+        return PreregisteredGrids.model_validate_json(self.deterministic_grids_payload)
+
+    @property
+    def family_definitions(self) -> tuple[StrategyFamilyDefinition, ...]:
+        return self.grids.families
+
+    @property
+    def baselines(self) -> BaselineDefinitionSet:
+        return BaselineDefinitionSet.model_validate_json(
+            self.baseline_definitions_payload
+        )
+
     @model_validator(mode="after")
     def validate_authority_links(self) -> "Gate2Authority":
-        if self.family_definitions != self.grids.families:
-            raise ValueError("family definitions differ from deterministic grids")
+        manifest = self.manifest
+        grids = self.grids
+        self.baselines
         if len({item.path for item in self.direct_dependencies}) != 15:
             raise ValueError("direct dependency paths must be unique")
-        if self.manifest.candidate_parameter_population_sha256 != (
-            self.grids.candidate_parameter_population_sha256
+        if manifest.candidate_parameter_population_sha256 != (
+            grids.candidate_parameter_population_sha256
         ):
             raise ValueError("candidate population differs from Gate 1 manifest")
-        if self.manifest.historical_phase2_trials != self.historical_phase2_trials:
+        if manifest.historical_phase2_trials != self.historical_phase2_trials:
             raise ValueError("historical trial count differs from Gate 1 manifest")
-        if self.manifest.phase4_initial_consumption != self.phase4_trials_consumed:
+        if manifest.phase4_initial_consumption != self.phase4_trials_consumed:
             raise ValueError("Phase 4 consumption differs from Gate 1 manifest")
         return self

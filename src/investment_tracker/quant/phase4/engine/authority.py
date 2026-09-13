@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from hashlib import sha256
 import json
+import os
 from pathlib import Path, PurePosixPath
+import stat
 import subprocess
 from typing import Callable
 
@@ -163,14 +165,36 @@ PINNED_DIRECT_DEPENDENCIES = (
 )
 
 
-def _repository_root(repository_root: Path, code: str) -> Path:
-    supplied = Path(repository_root)
+def _is_redirect(path: Path) -> bool:
     try:
-        if supplied.is_symlink():
-            raise Gate2SealError(code, "repository root is a symlink")
-        root = supplied.resolve(strict=True)
-    except Gate2SealError:
-        raise
+        if path.is_symlink():
+            return True
+        is_junction = getattr(path, "is_junction", None)
+        if is_junction is not None and is_junction():
+            return True
+        attributes = getattr(path.lstat(), "st_file_attributes", 0)
+        return bool(attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
+    except FileNotFoundError:
+        return False
+
+
+def _assert_no_redirect_components(path: Path, code: str, label: str) -> None:
+    current = Path(path.anchor)
+    for component in path.parts[1:]:
+        current = current / component
+        try:
+            redirected = _is_redirect(current)
+        except OSError as exc:
+            raise Gate2SealError(code, f"{label} reparse status is unreadable") from exc
+        if redirected:
+            raise Gate2SealError(code, f"{label} contains a filesystem redirect")
+
+
+def _repository_root(repository_root: Path, code: str) -> Path:
+    lexical = Path(os.path.abspath(Path(repository_root)))
+    _assert_no_redirect_components(lexical, code, "repository root")
+    try:
+        root = lexical.resolve(strict=True)
     except OSError as exc:
         raise Gate2SealError(code, "repository root does not exist") from exc
     if not root.is_dir():
@@ -187,12 +211,27 @@ def _read_exact(
     current = root
     for component in PurePosixPath(identity.path).parts:
         current = current / component
-        if current.is_symlink():
-            raise Gate2SealError(code, f"dependency path is symlinked: {identity.path}")
-    if not current.is_file():
+        try:
+            redirected = _is_redirect(current)
+        except OSError as exc:
+            raise Gate2SealError(
+                code, f"dependency reparse status is unreadable: {identity.path}"
+            ) from exc
+        if redirected:
+            raise Gate2SealError(
+                code, f"dependency path is redirected: {identity.path}"
+            )
+    try:
+        resolved = current.resolve(strict=True)
+        resolved.relative_to(root)
+    except (OSError, ValueError) as exc:
+        raise Gate2SealError(
+            code, f"dependency resolves outside repository: {identity.path}"
+        ) from exc
+    if not resolved.is_file():
         raise Gate2SealError(code, f"dependency is not a regular file: {identity.path}")
     try:
-        payload = current.read_bytes()
+        payload = resolved.read_bytes()
     except OSError as exc:
         raise Gate2SealError(
             code, f"dependency is unreadable: {identity.path}"
@@ -859,10 +898,8 @@ def load_gate2_authority(
         starting_revision=STARTING_REVISION,
         head_revision=revision,
         manifest_identity=GATE1_MANIFEST_IDENTITY,
-        manifest=manifest,
-        grids=grids,
-        family_definitions=grids.families,
-        baselines=baselines,
+        manifest_payload=manifest_bytes,
+        deterministic_grids_payload=payloads[1],
         family_definitions_payload=payloads[6],
         baseline_definitions_payload=payloads[0],
         direct_dependencies=dependencies,
