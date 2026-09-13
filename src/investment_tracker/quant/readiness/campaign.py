@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from hashlib import sha256
+from importlib import metadata as importlib_metadata
 from pathlib import Path, PurePosixPath
+import platform
+import re
+import subprocess
 from typing import Literal
 
 from pydantic import Field, ValidationError, model_validator
@@ -20,6 +24,7 @@ from .bootstrap_audit import (
 from .hashing import (
     ArtifactIdentityError,
     artifact_identity,
+    canonical_json_bytes,
     canonical_sha256,
     normalize_repository_path,
 )
@@ -79,6 +84,8 @@ class Phase4ReadinessManifest(FrozenReadinessModel):
         "PHASE4-READINESS-MANIFEST-v1"
     )
     status: Literal["PHASE_4_READY"] = "PHASE_4_READY"
+    source_revision: str = Field(pattern=r"^[0-9a-f]{40,64}$")
+    dependency_identity: str = Field(pattern=r"^[0-9a-f]{64}$")
     bootstrap_input_vector: ReadinessArtifactIdentity
     bootstrap_audit: ReadinessArtifactIdentity
     trial_authority: ReadinessArtifactIdentity
@@ -159,7 +166,69 @@ def _failed(reason_code: str, exc: Exception) -> Phase4ReadinessOutcome:
     )
 
 
-def _protected_tree_digest(repository_root: Path, relative_path: str) -> str:
+def _runtime_source_revision(repository_root: Path) -> str:
+    try:
+        revision = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repository_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise ReadinessArtifactIntegrityError(
+            "source revision is unavailable for the configured repository"
+        ) from exc
+    if re.fullmatch(r"[0-9a-f]{40,64}", revision) is None:
+        raise ReadinessArtifactIntegrityError("source revision is not canonical")
+    return revision
+
+
+def _runtime_dependency_identity() -> str:
+    packages = sorted(
+        (
+            distribution.metadata.get("Name", "UNKNOWN"),
+            distribution.version,
+        )
+        for distribution in importlib_metadata.distributions()
+    )
+    return canonical_sha256(
+        {
+            "python": platform.python_version(),
+            "platform": platform.platform(),
+            "packages": packages,
+        }
+    )
+
+
+def _verified_runtime_identities(
+    repository_root: Path,
+    *,
+    source_revision: str | None,
+    dependency_identity: str | None,
+) -> tuple[str, str]:
+    revision = (
+        _runtime_source_revision(repository_root)
+        if source_revision is None
+        else source_revision
+    )
+    dependencies = (
+        _runtime_dependency_identity()
+        if dependency_identity is None
+        else dependency_identity
+    )
+    if not isinstance(revision, str) or re.fullmatch(
+        r"[0-9a-f]{40,64}", revision
+    ) is None:
+        raise ReadinessArtifactIntegrityError("source revision is not canonical")
+    if not isinstance(dependencies, str) or re.fullmatch(
+        r"[0-9a-f]{64}", dependencies
+    ) is None:
+        raise ReadinessArtifactIntegrityError("dependency identity is not canonical")
+    return revision, dependencies
+
+
+def _scan_protected_tree_digest(repository_root: Path, relative_path: str) -> str:
     try:
         normalized = normalize_repository_path(
             repository_root,
@@ -201,6 +270,17 @@ def _protected_tree_digest(repository_root: Path, relative_path: str) -> str:
             f"protected historical tree is empty: {relative_path}"
         )
     return canonical_sha256(entries)
+
+
+def _protected_tree_digest(repository_root: Path, relative_path: str) -> str:
+    try:
+        return _scan_protected_tree_digest(repository_root, relative_path)
+    except ReadinessArtifactIntegrityError:
+        raise
+    except (OSError, TypeError, ValueError) as exc:
+        raise ReadinessArtifactIntegrityError(
+            f"protected historical tree cannot be read: {relative_path}: {exc}"
+        ) from exc
 
 
 def _protected_tree_digests(
@@ -281,6 +361,9 @@ def _verify_written_artifacts(
 def run_phase4_readiness(
     repository_root: Path,
     results_root: Path,
+    *,
+    source_revision: str | None = None,
+    dependency_identity: str | None = None,
 ) -> Phase4ReadinessOutcome:
     try:
         configured_repository = Path(repository_root)
@@ -296,6 +379,17 @@ def run_phase4_readiness(
         before_trees = _protected_tree_digests(repository)
     except Exception as exc:
         return _failed("ROOT_VALIDATION_FAILED", exc)
+
+    try:
+        verified_source_revision, verified_dependency_identity = (
+            _verified_runtime_identities(
+                repository,
+                source_revision=source_revision,
+                dependency_identity=dependency_identity,
+            )
+        )
+    except ReadinessArtifactIntegrityError as exc:
+        return _failed("RUNTIME_IDENTITY_FAILED", exc)
 
     try:
         source = load_pinned_bootstrap_source(repository)
@@ -403,7 +497,13 @@ def run_phase4_readiness(
             raise ReadinessArtifactIntegrityError(
                 "protected historical artifact tree changed during readiness audit"
             )
-    except ReadinessArtifactIntegrityError as exc:
+    except (
+        ReadinessArtifactIntegrityError,
+        OSError,
+        TypeError,
+        ValueError,
+        ValidationError,
+    ) as exc:
         return _failed("PROTECTED_TREE_MUTATION", exc)
 
     try:
@@ -444,6 +544,13 @@ def run_phase4_readiness(
             bootstrap_zero_count=verified_vector.zero_count,
             bootstrap_positive_count=verified_vector.positive_count,
             bootstrap_interval=verified_audit.interval,
+            bootstrap_draws=verified_audit.draws,
+            bootstrap_seed=verified_audit.seed,
+            bootstrap_lower_percentile=verified_audit.lower_percentile,
+            bootstrap_upper_percentile=verified_audit.upper_percentile,
+            bootstrap_zero_resampled_medians=(
+                verified_audit.zero_resampled_medians
+            ),
             historical_phase2_trial_count=(
                 verified_authority.authority.historical_phase2_trial_count
             ),
@@ -452,6 +559,15 @@ def run_phase4_readiness(
             ),
             phase4_new_trials_remaining=(
                 verified_configuration.phase4_new_trials_remaining
+            ),
+            maximum_new_strategy_families=(
+                verified_configuration.maximum_new_strategy_families
+            ),
+            maximum_candidate_trials_per_family=(
+                verified_configuration.maximum_candidate_trials_per_family
+            ),
+            maximum_aggregate_new_candidate_trials=(
+                verified_configuration.maximum_aggregate_new_candidate_trials
             ),
             dsr=dsr,
             pbo=pbo,
@@ -479,6 +595,8 @@ def run_phase4_readiness(
                 "written readiness report does not match rendered summary"
             )
         manifest_model = Phase4ReadinessManifest(
+            source_revision=verified_source_revision,
+            dependency_identity=verified_dependency_identity,
             bootstrap_input_vector=summary.bootstrap_input_vector,
             bootstrap_audit=summary.bootstrap_audit,
             trial_authority=summary.trial_authority,
@@ -489,12 +607,37 @@ def run_phase4_readiness(
             pbo=summary.pbo,
             protected_tree_digests=summary.protected_tree_digests,
         )
-        manifest_identity = store.write_json(
+        manifest_payload = manifest_model.model_dump(mode="json")
+        Phase4ReadinessManifest.model_validate(manifest_payload)
+        manifest_bytes = canonical_json_bytes(manifest_payload)
+        manifest_content_sha256 = sha256(manifest_bytes).hexdigest()
+        manifest_path = (
+            "results/phase4/readiness/phase4_readiness_manifest/sha256/"
+            f"{manifest_content_sha256}/manifest.json"
+        )
+        expected_manifest_identity = ReadinessArtifactIdentity(
+            kind="phase4_readiness_manifest",
+            content_sha256=manifest_content_sha256,
+            path=manifest_path,
+            sha256=canonical_sha256(
+                {
+                    "content_sha256": manifest_content_sha256,
+                    "kind": "phase4_readiness_manifest",
+                    "path": manifest_path,
+                }
+            ),
+        )
+        ready_outcome = Phase4ReadinessOutcome(
+            status="PHASE_4_READY",
+            manifest=expected_manifest_identity,
+            report=report_identity,
+            summary=summary,
+        )
+        store.write_json(
             "phase4_readiness_manifest",
             "manifest.json",
-            manifest_model.model_dump(mode="json"),
+            manifest_payload,
         )
-        Phase4ReadinessManifest.model_validate(store.read_json(manifest_identity))
     except (
         ReadinessArtifactIntegrityError,
         ReadinessReportError,
@@ -504,9 +647,4 @@ def run_phase4_readiness(
     ) as exc:
         return _failed("FINAL_READINESS_EVIDENCE_FAILED", exc)
 
-    return Phase4ReadinessOutcome(
-        status="PHASE_4_READY",
-        manifest=manifest_identity,
-        report=report_identity,
-        summary=summary,
-    )
+    return ready_outcome

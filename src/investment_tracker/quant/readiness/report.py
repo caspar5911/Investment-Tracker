@@ -43,12 +43,28 @@ class Phase4ReadinessSummary(FrozenReadinessModel):
     bootstrap_zero_count: Literal[368] = 368
     bootstrap_positive_count: Literal[351] = 351
     bootstrap_interval: tuple[Literal[0.0], Literal[0.0]] = (0.0, 0.0)
+    bootstrap_resampling_unit: Literal[
+        "DAILY_EQUAL_WEIGHT_PORTFOLIO_RETURN"
+    ] = "DAILY_EQUAL_WEIGHT_PORTFOLIO_RETURN"
+    bootstrap_sampling_method: Literal[
+        "INDEPENDENT_WITH_REPLACEMENT"
+    ] = "INDEPENDENT_WITH_REPLACEMENT"
+    bootstrap_draws: Literal[2000] = 2000
+    bootstrap_seed: Literal[0] = 0
+    bootstrap_lower_percentile: Literal[5.0] = 5.0
+    bootstrap_upper_percentile: Literal[95.0] = 95.0
+    bootstrap_percentile_method: Literal[
+        "NUMPY_PERCENTILE_DEFAULTS"
+    ] = "NUMPY_PERCENTILE_DEFAULTS"
+    bootstrap_zero_resampled_medians: Literal[2000] = 2000
     bootstrap_claim_scope: Literal[
         "MEDIAN_DAILY_EQUAL_WEIGHT_PORTFOLIO_RETURN_ONLY"
     ] = "MEDIAN_DAILY_EQUAL_WEIGHT_PORTFOLIO_RETURN_ONLY"
     historical_phase2_trial_count: Literal[136] = 136
     phase4_new_trials_consumed: Literal[0] = 0
     phase4_new_trials_remaining: Literal[3000] = 3000
+    maximum_new_strategy_families: Literal[10] = 10
+    maximum_candidate_trials_per_family: Literal[500] = 500
     maximum_aggregate_new_candidate_trials: Literal[3000] = 3000
     dsr: SearchAwareStatisticResult
     pbo: SearchAwareStatisticResult
@@ -151,6 +167,12 @@ def render_readiness_report(summary: Phase4ReadinessSummary) -> str:
         "## Bootstrap evidence",
         "",
         "- Bootstrap statistic: median daily equal-weight portfolio return",
+        "- Sampling: independently with replacement from daily equal-weight portfolio returns",
+        "- Median statistic per resample",
+        "- 2,000 bootstrap draws",
+        "- PRNG seed: 0",
+        "- Interval endpoints: 5th and 95th percentiles using NumPy percentile defaults",
+        "- All 2,000 resampled medians were exactly zero",
         "- Sample count: 1,007",
         "- Sign counts: 288 negative, 368 zero, 351 positive",
         "- Reproduced interval: [0.0, 0.0]",
@@ -160,6 +182,9 @@ def render_readiness_report(summary: Phase4ReadinessSummary) -> str:
         "",
         "- 136 historical Phase 2 trials",
         "- Phase 4 budget consumed: 0 of 3,000",
+        "- Maximum new strategy families: 10",
+        "- Maximum candidate trials per family: 500",
+        "- Maximum aggregate new candidate trials: 3,000",
         f"- DSR: {verified.dsr.interpretation}/{verified.dsr.status} — {verified.dsr.reason}",
         f"- PBO: {verified.pbo.interpretation}/{verified.pbo.status} — {verified.pbo.reason}",
         "",

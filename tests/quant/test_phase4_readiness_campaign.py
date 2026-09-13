@@ -29,6 +29,8 @@ PROTECTED_TREES = (
     "results/phase3",
     "data/cache/phase3",
 )
+SOURCE_REVISION = "1" * 40
+DEPENDENCY_IDENTITY = "2" * 64
 
 
 @dataclass(frozen=True)
@@ -82,6 +84,15 @@ def _tree_digest(repository: Path, relative: str) -> str:
     return canonical_sha256(entries)
 
 
+def _run_readiness(provider_free_repo: ProviderFreeRepository):
+    return run_phase4_readiness(
+        provider_free_repo.root,
+        provider_free_repo.root / "results",
+        source_revision=SOURCE_REVISION,
+        dependency_identity=DEPENDENCY_IDENTITY,
+    )
+
+
 def test_readiness_campaign_writes_complete_linked_evidence_last(
     provider_free_repo: ProviderFreeRepository,
     monkeypatch: pytest.MonkeyPatch,
@@ -105,10 +116,7 @@ def test_readiness_campaign_writes_complete_linked_evidence_last(
         for relative in PROTECTED_TREES
     }
 
-    outcome = run_phase4_readiness(
-        provider_free_repo.root,
-        provider_free_repo.root / "results",
-    )
+    outcome = _run_readiness(provider_free_repo)
 
     after = {
         relative: _tree_digest(provider_free_repo.root, relative)
@@ -150,22 +158,42 @@ def test_readiness_campaign_writes_complete_linked_evidence_last(
 def test_readiness_report_is_complete_and_non_circular(
     provider_free_repo: ProviderFreeRepository,
 ) -> None:
-    outcome = run_phase4_readiness(
-        provider_free_repo.root,
-        provider_free_repo.root / "results",
-    )
+    outcome = _run_readiness(provider_free_repo)
     assert outcome.summary is not None
     assert outcome.report is not None
     assert outcome.manifest is not None
+    assert outcome.summary.bootstrap_resampling_unit == (
+        "DAILY_EQUAL_WEIGHT_PORTFOLIO_RETURN"
+    )
+    assert outcome.summary.bootstrap_sampling_method == "INDEPENDENT_WITH_REPLACEMENT"
+    assert outcome.summary.bootstrap_draws == 2000
+    assert outcome.summary.bootstrap_seed == 0
+    assert outcome.summary.bootstrap_lower_percentile == 5.0
+    assert outcome.summary.bootstrap_upper_percentile == 95.0
+    assert outcome.summary.bootstrap_percentile_method == "NUMPY_PERCENTILE_DEFAULTS"
+    assert outcome.summary.bootstrap_zero_resampled_medians == 2000
+    assert outcome.summary.maximum_new_strategy_families == 10
+    assert outcome.summary.maximum_candidate_trials_per_family == 500
+    assert outcome.summary.maximum_aggregate_new_candidate_trials == 3000
 
     report = provider_free_repo.store.read_text(outcome.report)
     assert report == render_readiness_report(outcome.summary)
     for expected in (
         "median daily equal-weight portfolio return",
+        "independently with replacement from daily equal-weight portfolio returns",
+        "Median statistic per resample",
+        "2,000 bootstrap draws",
+        "PRNG seed: 0",
+        "5th and 95th percentiles",
+        "NumPy percentile defaults",
+        "All 2,000 resampled medians were exactly zero",
         "1,007",
         "[0.0, 0.0]",
         "136 historical Phase 2 trials",
         "0 of 3,000",
+        "Maximum new strategy families: 10",
+        "Maximum candidate trials per family: 500",
+        "Maximum aggregate new candidate trials: 3,000",
         "DSR: UNKNOWN/NOT_IMPLEMENTED",
         "PBO: UNKNOWN/NOT_IMPLEMENTED",
         "TRAIN declared: 2014-01-02 through 2018-12-31; actual: 2014-01-02 through 2018-12-31 (1,258 sessions)",
@@ -194,10 +222,7 @@ def test_fail_closed_campaign_does_not_write_ready_manifest(
 ) -> None:
     provider_free_repo.tamper_pinned_source()
 
-    outcome = run_phase4_readiness(
-        provider_free_repo.root,
-        provider_free_repo.root / "results",
-    )
+    outcome = _run_readiness(provider_free_repo)
 
     assert outcome.status == "READINESS_FAILED"
     assert outcome.reason_code == "PINNED_BOOTSTRAP_SOURCE_MISMATCH"
@@ -231,6 +256,74 @@ def test_configured_repository_path_is_validated_before_resolution(
     assert observed["repository_root"] == configured
     assert outcome.status == "READINESS_FAILED"
     assert outcome.reason_code == "ROOT_VALIDATION_FAILED"
+
+
+def test_final_manifest_publication_is_the_last_fallible_commit_point(
+    provider_free_repo: ProviderFreeRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_read_json = ReadinessArtifactStore.read_json
+
+    def reject_manifest_reopen(self, identity):
+        if identity.kind == "phase4_readiness_manifest":
+            raise ReadinessArtifactIntegrityError("post-publication read failed")
+        return original_read_json(self, identity)
+
+    monkeypatch.setattr(ReadinessArtifactStore, "read_json", reject_manifest_reopen)
+
+    outcome = _run_readiness(provider_free_repo)
+    manifest_root = (
+        provider_free_repo.root
+        / "results/phase4/readiness/phase4_readiness_manifest"
+    )
+
+    assert not (
+        outcome.status == "READINESS_FAILED"
+        and any(manifest_root.rglob("manifest.json"))
+    )
+    assert outcome.status == "PHASE_4_READY"
+
+
+def test_second_protected_tree_scan_io_failure_is_machine_readable(
+    provider_free_repo: ProviderFreeRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    protected_root = provider_free_repo.root / "data/cache/phase3"
+    original_rglob = Path.rglob
+    calls = 0
+
+    def fail_second_scan(self: Path, pattern: str):
+        nonlocal calls
+        if self == protected_root:
+            calls += 1
+            if calls == 2:
+                raise OSError("second protected-tree scan failed")
+        return original_rglob(self, pattern)
+
+    monkeypatch.setattr(Path, "rglob", fail_second_scan)
+
+    outcome = _run_readiness(provider_free_repo)
+
+    assert outcome.status == "READINESS_FAILED"
+    assert outcome.reason_code == "PROTECTED_TREE_MUTATION"
+    assert "second protected-tree scan failed" in outcome.reason
+    assert outcome.manifest is None
+    assert not (
+        provider_free_repo.root
+        / "results/phase4/readiness/phase4_readiness_manifest"
+    ).exists()
+
+
+def test_manifest_persists_explicit_runtime_identities(
+    provider_free_repo: ProviderFreeRepository,
+) -> None:
+    outcome = _run_readiness(provider_free_repo)
+    assert outcome.manifest is not None
+
+    manifest = provider_free_repo.store.read_json(outcome.manifest)
+
+    assert manifest["source_revision"] == SOURCE_REVISION
+    assert manifest["dependency_identity"] == DEPENDENCY_IDENTITY
 
 
 def test_readiness_public_api_exposes_only_bounded_audit_entrypoints() -> None:
