@@ -73,9 +73,9 @@ GATE2_SOURCE_BUNDLES: dict[str, tuple[str, ...]] = {
         (
             "seal.py",
             "artifacts.py",
+            "authority.py",
             "conformance.py",
             "models.py",
-            "robustness.py",
             "source_identity.py",
         )
     ),

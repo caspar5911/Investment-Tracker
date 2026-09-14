@@ -192,9 +192,9 @@ def test_bundle_membership_rules_cover_signal_target_and_accounting_sources() ->
                 for name in (
                     "seal.py",
                     "artifacts.py",
+                    "authority.py",
                     "conformance.py",
                     "models.py",
-                    "robustness.py",
                     "source_identity.py",
                 )
             }
