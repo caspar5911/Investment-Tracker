@@ -159,6 +159,8 @@ def test_bundle_membership_rules_cover_signal_target_and_accounting_sources() ->
         "evidence",
         "authority",
         "artifact",
+        "seal",
+        "cli",
         "engine",
     }
     prefix = "src/investment_tracker/quant/phase4/engine/"
@@ -183,6 +185,26 @@ def test_bundle_membership_rules_cover_signal_target_and_accounting_sources() ->
     assert tuple(bundles["evidence"]) == (f"{prefix}evidence.py",)
     assert tuple(bundles["authority"]) == (f"{prefix}authority.py",)
     assert tuple(bundles["artifact"]) == (f"{prefix}artifacts.py",)
+    assert tuple(bundles["seal"]) == tuple(
+        sorted(
+            {
+                f"{prefix}{name}"
+                for name in (
+                    "seal.py",
+                    "artifacts.py",
+                    "conformance.py",
+                    "models.py",
+                    "robustness.py",
+                    "source_identity.py",
+                )
+            }
+        )
+    )
+    assert tuple(bundles["cli"]) == tuple(
+        sorted(
+            {f"{prefix}{name}" for name in ("cli.py", "authority.py", "models.py", "seal.py")}
+        )
+    )
     for values in bundles.values():
         assert values == tuple(sorted(set(values)))
 
