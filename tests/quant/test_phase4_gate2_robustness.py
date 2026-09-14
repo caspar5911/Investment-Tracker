@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
+from pydantic import ValidationError
 
 from investment_tracker.quant.phase4.engine.market import MarketPanel
 from investment_tracker.quant.phase4.engine.models import Gate2SealError
@@ -253,23 +254,48 @@ def test_slice_folds_missing_authority_fails_closed(authority) -> None:
 
 
 def test_slice_folds_use_continuous_equity_without_reset(authority) -> None:
-    sessions, replay = _replay(authority, periods=4)
+    sessions, replay = _replay(authority, periods=5)
     authority_model = FoldAuthority(
-        fold_ids=("fold-0", "fold-1"),
-        boundaries=((sessions[0], sessions[2]), (sessions[2], sessions[3])),
+        fold_ids=("fold-0", "fold-1", "fold-2", "fold-3"),
+        boundaries=(
+            (sessions[0], sessions[1]),
+            (sessions[1], sessions[2]),
+            (sessions[2], sessions[3]),
+            (sessions[3], sessions[4]),
+        ),
     )
     evidence = slice_continuous_folds(replay, authority_model)
 
     equity = replay.close_equity
     assert evidence.fold_returns[0].value == pytest.approx(
-        equity[2] / equity[0] - 1.0
+        equity[1] / equity[0] - 1.0
     )
     assert evidence.fold_returns[1].value == pytest.approx(
-        equity[3] / equity[2] - 1.0
+        equity[2] / equity[1] - 1.0
     )
     # slicing the same continuous series: no discontinuity or reset at the seam
-    assert evidence.fold_equity_start[1] == pytest.approx(equity[2])
-    assert evidence.fold_equity_end[0] == pytest.approx(equity[2])
+    assert evidence.fold_equity_start[1] == pytest.approx(equity[1])
+    assert evidence.fold_equity_end[0] == pytest.approx(equity[1])
+
+
+def test_fold_authority_rejects_two_fold_or_noncontiguous_interface(authority) -> None:
+    sessions, _ = _replay(authority, periods=5)
+
+    with pytest.raises(ValidationError):
+        FoldAuthority(
+            fold_ids=("fold-0", "fold-1"),
+            boundaries=((sessions[0], sessions[1]), (sessions[1], sessions[2])),
+        )
+    with pytest.raises(ValidationError):
+        FoldAuthority(
+            fold_ids=("fold-0", "fold-1", "fold-2", "fold-3"),
+            boundaries=(
+                (sessions[0], sessions[1]),
+                (sessions[2], sessions[3]),
+                (sessions[3], sessions[4]),
+                (sessions[4], sessions[4] + pd.Timedelta(days=1)),
+            ),
+        )
 
 
 def test_partition_regimes_missing_authority_fails_closed(authority) -> None:
@@ -319,7 +345,7 @@ def test_partition_regimes_partial_authority_fails_closed(authority) -> None:
 
 def test_every_evidence_schema_preserves_unavailable_statistics(authority) -> None:
     binding = _binding(authority)
-    sessions, replay = _replay(authority, periods=4)
+    sessions, replay = _replay(authority, periods=5)
     scored = _scored(
         {"AAA": [10.0, 10.5, 11.0, 11.5]}, {"AAA": [10.0, 10.4, 10.9, 11.4]}
     )
@@ -327,8 +353,13 @@ def test_every_evidence_schema_preserves_unavailable_statistics(authority) -> No
     friction = run_friction_cases(scored, (first, None, None, None))
     bootstrap = bootstrap_median_daily_return([0.001, -0.002, 0.003])
     fold_authority = FoldAuthority(
-        fold_ids=("fold-0", "fold-1"),
-        boundaries=((sessions[0], sessions[2]), (sessions[2], sessions[3])),
+        fold_ids=("fold-0", "fold-1", "fold-2", "fold-3"),
+        boundaries=(
+            (sessions[0], sessions[1]),
+            (sessions[1], sessions[2]),
+            (sessions[2], sessions[3]),
+            (sessions[3], sessions[4]),
+        ),
     )
     fold = slice_continuous_folds(replay, fold_authority)
     regime_authority = RegimeAuthority(

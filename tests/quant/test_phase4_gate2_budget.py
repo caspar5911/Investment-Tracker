@@ -90,6 +90,21 @@ def test_duplicate_representation_does_not_reconsume(authority) -> None:
     assert repeated.phase4_new_trials_remaining == 2999
 
 
+def test_duplicate_already_consumed_trial_returns_its_original_position_after_cursor_advances(
+    authority,
+) -> None:
+    state = BudgetState.from_authority(authority)
+    first_trial = state.trial_ids[0]
+    advanced = state.consume_current(first_trial).record_candidate_outcome(0.01)
+
+    duplicate = advanced.consume_current(first_trial)
+
+    assert duplicate.traversal_cursor == 1
+    assert duplicate.phase4_new_trials_consumed == 1
+    assert duplicate.budget_positions[0] == 1
+    assert duplicate.consumption_ordinals[0] == 1
+
+
 def test_only_current_cursor_trial_can_start(authority) -> None:
     state = BudgetState.from_authority(authority)
     # the second candidate's trial may not be consumed before the first
@@ -182,6 +197,77 @@ def test_exhausted_grid_after_all_rows_attempted(authority) -> None:
     assert not any(
         row.startswith("SKIPPED") for row in state.row_states[:family0_size]
     )
+
+
+def test_premature_exhausted_grid_is_rejected(authority) -> None:
+    state = BudgetState.from_authority(authority)
+
+    with pytest.raises(Gate2SealError) as exc_info:
+        state.terminate_family("EXHAUSTED_GRID")
+
+    assert exc_info.value.code == "BUDGET_ACCOUNTING_INVALID"
+
+
+def test_automatic_exhausted_grid_rejects_an_incomplete_family_state(authority) -> None:
+    state = BudgetState.from_authority(authority)
+    partial = BudgetState.model_validate(
+        {
+            **state.model_dump(),
+            "row_states": (
+                *("UNATTEMPTED" for _ in range(53)),
+                "CONSUMED",
+                *("UNATTEMPTED" for _ in range(126)),
+            ),
+            "consumption_ordinals": (
+                *(None for _ in range(53)),
+                1,
+                *(None for _ in range(126)),
+            ),
+            "phase4_new_trials_consumed": 1,
+            "phase4_new_trials_remaining": 2999,
+            "next_consumption_ordinal": 2,
+            "traversal_cursor": 53,
+        }
+    )
+
+    with pytest.raises(Gate2SealError) as exc_info:
+        partial.record_candidate_outcome(0.01)
+
+    assert exc_info.value.code == "BUDGET_ACCOUNTING_INVALID"
+
+
+def test_per_family_budget_terminal_marks_remaining_rows_without_consumption(authority) -> None:
+    state = BudgetState.from_authority(authority)
+    stopped = state.terminate_family("PER_FAMILY_BUDGET_EXHAUSTED")
+
+    assert stopped.last_family_reason == "PER_FAMILY_BUDGET_EXHAUSTED"
+    assert stopped.traversal_cursor == 54
+    assert stopped.active_family_index == 1
+    assert stopped.phase4_new_trials_consumed == 0
+    assert all(row == "SKIPPED_PER_FAMILY_BUDGET" for row in stopped.row_states[:54])
+    assert all(ordinal is None for ordinal in stopped.consumption_ordinals[:54])
+
+
+def test_aggregate_budget_terminal_skips_remaining_rows_deterministically(authority) -> None:
+    state = BudgetState.from_authority(authority)
+    exhausted = BudgetState.model_validate(
+        {
+            **state.model_dump(),
+            "phase4_new_trials_consumed": 3000,
+            "phase4_new_trials_remaining": 0,
+            "next_consumption_ordinal": 3001,
+        }
+    )
+
+    terminal = exhausted.consume_current(exhausted.trial_ids[0])
+
+    assert terminal.campaign_status == "AGGREGATE_BUDGET_EXHAUSTED"
+    assert terminal.campaign_terminated is True
+    assert terminal.traversal_cursor == 180
+    assert terminal.active_family_index == 4
+    assert terminal.phase4_new_trials_consumed == 3000
+    assert all(row == "SKIPPED_AGGREGATE_BUDGET" for row in terminal.row_states)
+    assert all(ordinal is None for ordinal in terminal.consumption_ordinals)
 
 
 def test_per_family_and_aggregate_budgets_are_unreachable(authority, family_sizes) -> None:

@@ -1313,8 +1313,10 @@ class FoldAuthority(FrozenGate2Model):
     model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
 
     schema_version: Literal["PHASE4-FOLD-AUTHORITY-v1"] = "PHASE4-FOLD-AUTHORITY-v1"
-    fold_ids: tuple[str, ...] = Field(min_length=1)
-    boundaries: tuple[tuple[pd.Timestamp, pd.Timestamp], ...] = Field(min_length=1)
+    fold_ids: tuple[str, ...] = Field(min_length=4, max_length=4)
+    boundaries: tuple[tuple[pd.Timestamp, pd.Timestamp], ...] = Field(
+        min_length=4, max_length=4
+    )
 
     @model_validator(mode="after")
     def validate_fold_authority(self) -> "FoldAuthority":
@@ -1326,8 +1328,8 @@ class FoldAuthority(FrozenGate2Model):
             if start >= end:
                 raise ValueError("fold start must precede its end")
         for previous, current in zip(self.boundaries, self.boundaries[1:], strict=False):
-            if previous[1] > current[0]:
-                raise ValueError("folds must not overlap")
+            if previous[1] != current[0]:
+                raise ValueError("fold boundaries must be chronological and contiguous")
         return self
 
 
@@ -1897,4 +1899,3 @@ class Gate2SealResult(FrozenGate2Model):
                 "the manifest must be the final written Gate 2 artifact"
             )
         return self
-

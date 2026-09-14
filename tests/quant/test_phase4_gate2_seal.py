@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import builtins
 import platform
 import subprocess
 import sys
@@ -143,6 +144,63 @@ def _manifest_of(result: Any, root: Path) -> "Phase4EngineManifest":
 def test_seal_types_are_available() -> None:
     assert _SEAL_IMPORT_ERROR is None, str(_SEAL_IMPORT_ERROR)
     assert callable(seal_gate2)
+
+
+def test_seal_reads_no_market_validation_protected_or_dynamic_resources(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _clone_repository(tmp_path / "repo")
+    read_paths: list[Path] = []
+    original_read_bytes = Path.read_bytes
+    original_read_text = Path.read_text
+    original_open = builtins.open
+
+    def observe_read_bytes(path: Path, *args: Any, **kwargs: Any) -> bytes:
+        read_paths.append(path.resolve())
+        return original_read_bytes(path, *args, **kwargs)
+
+    def observe_read_text(path: Path, *args: Any, **kwargs: Any) -> str:
+        read_paths.append(path.resolve())
+        return original_read_text(path, *args, **kwargs)
+
+    def observe_open(file: Any, mode: str = "r", *args: Any, **kwargs: Any) -> Any:
+        if "r" in mode or "+" in mode:
+            try:
+                read_paths.append(Path(file).resolve())
+            except TypeError:
+                pass
+        return original_open(file, mode, *args, **kwargs)
+
+    def refuse(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("forbidden external seam reached during seal")
+
+    monkeypatch.setattr(Path, "read_bytes", observe_read_bytes)
+    monkeypatch.setattr(Path, "read_text", observe_read_text)
+    monkeypatch.setattr(builtins, "open", observe_open)
+    import socket
+    import urllib.request
+
+    monkeypatch.setattr(socket.socket, "connect", refuse)
+    monkeypatch.setattr(urllib.request, "urlopen", refuse)
+
+    result = seal_gate2(root)
+
+    assert result.status == "PHASE4_ENGINE_SEALED"
+    assert read_paths
+    forbidden_components = {
+        "final_holdout",
+        "protected",
+        "provider",
+        "cache",
+        "latest",
+        "dynamic",
+    }
+    for path in read_paths:
+        components = {part.lower() for part in path.parts}
+        assert not components & forbidden_components
+        assert not ({"market", "bars"} <= components)
+        assert not ({"results", "validation"} <= components)
 
 
 def test_seal_manifest_schema_status_and_bound_identities(

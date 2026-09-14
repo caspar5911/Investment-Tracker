@@ -54,6 +54,17 @@ class BudgetState(_BudgetStateModel):
         )
 
     def consume_current(self, trial_id: str) -> "BudgetState":
+        try:
+            trial_index = self.trial_ids.index(trial_id)
+        except ValueError:
+            raise Gate2SealError(
+                "BUDGET_ACCOUNTING_INVALID",
+                "only an authoritative Phase 4 trial may start",
+            ) from None
+        if self.row_states[trial_index] == "CONSUMED":
+            # A duplicate representation is a lookup of immutable consumption
+            # state, even when the cursor has moved to another trial.
+            return self
         if self.campaign_status != "ACTIVE":
             raise Gate2SealError(
                 "BUDGET_ACCOUNTING_INVALID", "campaign is not active"
@@ -62,20 +73,13 @@ class BudgetState(_BudgetStateModel):
             raise Gate2SealError(
                 "BUDGET_ACCOUNTING_INVALID", "population already traversed"
             )
-        current_trial = self.trial_ids[self.traversal_cursor]
-        if trial_id != current_trial:
+        if trial_index != self.traversal_cursor:
             raise Gate2SealError(
                 "BUDGET_ACCOUNTING_INVALID",
                 "only the current cursor trial may start",
             )
-        if self.row_states[self.traversal_cursor] == "CONSUMED":
-            # Idempotent: a duplicate representation of the same current trial
-            # never re-consumes budget or advances any counter.
-            return self
         if self.phase4_new_trials_remaining == 0:
-            raise Gate2SealError(
-                "BUDGET_ACCOUNTING_INVALID", "aggregate Phase 4 budget exhausted"
-            )
+            return self.model_copy(update=self._exhaust_aggregate_budget())
         ordinal = self.next_consumption_ordinal
         consumed = self.phase4_new_trials_consumed + 1
         row_states = list(self.row_states)
@@ -129,6 +133,12 @@ class BudgetState(_BudgetStateModel):
             updates = self._stop_family(reason=reason)
         elif reason == "EXHAUSTED_GRID":
             updates = self._advance_past_family(reason=reason)
+        elif reason == "PER_FAMILY_BUDGET_EXHAUSTED":
+            updates = self._stop_family(
+                reason=reason,
+                skipped_state="SKIPPED_PER_FAMILY_BUDGET",
+                include_current=True,
+            )
         else:
             raise Gate2SealError(
                 "BUDGET_ACCOUNTING_INVALID", "unknown family termination reason"
@@ -145,12 +155,19 @@ class BudgetState(_BudgetStateModel):
             }
         )
 
-    def _stop_family(self, *, reason: BudgetFamilyReason) -> dict[str, object]:
+    def _stop_family(
+        self,
+        *,
+        reason: BudgetFamilyReason,
+        skipped_state: str = "SKIPPED_FAMILY_STOP",
+        include_current: bool = False,
+    ) -> dict[str, object]:
         _, family_end = self.family_ranges[self.active_family_index]
         row_states = list(self.row_states)
-        for index in range(self.traversal_cursor + 1, family_end):
+        first_skipped = self.traversal_cursor if include_current else self.traversal_cursor + 1
+        for index in range(first_skipped, family_end):
             if row_states[index] == "UNATTEMPTED":
-                row_states[index] = "SKIPPED_FAMILY_STOP"
+                row_states[index] = skipped_state
         next_family_index = self.active_family_index + 1
         campaign_status = (
             "COMPLETE" if next_family_index >= len(self.family_ranges) else "ACTIVE"
@@ -165,7 +182,15 @@ class BudgetState(_BudgetStateModel):
         }
 
     def _advance_past_family(self, *, reason: BudgetFamilyReason) -> dict[str, object]:
-        _, family_end = self.family_ranges[self.active_family_index]
+        family_start, family_end = self.family_ranges[self.active_family_index]
+        if reason == "EXHAUSTED_GRID" and any(
+            state == "UNATTEMPTED"
+            for state in self.row_states[family_start:family_end]
+        ):
+            raise Gate2SealError(
+                "BUDGET_ACCOUNTING_INVALID",
+                "EXHAUSTED_GRID requires every non-skipped family row to be attempted",
+            )
         next_family_index = self.active_family_index + 1
         campaign_status = (
             "COMPLETE" if next_family_index >= len(self.family_ranges) else "ACTIVE"
@@ -176,6 +201,20 @@ class BudgetState(_BudgetStateModel):
             "oos_streak": 0,
             "last_family_reason": reason,
             "campaign_status": campaign_status,
+        }
+
+    def _exhaust_aggregate_budget(self) -> dict[str, object]:
+        row_states = tuple(
+            "SKIPPED_AGGREGATE_BUDGET" if state == "UNATTEMPTED" else state
+            for state in self.row_states
+        )
+        return {
+            "row_states": row_states,
+            "traversal_cursor": len(self.trial_ids),
+            "active_family_index": len(self.family_ranges),
+            "oos_streak": 0,
+            "campaign_status": "AGGREGATE_BUDGET_EXHAUSTED",
+            "campaign_terminated": True,
         }
 
 

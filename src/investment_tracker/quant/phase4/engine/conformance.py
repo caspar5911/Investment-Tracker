@@ -102,6 +102,12 @@ class SyntheticConformanceRecord(FrozenGate2Model):
     fixture_configuration_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     warmup_panel_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     post_warmup_panel_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    synthetic_target_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    synthetic_replay_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    synthetic_metric_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    synthetic_durability_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    synthetic_bootstrap_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    synthetic_budget_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     fold_authority_status: str = "FOLD_AUTHORITY_MISSING"
     regime_authority_status: str = "REGIME_AUTHORITY_MISSING"
     execution_convention: str = "COMPLETED_BAR_SIGNAL_NEXT_BAR_OPEN"
@@ -115,6 +121,30 @@ class SyntheticConformanceRecord(FrozenGate2Model):
     @property
     def scored_panel_sha256(self) -> str:
         return self.post_warmup_panel_sha256
+
+
+def _canonical_output_value(value: object) -> object:
+    if isinstance(value, FrozenGate2Model):
+        return value.model_dump(mode="json")
+    if isinstance(value, tuple | list):
+        return [_canonical_output_value(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _canonical_output_value(item) for key, item in value.items()}
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
+
+
+def synthetic_output_identity(output_kind: str, output: object) -> str:
+    """Bind an internal synthetic output without persisting its observations."""
+
+    return canonical_sha256(
+        {
+            "schema_version": "PHASE4-SYNTHETIC-CONFORMANCE-OUTPUT-v1",
+            "output_kind": output_kind,
+            "output": _canonical_output_value(output),
+        }
+    )
 
 
 def _fixture_configuration() -> dict[str, object]:
@@ -478,7 +508,7 @@ def _assert_rebalance_clock(
     return by_family, tuple(sequence)
 
 
-def _assert_budget_machine(authority: Gate2Authority) -> None:
+def _assert_budget_machine(authority: Gate2Authority) -> BudgetState:
     fresh = BudgetState.from_authority(authority)
     if (
         fresh.phase4_new_trials_consumed != 0
@@ -525,6 +555,7 @@ def _assert_budget_machine(authority: Gate2Authority) -> None:
             "BUDGET_ACCOUNTING_INVALID: traversal cursor did not advance on "
             "the recorded outcome",
         )
+    return advanced
 
 
 def _assert_unbound_fold_and_regime(replay: object) -> None:
@@ -688,17 +719,17 @@ def run_synthetic_conformance(
         )
 
     benchmark = equal_weight_buy_and_hold(scored, friction_bps=_PRIMARY_FRICTION_BPS)
-    calculate_metrics(replay, benchmark)
+    metrics = calculate_metrics(replay, benchmark)
 
     expected_sessions = ExpectedSessionAuthority(
         sessions=sessions,
         sha256=expected_session_identity(sessions),
     )
-    calculate_durability(replay, expected_sessions)
+    durability = calculate_durability(replay, expected_sessions)
 
-    bootstrap_median_daily_return(replay.daily_returns)
+    bootstrap = bootstrap_median_daily_return(replay.daily_returns)
 
-    _assert_budget_machine(authority)
+    budget = _assert_budget_machine(authority)
     _assert_unbound_fold_and_regime(replay)
     _assert_baselines_comparison_only(authority)
     _assert_static_scan_clean()
@@ -728,6 +759,12 @@ def run_synthetic_conformance(
         fixture_configuration_sha256=canonical_sha256(_fixture_configuration()),
         warmup_panel_sha256=market_input.warmup_panel_sha256,
         post_warmup_panel_sha256=market_input.scored_panel_sha256,
+        synthetic_target_sha256=synthetic_output_identity("target", targets),
+        synthetic_replay_sha256=synthetic_output_identity("replay", replay),
+        synthetic_metric_sha256=synthetic_output_identity("metric", metrics),
+        synthetic_durability_sha256=synthetic_output_identity("durability", durability),
+        synthetic_bootstrap_sha256=synthetic_output_identity("bootstrap", bootstrap),
+        synthetic_budget_sha256=synthetic_output_identity("budget", budget),
         invariants=invariants,
         source_bundle_sha256s=tuple(
             (name, validated_bundles[name].bundle_sha256)
@@ -742,4 +779,5 @@ __all__ = (
     "ConformanceInvariant",
     "SyntheticConformanceRecord",
     "run_synthetic_conformance",
+    "synthetic_output_identity",
 )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import builtins
 from pathlib import Path
 from typing import Any
 
@@ -176,6 +177,18 @@ def test_synthetic_conformance_record_fields(market_input) -> None:
     assert record.fixture_configuration_sha256 == canonical_sha256(
         expected_config
     )
+    digest_fields = (
+        "synthetic_target_sha256",
+        "synthetic_replay_sha256",
+        "synthetic_metric_sha256",
+        "synthetic_durability_sha256",
+        "synthetic_bootstrap_sha256",
+        "synthetic_budget_sha256",
+    )
+    for field_name in digest_fields:
+        value = getattr(record, field_name)
+        assert len(value) == 64
+        assert set(value) <= set("0123456789abcdef")
     names = tuple(item.name for item in record.invariants)
     assert names == EXPECTED_INVARIANT_NAMES
     assert all(item.status == "PASS" for item in record.invariants)
@@ -223,6 +236,14 @@ def test_synthetic_conformance_is_deterministic(market_input) -> None:
     second = run_synthetic_conformance(authority, bundles)
     assert first == second
     assert first.model_dump_json() == second.model_dump_json()
+
+
+def test_synthetic_output_digest_uses_a_canonical_output_envelope() -> None:
+    identity = _conformance_module.synthetic_output_identity(
+        "target", {"sequence": ["one", None], "version": 1}
+    )
+
+    assert identity == "9bc2f4653fd294e59f78e9da54315257a2aa33e73796bf0e44e23ba9adc3b4b9"
 
 
 def test_bundle_set_missing_key_is_rejected(market_input) -> None:
@@ -292,6 +313,30 @@ def test_no_external_seams_are_reachable_during_conformance(market_input, monkey
 
     authority = load_gate2_authority(REPOSITORY_ROOT)
     bundles = _bundle_set(authority, market_input)
+    read_paths: list[Path] = []
+    original_read_bytes = Path.read_bytes
+    original_read_text = Path.read_text
+    original_open = builtins.open
+
+    def observe_read_bytes(path: Path, *args: Any, **kwargs: Any) -> bytes:
+        read_paths.append(path.resolve())
+        return original_read_bytes(path, *args, **kwargs)
+
+    def observe_read_text(path: Path, *args: Any, **kwargs: Any) -> str:
+        read_paths.append(path.resolve())
+        return original_read_text(path, *args, **kwargs)
+
+    def observe_open(file: Any, mode: str = "r", *args: Any, **kwargs: Any) -> Any:
+        if "r" in mode or "+" in mode:
+            try:
+                read_paths.append(Path(file).resolve())
+            except TypeError:
+                pass
+        return original_open(file, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_bytes", observe_read_bytes)
+    monkeypatch.setattr(Path, "read_text", observe_read_text)
+    monkeypatch.setattr(builtins, "open", observe_open)
 
     def refuse(*args: Any, **kwargs: Any) -> Any:
         raise AssertionError("forbidden external seam reached during conformance")
@@ -309,6 +354,20 @@ def test_no_external_seams_are_reachable_during_conformance(market_input, monkey
     for symbol in PROTECTED_SYMBOLS:
         assert symbol not in rendered
     assert "SYN-" in rendered
+    assert read_paths
+    forbidden_components = {
+        "final_holdout",
+        "protected",
+        "provider",
+        "cache",
+        "latest",
+        "dynamic",
+    }
+    for path in read_paths:
+        components = {part.lower() for part in path.parts}
+        assert not components & forbidden_components
+        assert not ({"market", "bars"} <= components)
+        assert not ({"results", "validation"} <= components)
 
 
 def test_budget_state_machine_transitions_are_inert() -> None:
