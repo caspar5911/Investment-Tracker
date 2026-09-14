@@ -288,6 +288,55 @@ class TrialAuthorityTerminalMetadata(FrozenGate2Model):
         return self
 
 
+_PINNED_GATE1_MANIFEST_IDENTITY = Gate1ArtifactIdentity(
+    kind="phase4_preregistration_manifest",
+    path=(
+        "results/phase4/gate1/phase4_preregistration_manifest/sha256/"
+        "dd175f7c61a9ea01353f5923c7c407720768553f92c73301e46cbc02b0723a89/"
+        "manifest.json"
+    ),
+    content_sha256=("dd175f7c61a9ea01353f5923c7c407720768553f92c73301e46cbc02b0723a89"),
+    sha256="e43ccbb596a9f66222b4e2785b1c40c423e6bb43b54b788e1fdb6358e1cdf146",
+)
+
+
+def _manifest_direct_dependencies(
+    manifest: Phase4PreregistrationManifest,
+) -> tuple[DirectDependencyIdentity, ...]:
+    artifact_fields = (
+        manifest.baseline_definitions,
+        manifest.deterministic_grids,
+        manifest.durability_policy,
+        manifest.family_budget_policy,
+        manifest.information_access_policy,
+        manifest.research_report,
+        manifest.strategy_family_definitions,
+        manifest.survivor_policy,
+    )
+    return (
+        DirectDependencyIdentity(**_PINNED_GATE1_MANIFEST_IDENTITY.model_dump()),
+        *(DirectDependencyIdentity(**item.model_dump()) for item in artifact_fields),
+        DirectDependencyIdentity(
+            kind="hypothesis_journal",
+            path=manifest.hypothesis_journal.path,
+            content_sha256=manifest.hypothesis_journal.file_sha256,
+        ),
+        DirectDependencyIdentity(
+            kind="source_journal",
+            path=manifest.source_journal.path,
+            content_sha256=manifest.source_journal.file_sha256,
+        ),
+        DirectDependencyIdentity(
+            kind="research_notes",
+            path=manifest.research_notes_path,
+            content_sha256=manifest.research_notes_content_sha256,
+        ),
+        DirectDependencyIdentity(**manifest.readiness_manifest.model_dump()),
+        DirectDependencyIdentity(**manifest.split_manifest.model_dump()),
+        DirectDependencyIdentity(**manifest.trial_authority.model_dump()),
+    )
+
+
 class Gate2Authority(FrozenGate2Model):
     starting_revision: Literal["fb1c30a6c9789bddf2033301977fc8e2f3ebc1a0"]
     head_revision: str = Field(pattern=r"^[0-9a-f]{40}$")
@@ -340,6 +389,16 @@ class Gate2Authority(FrozenGate2Model):
             self.baseline_definitions_payload
         )
 
+    @staticmethod
+    def _parsed_canonical_payload(*, field_name: str, payload: bytes) -> object:
+        try:
+            parsed = json.loads(payload)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError(f"{field_name} must be valid JSON") from exc
+        if canonical_json_bytes(parsed) != payload:
+            raise ValueError(f"{field_name} must use exact canonical JSON bytes")
+        return parsed
+
     def _validated_retained_payload(
         self,
         *,
@@ -354,12 +413,10 @@ class Gate2Authority(FrozenGate2Model):
             raise ValueError(
                 f"{field_name} must have exactly one corresponding direct dependency"
             )
-        try:
-            parsed = json.loads(payload)
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise ValueError(f"{field_name} must be valid JSON") from exc
-        if canonical_json_bytes(parsed) != payload:
-            raise ValueError(f"{field_name} must use exact canonical JSON bytes")
+        parsed = self._parsed_canonical_payload(
+            field_name=field_name,
+            payload=payload,
+        )
         if sha256(payload).hexdigest() != dependencies[0].content_sha256:
             raise ValueError(f"{field_name} content digest mismatch")
         return parsed
@@ -368,11 +425,21 @@ class Gate2Authority(FrozenGate2Model):
     def validate_authority_links(self) -> "Gate2Authority":
         if len({item.path for item in self.direct_dependencies}) != 15:
             raise ValueError("direct dependency paths must be unique")
-        manifest_payload = self._validated_retained_payload(
+        manifest_payload = self._parsed_canonical_payload(
             field_name="manifest_payload",
-            dependency_kind="phase4_preregistration_manifest",
             payload=self.manifest_payload,
         )
+        if self.manifest_identity != _PINNED_GATE1_MANIFEST_IDENTITY:
+            raise ValueError("Gate 1 manifest identity is not the pinned authority")
+        if sha256(self.manifest_payload).hexdigest() != (
+            self.manifest_identity.content_sha256
+        ):
+            raise ValueError("manifest_payload content digest mismatch")
+        manifest = Phase4PreregistrationManifest.model_validate(manifest_payload)
+        if self.direct_dependencies != _manifest_direct_dependencies(manifest):
+            raise ValueError(
+                "direct dependencies differ from the pinned Gate 1 manifest"
+            )
         baseline_payload = self._validated_retained_payload(
             field_name="baseline_definitions_payload",
             dependency_kind="baseline_definitions",
@@ -388,7 +455,6 @@ class Gate2Authority(FrozenGate2Model):
             dependency_kind="strategy_family_definitions",
             payload=self.family_definitions_payload,
         )
-        manifest = Phase4PreregistrationManifest.model_validate(manifest_payload)
         BaselineDefinitionSet.model_validate(baseline_payload)
         grids = PreregisteredGrids.model_validate(grids_payload)
         expected_family_payload = {

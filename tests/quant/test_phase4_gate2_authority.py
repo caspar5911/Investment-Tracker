@@ -278,6 +278,91 @@ def test_reconstruction_rejects_digest_bound_family_grid_disagreement() -> None:
         module.Gate2Authority.model_validate(payload)
 
 
+def test_reconstruction_rejects_self_consistent_baseline_substitution() -> None:
+    module = authority_module()
+    payload = load_authority(REPOSITORY_ROOT).model_dump()
+    baseline_payload = json.loads(payload["baseline_definitions_payload"])
+    baseline_payload["baselines"][0]["baseline_id"] = "baseline-a-substitute-v1"
+    substituted_bytes = module.canonical_json_bytes(baseline_payload)
+    substituted_digest = sha256(substituted_bytes).hexdigest()
+    dependencies = list(payload["direct_dependencies"])
+    baseline_index = next(
+        index
+        for index, dependency in enumerate(dependencies)
+        if dependency["kind"] == "baseline_definitions"
+    )
+    baseline_dependency = dict(dependencies[baseline_index])
+    baseline_dependency["content_sha256"] = substituted_digest
+    baseline_dependency["sha256"] = module.artifact_envelope_identity(
+        content_sha256=substituted_digest,
+        kind=baseline_dependency["kind"],
+        path=baseline_dependency["path"],
+    )
+    dependencies[baseline_index] = baseline_dependency
+    payload["direct_dependencies"] = tuple(dependencies)
+    payload["baseline_definitions_payload"] = substituted_bytes
+
+    with pytest.raises(ValidationError):
+        module.Gate2Authority.model_validate(payload)
+
+
+def test_reconstruction_rejects_self_consistent_manifest_substitution() -> None:
+    module = authority_module()
+    payload = load_authority(REPOSITORY_ROOT).model_dump()
+    manifest_payload = json.loads(payload["manifest_payload"])
+    manifest_payload["runtime_dependency_sha256"] = "0" * 64
+    substituted_bytes = module.canonical_json_bytes(manifest_payload)
+    substituted_digest = sha256(substituted_bytes).hexdigest()
+    manifest_identity = dict(payload["manifest_identity"])
+    manifest_identity["content_sha256"] = substituted_digest
+    manifest_identity["sha256"] = module.artifact_envelope_identity(
+        content_sha256=substituted_digest,
+        kind=manifest_identity["kind"],
+        path=manifest_identity["path"],
+    )
+    dependencies = list(payload["direct_dependencies"])
+    dependencies[0] = dict(manifest_identity)
+    payload["manifest_identity"] = manifest_identity
+    payload["manifest_payload"] = substituted_bytes
+    payload["direct_dependencies"] = tuple(dependencies)
+
+    with pytest.raises(ValidationError):
+        module.Gate2Authority.model_validate(payload)
+
+
+def test_reconstruction_rejects_reordered_manifest_dependencies() -> None:
+    payload = load_authority(REPOSITORY_ROOT).model_dump()
+    dependencies = list(payload["direct_dependencies"])
+    dependencies[3], dependencies[4] = dependencies[4], dependencies[3]
+    payload["direct_dependencies"] = tuple(dependencies)
+
+    with pytest.raises(ValidationError):
+        authority_module().Gate2Authority.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    "dependency_kind",
+    ("hypothesis_journal", "source_journal", "research_notes"),
+)
+def test_reconstruction_rejects_substituted_manifest_byte_projection(
+    dependency_kind: str,
+) -> None:
+    payload = load_authority(REPOSITORY_ROOT).model_dump()
+    dependencies = list(payload["direct_dependencies"])
+    dependency_index = next(
+        index
+        for index, dependency in enumerate(dependencies)
+        if dependency["kind"] == dependency_kind
+    )
+    dependency = dict(dependencies[dependency_index])
+    dependency["content_sha256"] = "0" * 64
+    dependencies[dependency_index] = dependency
+    payload["direct_dependencies"] = tuple(dependencies)
+
+    with pytest.raises(ValidationError):
+        authority_module().Gate2Authority.model_validate(payload)
+
+
 @pytest.mark.parametrize("mode", ["missing", "mutated"])
 def test_manifest_identity_fails_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
