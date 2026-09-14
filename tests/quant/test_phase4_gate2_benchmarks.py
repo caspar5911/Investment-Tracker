@@ -143,6 +143,7 @@ def test_equal_weight_buy_and_hold_single_session_creates_no_fill() -> None:
     assert replay.fills == ()
     assert replay.close_equity == pytest.approx((100000.0,))
     assert replay.total_turnover == 0.0
+    assert replay.target_gross_exposure == (1.0,)
 
 
 def test_benchmarks_reject_warmup_role_panel() -> None:

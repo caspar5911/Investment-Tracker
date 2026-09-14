@@ -103,9 +103,13 @@ def _minimum(values: list[float]) -> MetricValue:
 def _concentration(values: list[float], *, top_three: bool = False) -> MetricValue:
     positives = sorted((value for value in values if value > 0.0), reverse=True)
     denominator = sum(positives)
+    if not math.isfinite(denominator):
+        return _unknown("INVALID_INPUT")
     if denominator <= 0.0:
         return _unknown("NONPOSITIVE_DENOMINATOR")
     numerator = sum(positives[:3]) if top_three else positives[0]
+    if not math.isfinite(numerator):
+        return _unknown("INVALID_INPUT")
     return _available(numerator / denominator)
 
 
@@ -132,6 +136,8 @@ def _rolling_evidence(
 
     for endpoint in replay.sessions:
         target = _subtract_months(endpoint, horizon)
+        if target < replay.sessions[0]:
+            continue
         eligible_anchors = [
             session for session in expected_sessions if session <= target
         ]
@@ -178,9 +184,13 @@ def _rolling_evidence(
             sum(value > 0.0 for value in available_values) / len(available_values)
         )
     else:
-        reason: MetricReason = (
-            "INCOMPLETE_WINDOW" if observations else "INSUFFICIENT_DATA"
-        )
+        observation_reasons = {item.reason for item in observations}
+        if "INVALID_INPUT" in observation_reasons:
+            reason: MetricReason = "INVALID_INPUT"
+        elif observations:
+            reason = "INCOMPLETE_WINDOW"
+        else:
+            reason = "INSUFFICIENT_DATA"
         minimum = _unknown(reason)
         median_value = _unknown(reason)
         positive_fraction = _unknown(reason)

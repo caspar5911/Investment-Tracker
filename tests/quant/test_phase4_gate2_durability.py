@@ -214,3 +214,54 @@ def test_durability_models_reject_misaligned_period_and_rolling_evidence() -> No
 
     with pytest.raises(ValidationError):
         DurabilityEvidence.model_validate(payload)
+
+
+def test_positive_concentration_overflow_fails_closed_instead_of_becoming_zero() -> (
+    None
+):
+    sessions = tuple(
+        pd.Timestamp(value, tz="UTC")
+        for value in ("2019-12-31", "2020-01-31", "2020-02-29", "2020-03-31")
+    )
+    replay = _replay(sessions, (1.0, 1e308, 1.0, 1e308))
+
+    result = calculate_durability(replay, _expected(sessions))
+
+    assert result.positive_month_concentration.status == "UNKNOWN"
+    assert result.positive_month_concentration.reason == "INVALID_INPUT"
+
+
+def test_rolling_summary_preserves_complete_window_arithmetic_failure() -> None:
+    sessions = (
+        pd.Timestamp("2020-01-31", tz="UTC"),
+        pd.Timestamp("2021-01-31", tz="UTC"),
+    )
+    replay = _replay(sessions, (1e-308, 1e308))
+
+    result = calculate_durability(replay, _expected(sessions))
+
+    assert result.rolling_12.observations[0].status == "UNKNOWN"
+    assert result.rolling_12.observations[0].reason == "INVALID_INPUT"
+    assert result.rolling_12.minimum.status == "UNKNOWN"
+    assert result.rolling_12.minimum.reason == "INVALID_INPUT"
+
+
+def test_rolling_anchor_cannot_precede_the_replay_scored_span() -> None:
+    expected_sessions = tuple(
+        pd.date_range("2019-01-31", "2020-06-30", freq="ME", tz="UTC")
+    )
+    actual_sessions = tuple(
+        session
+        for session in expected_sessions
+        if session >= pd.Timestamp("2020-01-31", tz="UTC")
+    )
+    replay = _replay(
+        actual_sessions,
+        tuple(100.0 + index for index in range(len(actual_sessions))),
+    )
+
+    result = calculate_durability(replay, _expected(expected_sessions))
+
+    assert result.rolling_12.observations == ()
+    assert result.rolling_12.minimum.status == "UNKNOWN"
+    assert result.rolling_12.minimum.reason == "INSUFFICIENT_DATA"

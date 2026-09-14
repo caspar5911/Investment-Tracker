@@ -43,10 +43,11 @@ def equal_weight_buy_and_hold(
     _validated_friction(friction_bps)
     count = len(sessions)
     pending = [None] * count
-    if count >= 2:
+    if count >= 1:
         weight = 1.0 / len(symbols)
         weights = tuple((symbol, weight) for symbol in symbols)
-        pending[0] = (sessions[0], sessions[1], weights)
+        due_session = sessions[1] if count >= 2 else None
+        pending[0] = (sessions[0], due_session, weights)
     return _replay(
         open_values,
         close_values,

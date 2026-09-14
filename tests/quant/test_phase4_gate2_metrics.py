@@ -113,6 +113,8 @@ def test_zero_denominators_and_insufficient_observations_are_explicit_unknowns()
     assert single.benchmark_excess_return.value == 0.0
     assert single.cagr.status == "UNKNOWN"
     assert single.annualized_one_way_turnover.status == "UNKNOWN"
+    assert single.sortino.status == "UNKNOWN"
+    assert single.sortino.reason == "INSUFFICIENT_DATA"
     assert single.total_one_way_turnover.value == 0.0
     assert single.average_realized_gross_exposure.value == 0.0
 
@@ -178,6 +180,22 @@ def test_nonfinite_annualized_turnover_fails_closed() -> None:
     assert result.total_one_way_turnover.value == 1e300
     assert result.annualized_one_way_turnover.status == "UNKNOWN"
     assert result.annualized_one_way_turnover.reason == "INVALID_INPUT"
+
+
+def test_single_return_sortino_uses_downside_rms_without_sample_std_requirement() -> (
+    None
+):
+    losing = calculate_metrics(_replay((100.0, 90.0)), _replay((100.0, 90.0)))
+
+    assert losing.annualized_volatility.status == "UNKNOWN"
+    assert losing.sharpe.status == "UNKNOWN"
+    assert losing.sortino.status == "AVAILABLE"
+    assert losing.sortino.value == pytest.approx(-math.sqrt(252.0))
+
+    winning = calculate_metrics(_replay((100.0, 110.0)), _replay((100.0, 110.0)))
+
+    assert winning.sortino.status == "UNKNOWN"
+    assert winning.sortino.reason == "NONPOSITIVE_DENOMINATOR"
 
 
 def test_governed_drawdown_and_search_aware_statistics_remain_exactly_unavailable() -> (

@@ -108,22 +108,26 @@ def calculate_metrics(
             volatility = _unknown("INVALID_INPUT")
             sharpe = _unknown("INVALID_INPUT")
             sortino = _unknown("INVALID_INPUT")
-        elif len(returns) < 2:
+        elif len(returns) == 0:
             volatility = _unknown("INSUFFICIENT_DATA")
             sharpe = _unknown("INSUFFICIENT_DATA")
             sortino = _unknown("INSUFFICIENT_DATA")
         else:
-            sample_std = float(np.std(returns, ddof=1))
             mean_return = float(np.mean(returns))
-            if not math.isfinite(sample_std) or sample_std < 0.0:
-                volatility = _unknown("INVALID_INPUT")
-                sharpe = _unknown("INVALID_INPUT")
-            elif sample_std == 0.0:
-                volatility = _available(0.0)
-                sharpe = _unknown("NONPOSITIVE_DENOMINATOR")
+            if len(returns) < 2:
+                volatility = _unknown("INSUFFICIENT_DATA")
+                sharpe = _unknown("INSUFFICIENT_DATA")
             else:
-                volatility = _available(sample_std * math.sqrt(252.0))
-                sharpe = _available(mean_return / sample_std * math.sqrt(252.0))
+                sample_std = float(np.std(returns, ddof=1))
+                if not math.isfinite(sample_std) or sample_std < 0.0:
+                    volatility = _unknown("INVALID_INPUT")
+                    sharpe = _unknown("INVALID_INPUT")
+                elif sample_std == 0.0:
+                    volatility = _available(0.0)
+                    sharpe = _unknown("NONPOSITIVE_DENOMINATOR")
+                else:
+                    volatility = _available(sample_std * math.sqrt(252.0))
+                    sharpe = _available(mean_return / sample_std * math.sqrt(252.0))
             downside_rms = float(
                 math.sqrt(float(np.mean(np.minimum(returns, 0.0) ** 2)))
             )
