@@ -1190,3 +1190,263 @@ class DurabilityEvidence(FrozenGate2Model):
         if self.rolling_60 is not None and self.rolling_60.horizon_months != 60:
             raise ValueError("Phase 5 rolling evidence must contain 60 months")
         return self
+
+
+# --- Task 6: robustness and budget ---
+
+
+class FrictionCaseEvidence(FrozenGate2Model):
+    schema_version: Literal["PHASE4-FRICTION-CASE-v1"] = "PHASE4-FRICTION-CASE-v1"
+    friction_bps: int
+    candidate_id: str | None = Field(default=None, pattern=r"^phase4-[0-9a-f]{64}$")
+    binding_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    total_return: MetricValue
+    total_turnover: MetricValue
+    close_equity: tuple[float, ...]
+
+    @model_validator(mode="after")
+    def validate_friction_case(self) -> "FrictionCaseEvidence":
+        if isinstance(self.friction_bps, bool) or self.friction_bps < 0:
+            raise ValueError("friction bps must be a nonnegative integer")
+        if (self.candidate_id is None) != (self.binding_sha256 is None):
+            raise ValueError("candidate and binding identities must align")
+        if not all(_finite_real(value) for value in self.close_equity):
+            raise ValueError("close equity must be finite")
+        return self
+
+
+class FrictionEvidence(FrozenGate2Model):
+    schema_version: Literal["PHASE4-FRICTION-EVIDENCE-v1"] = (
+        "PHASE4-FRICTION-EVIDENCE-v1"
+    )
+    candidate_id: str | None = Field(default=None, pattern=r"^phase4-[0-9a-f]{64}$")
+    binding_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    cases: tuple[FrictionCaseEvidence, ...] = Field(min_length=5)
+    primary_bps: Literal[3] = 3
+    friction_retention_ratio: MetricValue
+
+    @model_validator(mode="after")
+    def validate_friction_evidence(self) -> "FrictionEvidence":
+        if [case.friction_bps for case in self.cases] != [0, 3, 10, 25, 50]:
+            raise ValueError("friction cases must be exactly (0, 3, 10, 25, 50)")
+        if len({case.candidate_id for case in self.cases}) != 1:
+            raise ValueError("friction cases must share one candidate identity")
+        if len({case.binding_sha256 for case in self.cases}) != 1:
+            raise ValueError("friction cases must share one binding identity")
+        if (self.candidate_id is None) != (self.binding_sha256 is None):
+            raise ValueError("candidate and binding identities must align")
+        return self
+
+
+class BootstrapEvidence(FrozenGate2Model):
+    schema_version: Literal["PHASE4-BOOTSTRAP-EVIDENCE-v1"] = (
+        "PHASE4-BOOTSTRAP-EVIDENCE-v1"
+    )
+    statistic: Literal["median_daily_return"] = "median_daily_return"
+    n_bootstrap_draws: Literal[2000] = 2000
+    seed: Literal[0] = 0
+    sample_size: int = Field(ge=2)
+    observed_median: MetricValue
+    percentile_05: MetricValue
+    percentile_95: MetricValue
+
+
+class FoldAuthority(FrozenGate2Model):
+    model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
+
+    schema_version: Literal["PHASE4-FOLD-AUTHORITY-v1"] = "PHASE4-FOLD-AUTHORITY-v1"
+    fold_ids: tuple[str, ...] = Field(min_length=1)
+    boundaries: tuple[tuple[pd.Timestamp, pd.Timestamp], ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_fold_authority(self) -> "FoldAuthority":
+        if len(self.fold_ids) != len(self.boundaries):
+            raise ValueError("fold ids and boundaries must align")
+        if len(set(self.fold_ids)) != len(self.fold_ids):
+            raise ValueError("fold ids must be unique")
+        for start, end in self.boundaries:
+            if start >= end:
+                raise ValueError("fold start must precede its end")
+        for previous, current in zip(self.boundaries, self.boundaries[1:], strict=False):
+            if previous[1] > current[0]:
+                raise ValueError("folds must not overlap")
+        return self
+
+
+class FoldSliceEvidence(FrozenGate2Model):
+    schema_version: Literal["PHASE4-FOLD-SLICE-EVIDENCE-v1"] = (
+        "PHASE4-FOLD-SLICE-EVIDENCE-v1"
+    )
+    candidate_id: str | None = Field(default=None, pattern=r"^phase4-[0-9a-f]{64}$")
+    binding_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    fold_ids: tuple[str, ...] = Field(min_length=1)
+    fold_returns: tuple[MetricValue, ...]
+    fold_equity_start: tuple[float, ...]
+    fold_equity_end: tuple[float, ...]
+
+    @model_validator(mode="after")
+    def validate_fold_slice(self) -> "FoldSliceEvidence":
+        if len(self.fold_ids) != len(self.fold_returns) or len(self.fold_equity_start) != len(
+            self.fold_equity_end
+        ):
+            raise ValueError("fold ids, returns, and equity endpoints must align")
+        if not all(_finite_real(v) for v in (*self.fold_equity_start, *self.fold_equity_end)):
+            raise ValueError("fold equity endpoints must be finite")
+        if (self.candidate_id is None) != (self.binding_sha256 is None):
+            raise ValueError("candidate and binding identities must align")
+        return self
+
+
+class RegimeAuthority(FrozenGate2Model):
+    model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
+
+    schema_version: Literal["PHASE4-REGIME-AUTHORITY-v1"] = "PHASE4-REGIME-AUTHORITY-v1"
+    regime_ids: tuple[str, ...] = Field(min_length=1)
+    session_regime: tuple[tuple[pd.Timestamp, str], ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_regime_authority(self) -> "RegimeAuthority":
+        if len(set(self.regime_ids)) != len(self.regime_ids):
+            raise ValueError("regime ids must be unique")
+        if self.regime_ids != tuple(sorted(self.regime_ids)):
+            raise ValueError("regime ids must be sorted")
+        seen: set = set()
+        for session, regime in self.session_regime:
+            if regime not in self.regime_ids:
+                raise ValueError("session regime must be a declared regime")
+            if session in seen:
+                raise ValueError("regime sessions must be unique")
+            seen.add(session)
+        return self
+
+
+class RegimePartitionEvidence(FrozenGate2Model):
+    model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
+
+    schema_version: Literal["PHASE4-REGIME-PARTITION-EVIDENCE-v1"] = (
+        "PHASE4-REGIME-PARTITION-EVIDENCE-v1"
+    )
+    candidate_id: str | None = Field(default=None, pattern=r"^phase4-[0-9a-f]{64}$")
+    binding_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    regime_ids: tuple[str, ...] = Field(min_length=1)
+    regime_session_counts: tuple[int, ...]
+    regime_sessions: tuple[tuple[pd.Timestamp, ...], ...]
+
+    @model_validator(mode="after")
+    def validate_regime_partition(self) -> "RegimePartitionEvidence":
+        if (
+            len(self.regime_ids)
+            != len(self.regime_session_counts)
+            != len(self.regime_sessions)
+        ):
+            raise ValueError("regime ids, counts, and sessions must align")
+        if len(set(self.regime_ids)) != len(self.regime_ids):
+            raise ValueError("regime ids must be unique")
+        for count, sessions in zip(self.regime_session_counts, self.regime_sessions):
+            if count != len(sessions):
+                raise ValueError("regime counts must match their sessions")
+        if sum(self.regime_session_counts) == 0:
+            raise ValueError("regime partition must be nonempty")
+        if (self.candidate_id is None) != (self.binding_sha256 is None):
+            raise ValueError("candidate and binding identities must align")
+        return self
+
+
+BudgetRowState = Literal[
+    "UNATTEMPTED",
+    "CONSUMED",
+    "SKIPPED_FAMILY_STOP",
+    "SKIPPED_PER_FAMILY_BUDGET",
+    "SKIPPED_AGGREGATE_BUDGET",
+]
+
+BudgetCampaignStatus = Literal[
+    "ACTIVE",
+    "CAMPAIGN_EXECUTION_FAILED",
+    "AGGREGATE_BUDGET_EXHAUSTED",
+    "COMPLETE",
+]
+
+BudgetFamilyReason = Literal[
+    "PERSISTENT_OOS_FAILURE",
+    "EXHAUSTED_GRID",
+    "PER_FAMILY_BUDGET_EXHAUSTED",
+]
+
+_VALID_ROW_STATES = frozenset(
+    {
+        "UNATTEMPTED",
+        "CONSUMED",
+        "SKIPPED_FAMILY_STOP",
+        "SKIPPED_PER_FAMILY_BUDGET",
+        "SKIPPED_AGGREGATE_BUDGET",
+    }
+)
+_VALID_CAMPAIGN_STATUSES = frozenset(
+    {
+        "ACTIVE",
+        "CAMPAIGN_EXECUTION_FAILED",
+        "AGGREGATE_BUDGET_EXHAUSTED",
+        "COMPLETE",
+    }
+)
+
+
+class BudgetState(FrozenGate2Model):
+    schema_version: Literal["PHASE4-BUDGET-STATE-v1"] = "PHASE4-BUDGET-STATE-v1"
+    campaign_id: Literal["PHASE4-FIXED-LONG-ONLY-2014-2022-v1"] = (
+        "PHASE4-FIXED-LONG-ONLY-2014-2022-v1"
+    )
+    historical_phase2_trials: Literal[136] = 136
+    historical_trials_are_lineage_only: Literal[True] = True
+    phase4_new_trials_consumed: int = Field(default=0, ge=0, le=3000)
+    phase4_new_trials_remaining: int = Field(default=3000, ge=0, le=3000)
+    first_phase4_budget_position: Literal[1] = 1
+    candidate_ids: tuple[str, ...] = ()
+    trial_ids: tuple[str, ...] = ()
+    budget_positions: tuple[int, ...] = ()
+    family_ranges: tuple[tuple[int, int], ...] = ()
+    row_states: tuple[BudgetRowState, ...] = ()
+    consumption_ordinals: tuple[int | None, ...] = ()
+    next_consumption_ordinal: int = Field(default=1, ge=1)
+    traversal_cursor: int = Field(default=0, ge=0)
+    active_family_index: int = Field(default=0, ge=0)
+    oos_streak: int = Field(default=0, ge=0)
+    campaign_status: BudgetCampaignStatus = "ACTIVE"
+    campaign_terminated: bool = False
+    last_family_reason: BudgetFamilyReason | None = None
+
+    @model_validator(mode="after")
+    def validate_budget_state(self) -> "BudgetState":
+        total = len(self.candidate_ids)
+        if not (
+            len(self.candidate_ids)
+            == len(self.trial_ids)
+            == len(self.budget_positions)
+            == len(self.row_states)
+            == len(self.consumption_ordinals)
+        ):
+            raise ValueError("budget row fields must align")
+        if total and self.budget_positions != tuple(range(1, total + 1)):
+            raise ValueError("budget positions must be contiguous from one")
+        if self.phase4_new_trials_consumed + self.phase4_new_trials_remaining != 3000:
+            raise ValueError("Phase 4 budget must sum to 3000")
+        if not 0 <= self.traversal_cursor <= total:
+            raise ValueError("traversal cursor is out of range")
+        if self.next_consumption_ordinal != self.phase4_new_trials_consumed + 1:
+            raise ValueError("next consumption ordinal must follow the counter")
+        covered = 0
+        for start, end in self.family_ranges:
+            if start != covered or end <= start:
+                raise ValueError("family ranges must be contiguous and increasing")
+            covered = end
+        if covered != total:
+            raise ValueError("family ranges must cover the population")
+        if not 0 <= self.active_family_index <= len(self.family_ranges):
+            raise ValueError("active family index is out of range")
+        if any(state not in _VALID_ROW_STATES for state in self.row_states):
+            raise ValueError("unknown row state")
+        if self.campaign_status not in _VALID_CAMPAIGN_STATUSES:
+            raise ValueError("unknown campaign status")
+        return self
+
