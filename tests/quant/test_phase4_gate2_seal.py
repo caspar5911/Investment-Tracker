@@ -368,6 +368,13 @@ def test_seal_failure_after_each_non_final_kind_writes_nothing_new(
 ) -> None:
     results_root = gate2_repo / "results" / "phase4" / "gate2"
 
+    # Warm up the clone so the content-addressed Gate 2 artifacts match the
+    # current HEAD before the per-kind comparison. This keeps the test
+    # self-contained: seal output is head-revision-sensitive, so without a
+    # warm-up the first non-final kind would legitimately write new files and
+    # the assertion would depend on module-internal test ordering.
+    seal_gate2(gate2_repo)
+
     def gate2_files() -> set[Path]:
         if not results_root.exists():
             return set()
