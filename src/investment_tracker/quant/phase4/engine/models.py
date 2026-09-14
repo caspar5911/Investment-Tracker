@@ -193,7 +193,7 @@ Gate2ArtifactKind = Literal[
 ]
 
 
-GATE2_ARTIFACT_FILENAMES: dict[str, str] = {
+GATE2_ARTIFACT_FILENAMES: dict[Gate2ArtifactKind, str] = {
     "engine_contract": "contract.json",
     "family_implementation_bindings": "bindings.json",
     "candidate_implementation_bindings": "bindings.json",
@@ -1524,6 +1524,13 @@ EvidenceKind = Literal[
 ]
 
 
+FoldAuthorityStatus = Literal["FOLD_AUTHORITY_MISSING", "FOLD_AUTHORITY_BOUND"]
+RegimeAuthorityStatus = Literal[
+    "REGIME_AUTHORITY_MISSING",
+    "REGIME_AUTHORITY_BOUND",
+]
+
+
 class Gate2EvaluationContext(FrozenGate2Model):
     """Identity inputs shared by every Gate 2 evaluation case."""
 
@@ -1536,18 +1543,50 @@ class Gate2EvaluationContext(FrozenGate2Model):
     fold_authority_sha256: str | None = Field(
         default=None, pattern=r"^[0-9a-f]{64}$"
     )
-    fold_authority_status: str = Field(min_length=1)
+    fold_authority_status: FoldAuthorityStatus
     regime_authority_sha256: str | None = Field(
         default=None, pattern=r"^[0-9a-f]{64}$"
     )
-    regime_authority_status: str = Field(min_length=1)
+    regime_authority_status: RegimeAuthorityStatus
     initial_cash_float64_hex: str = Field(
         pattern=r"^0x[0-9a-f]+(\.[0-9a-f]+)?p[+-]?[0-9]+$"
     )
-    primary_friction_bps: int
+    primary_friction_bps: Literal[3]
     execution_convention: str = Field(min_length=1)
     execution_series: str = Field(min_length=1)
     decision_grade: bool
+
+    @model_validator(mode="after")
+    def validate_authority_pairing(self) -> "Gate2EvaluationContext":
+        if (self.fold_authority_sha256 is None) != (
+            self.fold_authority_status == "FOLD_AUTHORITY_MISSING"
+        ):
+            raise ValueError(
+                "fold authority digest and status must agree"
+            )
+        if (self.regime_authority_sha256 is None) != (
+            self.regime_authority_status == "REGIME_AUTHORITY_MISSING"
+        ):
+            raise ValueError(
+                "regime authority digest and status must agree"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_initial_cash(self) -> "Gate2EvaluationContext":
+        try:
+            decoded = float.fromhex(self.initial_cash_float64_hex)
+        except (ValueError, OverflowError) as exc:
+            raise ValueError(
+                "initial cash must be canonical finite binary64 hex"
+            ) from exc
+        if not math.isfinite(decoded) or decoded.hex() != (
+            self.initial_cash_float64_hex
+        ):
+            raise ValueError(
+                "initial cash must be canonical finite binary64 hex"
+            )
+        return self
 
 
 class Gate2EvidenceRecord(FrozenGate2Model):

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from importlib import import_module
 import inspect
 
 import pytest
@@ -161,7 +160,6 @@ def test_context_identity_is_sensitive_to_bound_and_cash_fields(
         "fold_authority_sha256",
         "regime_authority_sha256",
         "initial_cash_float64_hex",
-        "primary_friction_bps",
         "execution_convention",
         "execution_series",
         "decision_grade",
@@ -169,17 +167,24 @@ def test_context_identity_is_sensitive_to_bound_and_cash_fields(
 )
 def test_every_context_field_changes_the_digest(field: str) -> None:
     value = _context().model_dump()[field]
+    overrides: dict[str, object]
     if field in _SHA_VARIANTS:
-        variant = _SHA_VARIANTS[field]
+        overrides = {field: _SHA_VARIANTS[field]}
+        if field == "fold_authority_sha256":
+            overrides["fold_authority_status"] = "FOLD_AUTHORITY_BOUND"
+        if field == "regime_authority_sha256":
+            overrides["regime_authority_status"] = "REGIME_AUTHORITY_BOUND"
     elif field == "initial_cash_float64_hex":
-        variant = INITIAL_CASH_ALT_HEX
-    elif isinstance(value, bool):
-        variant = not value
-    elif isinstance(value, int):
-        variant = value + 1
+        overrides = {"initial_cash_float64_hex": INITIAL_CASH_ALT_HEX}
     else:
-        variant = value + "x"
-    assert evaluation_context_identity(_context(**{field: variant})) != CTX_FULL
+        overrides = {
+            field: not value
+            if isinstance(value, bool)
+            else value + 1
+            if isinstance(value, int)
+            else value + "x"
+        }
+    assert evaluation_context_identity(_context(**overrides)) != CTX_FULL
 
 
 def test_missing_fold_and_regime_states_cannot_execute_their_cases() -> None:
@@ -295,6 +300,46 @@ def test_initial_cash_hex_must_be_a_finite_binary64_hex() -> None:
         _context(initial_cash_float64_hex=float("inf").hex())
     with pytest.raises(ValueError):
         _context(initial_cash_float64_hex="not-a-hex-float")
+    with pytest.raises(ValueError):
+        # Over-precise mantissa: rounds to 1.0, whose canonical hex is 0x1p+0.
+        _context(initial_cash_float64_hex="0x1.00000000000001p+0")
+
+
+def test_authority_statuses_are_fail_closed_literals() -> None:
+    with pytest.raises(ValueError):
+        _context(fold_authority_status="FOLD_AUTHORITY_MAYBE")
+    with pytest.raises(ValueError):
+        _context(regime_authority_status="x")
+
+
+def test_context_requires_consistent_fold_and_regime_pairing() -> None:
+    with pytest.raises(ValueError):
+        _context(
+            fold_authority_sha256="a" * 64,
+            fold_authority_status="FOLD_AUTHORITY_MISSING",
+        )
+    with pytest.raises(ValueError):
+        _context(fold_authority_status="FOLD_AUTHORITY_BOUND")
+    with pytest.raises(ValueError):
+        _context(
+            regime_authority_sha256="a" * 64,
+            regime_authority_status="REGIME_AUTHORITY_MISSING",
+        )
+    with pytest.raises(ValueError):
+        _context(regime_authority_status="REGIME_AUTHORITY_BOUND")
+
+
+def test_context_primary_friction_is_pinned_to_three_bps() -> None:
+    assert _context().primary_friction_bps == 3
+    for value in (0, 4, -1):
+        with pytest.raises(ValueError):
+            _context(primary_friction_bps=value)  # type: ignore[arg-type]
+
+
+def test_evidence_context_is_frozen() -> None:
+    context = _context()
+    with pytest.raises(ValueError):
+        context.campaign_id = "other"  # type: ignore[misc]
 
 
 def _record_kwargs(**overrides) -> dict[str, object]:

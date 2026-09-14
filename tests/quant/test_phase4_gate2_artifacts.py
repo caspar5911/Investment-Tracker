@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from hashlib import sha256
-from importlib import import_module
 import inspect
 from pathlib import Path
 
@@ -45,10 +44,10 @@ EXACT_FILENAMES = {
 }
 
 
-def _store(tmp_path: Path, results_name: str = "results") -> object:
+def _store(tmp_path: Path) -> object:
     repository = tmp_path / "repository"
     repository.mkdir()
-    return Gate2ArtifactStore(repository, repository / results_name)
+    return Gate2ArtifactStore(repository, repository / "results")
 
 
 @pytest.fixture(autouse=True)
@@ -140,8 +139,40 @@ def test_manifest_kind_is_rejected_by_regular_writes(tmp_path: Path) -> None:
     store = _store(tmp_path)
     with pytest.raises(Gate2ArtifactError, match="manifest"):
         store.write_json("phase4_engine_manifest", {"status": "x"})
-    with pytest.raises(Gate2ArtifactError, match="manifest"):
+    with pytest.raises(Gate2ArtifactError, match="phase4_engine_report"):
         store.write_bytes("phase4_engine_manifest", b"x")
+
+
+def test_write_json_rejects_the_markdown_kind(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    with pytest.raises(Gate2ArtifactError, match="phase4_engine_report"):
+        store.write_json("phase4_engine_report", {"value": 1})
+
+
+def test_write_bytes_rejects_the_json_kinds(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    for kind in (
+        "engine_contract",
+        "family_implementation_bindings",
+        "candidate_implementation_bindings",
+        "synthetic_conformance",
+    ):
+        with pytest.raises(Gate2ArtifactError, match="phase4_engine_report"):
+            store.write_bytes(kind, b"x")
+
+
+def test_write_bytes_requires_utf8_markdown(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    with pytest.raises(Gate2ArtifactError, match="UTF-8"):
+        store.write_bytes("phase4_engine_report", b"\xff\xfe\x00bad")
+
+
+def test_results_root_must_be_the_repository_results_directory(tmp_path: Path) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+
+    with pytest.raises(Gate2ArtifactError, match="results root"):
+        Gate2ArtifactStore(repository, repository / "alt-results")
 
 
 def test_collision_with_different_bytes_fails_closed_and_preserves_existing(
@@ -273,6 +304,52 @@ def test_verify_rejects_envelope_mismatch(tmp_path: Path) -> None:
 
     with pytest.raises(Gate2ArtifactError, match="envelope"):
         store.verify(tampered)
+
+
+def test_verify_rejects_a_missing_artifact(tmp_path: Path) -> None:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    store = Gate2ArtifactStore(repository, repository / "results")
+    identity = store.write_json("synthetic_conformance", {"value": 1})
+    repository.joinpath(*identity.path.split("/")).unlink()
+
+    with pytest.raises(Gate2ArtifactError, match="unreadable"):
+        store.verify(identity)
+
+
+def test_artifact_identity_validator_rejects_bad_paths_and_envelopes() -> None:
+    content_sha = "1" * 64
+    path = f"results/phase4/gate2/engine_contract/sha256/{content_sha}/contract.json"
+    envelope = artifact_envelope_identity(
+        content_sha256=content_sha, kind="engine_contract", path=path
+    )
+    assert Gate2ArtifactIdentity(
+        kind="engine_contract",
+        content_sha256=content_sha,
+        path=path,
+        sha256=envelope,
+    ).sha256 == envelope
+    with pytest.raises(ValueError):
+        Gate2ArtifactIdentity(
+            kind="engine_contract",
+            content_sha256=content_sha,
+            path=path.replace("/", "\\"),
+            sha256=envelope,
+        )
+    with pytest.raises(ValueError):
+        Gate2ArtifactIdentity(
+            kind="engine_contract",
+            content_sha256=content_sha,
+            path=path.replace("contract.json", "wrong.json"),
+            sha256=envelope,
+        )
+    with pytest.raises(ValueError):
+        Gate2ArtifactIdentity(
+            kind="engine_contract",
+            content_sha256=content_sha,
+            path=path,
+            sha256="0" * 64,
+        )
 
 
 def test_temporary_files_are_cleaned_up(tmp_path: Path) -> None:

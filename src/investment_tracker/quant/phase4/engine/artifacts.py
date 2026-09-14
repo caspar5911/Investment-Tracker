@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from hashlib import sha256
 import os
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path, PurePosixPath
 import tempfile
 from typing import Literal, get_args
 
@@ -15,6 +15,7 @@ from investment_tracker.quant.phase4.preregistration.canonical import (
 from .models import GATE2_ARTIFACT_FILENAMES, Gate2ArtifactIdentity, Gate2ArtifactKind
 
 MANIFEST_KIND: Literal["phase4_engine_manifest"] = "phase4_engine_manifest"
+MARKDOWN_KIND: Literal["phase4_engine_report"] = "phase4_engine_report"
 
 
 class Gate2ArtifactError(RuntimeError):
@@ -48,6 +49,10 @@ class Gate2ArtifactStore:
             relative = normalize_repository_path(repository, configured)
         except (OSError, ValueError) as exc:
             raise Gate2ArtifactError("results root must be repository constrained") from exc
+        if PurePosixPath(relative).parts != ("results",):
+            raise Gate2ArtifactError(
+                "results root must be the repository results directory"
+            )
         self._repository_root = repository
         self._results_root = repository.joinpath(*PurePosixPath(relative).parts)
         self._gate2_root = self._results_root / "phase4" / "gate2"
@@ -203,6 +208,11 @@ class Gate2ArtifactStore:
         kind: Gate2ArtifactKind,
         payload: object,
     ) -> Gate2ArtifactIdentity:
+        if kind == MARKDOWN_KIND:
+            raise Gate2ArtifactError(
+                "artifact kind phase4_engine_report requires exact UTF-8 "
+                "Markdown bytes"
+            )
         try:
             encoded = canonical_json_bytes(payload)
         except (TypeError, ValueError) as exc:
@@ -216,6 +226,14 @@ class Gate2ArtifactStore:
     ) -> Gate2ArtifactIdentity:
         if not isinstance(payload, bytes):
             raise Gate2ArtifactError("artifact payload must be bytes")
+        if kind != MARKDOWN_KIND:
+            raise Gate2ArtifactError(
+                "artifact bytes are reserved for the phase4_engine_report kind"
+            )
+        try:
+            payload.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise Gate2ArtifactError("artifact bytes must be UTF-8") from exc
         return self._publish(kind, payload, final_commit=False)
 
     def commit_manifest(self, payload: object) -> Gate2ArtifactIdentity:
