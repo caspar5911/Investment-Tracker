@@ -238,6 +238,53 @@ def test_panel_accepts_only_exact_non_binary64_numeric_coercion() -> None:
     assert panel.open_prices.iloc[0].tolist() == [10.0, 20.0]
 
 
+@pytest.mark.parametrize("integer_dtype", [np.int64, np.uint64])
+def test_panel_rejects_homogeneous_numpy_integer_hash_collision(
+    integer_dtype: type[np.integer],
+) -> None:
+    index = _sessions(periods=2)
+    exactly_representable = 2**53
+    rounded_collision = exactly_representable + 1
+    exact_open = pd.DataFrame(
+        np.array([[exactly_representable, 20], [30, 40]], dtype=integer_dtype),
+        index=index,
+        columns=["AAA", "BBB"],
+    )
+    lossy_open = exact_open.copy(deep=True)
+    lossy_open.iloc[0, 0] = rounded_collision
+    close_prices = pd.DataFrame(
+        np.array([[50, 60], [70, 80]], dtype=integer_dtype),
+        index=index,
+        columns=["AAA", "BBB"],
+    )
+
+    exact_panel = MarketPanel.from_frames(exact_open, close_prices, role="SCORED")
+    assert exact_panel.open_prices.iloc[0, 0] == float(exactly_representable)
+    _assert_invalid(lossy_open, close_prices)
+
+
+@pytest.mark.parametrize("integer_dtype", [np.int64, np.uint64])
+def test_panel_accepts_exactly_representable_homogeneous_numpy_integers(
+    integer_dtype: type[np.integer],
+) -> None:
+    index = _sessions(periods=2)
+    open_prices = pd.DataFrame(
+        np.array([[10, 20], [30, 40]], dtype=integer_dtype),
+        index=index,
+        columns=["AAA", "BBB"],
+    )
+    close_prices = pd.DataFrame(
+        np.array([[11, 21], [31, 41]], dtype=integer_dtype),
+        index=index,
+        columns=["AAA", "BBB"],
+    )
+
+    panel = MarketPanel.from_frames(open_prices, close_prices, role="SCORED")
+
+    assert panel.open_prices.dtypes.tolist() == [np.dtype("float64")] * 2
+    assert panel.open_prices.iloc[0].tolist() == [10.0, 20.0]
+
+
 @pytest.mark.parametrize("role", ["TRAIN", "VALIDATION", "", None])
 def test_panel_rejects_unknown_role(role: object) -> None:
     open_prices, close_prices = _frames()

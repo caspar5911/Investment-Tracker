@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from hashlib import sha256
-from numbers import Real
+from numbers import Integral, Real
 from typing import Final, final
 
 import numpy as np
@@ -52,6 +52,8 @@ def _validated_symbols(columns: pd.Index, *, frame_name: str) -> tuple[str, ...]
 def _is_exact_binary64_admission(source: object, admitted: np.float64) -> bool:
     if isinstance(source, (bool, np.bool_)) or not isinstance(source, Real):
         return False
+    if isinstance(source, Integral):
+        return bool(np.isfinite(admitted)) and int(source) == int(admitted)
     try:
         comparison = source == float(admitted)
         return isinstance(comparison, (bool, np.bool_)) and bool(comparison)
