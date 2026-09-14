@@ -10,6 +10,7 @@ import pandas as pd
 from investment_tracker.quant.phase4.engine.market import MarketPanel
 from investment_tracker.quant.phase4.engine.models import (
     Fill,
+    FixedStrategyBinding,
     Gate2SealError,
     PortfolioReplay,
     SessionState,
@@ -22,7 +23,9 @@ _NOTIONAL_TOLERANCE: float = 1e-12
 _EXPOSURE_TOLERANCE: float = 1e-12
 _FLOAT_DUST: float = 1e-9
 
-PendingTarget = Tuple[pd.Timestamp, pd.Timestamp, Tuple[Tuple[str, float], ...]]
+PendingTarget = Tuple[
+    pd.Timestamp, pd.Timestamp | None, Tuple[Tuple[str, float], ...]
+]
 
 
 def _accounting(message: str) -> Gate2SealError:
@@ -76,6 +79,7 @@ def _make_fill(
     units_delta: float,
     notional: float,
     friction: float,
+    binding: FixedStrategyBinding | None,
 ) -> Fill:
     return Fill(
         symbol=symbol,
@@ -85,6 +89,7 @@ def _make_fill(
         units_delta=float(units_delta),
         fill_notional=float(notional),
         friction=float(friction),
+        binding=binding,
     )
 
 
@@ -97,8 +102,7 @@ def _replay(
     *,
     friction_bps: int,
     initial_cash: float,
-    candidate_id: str | None,
-    binding_sha256: str | None,
+    binding: FixedStrategyBinding | None,
 ) -> PortfolioReplay:
     count = len(sessions)
     symbol_index = {symbol: position for position, symbol in enumerate(symbols)}
@@ -108,6 +112,7 @@ def _replay(
 
     fills: list[Fill] = []
     states: list[SessionState] = []
+    last_target_gross = 0.0
 
     for position in range(count):
         open_row = open_values[position]
@@ -144,12 +149,13 @@ def _replay(
                         float(units_delta),
                         float(notional),
                         float(friction),
+                        binding,
                     )
                 )
 
             if buy_order:
                 desired_buy = np.array(
-                    [desired[j] for j in buy_order], dtype=np.float64
+                    [delta[j] for j in buy_order], dtype=np.float64
                 )
                 total_buy = float(desired_buy.sum())
                 if total_buy > 0.0:
@@ -174,6 +180,7 @@ def _replay(
                                 float(units_delta),
                                 float(notional),
                                 float(friction),
+                                binding,
                             )
                         )
 
@@ -192,10 +199,11 @@ def _replay(
         if not 0.0 <= realized <= 1.0 + _EXPOSURE_TOLERANCE:
             raise _long_only("realized gross exposure exceeds one")
 
-        carried = pending[position]
-        target_gross = 0.0
-        if carried is not None and carried[1] is not None:
-            target_gross = float(sum(weight for _symbol, weight in carried[2]))
+        fresh_target = pending[position]
+        if fresh_target is not None:
+            last_target_gross = float(
+                sum(weight for _symbol, weight in fresh_target[2])
+            )
         units = tuple(
             (symbols[j], float(holdings[j]))
             for j in range(len(symbols))
@@ -209,14 +217,15 @@ def _replay(
                 cash=float(cash),
                 units=units,
                 realized_gross_exposure=float(realized),
-                target_gross_exposure=float(target_gross),
+                target_gross_exposure=float(last_target_gross),
+                binding=binding,
             )
         )
 
     total_turnover = float(sum(abs(fill.fill_notional) for fill in fills))
     return PortfolioReplay(
-        candidate_id=candidate_id,
-        binding_sha256=binding_sha256,
+        candidate_id=None if binding is None else binding.candidate_id,
+        binding_sha256=None if binding is None else binding.binding_sha256,
         friction_bps=int(friction_bps),
         initial_cash=float(initial_cash),
         states=tuple(states),
@@ -245,6 +254,7 @@ def replay_targets(
     pending: list[PendingTarget | None] = []
     candidate_id: str | None = None
     binding_sha256: str | None = None
+    binding: FixedStrategyBinding | None = None
     for index, item in enumerate(target_items):
         if item is None:
             pending.append(None)
@@ -260,6 +270,8 @@ def replay_targets(
                 raise _accounting(
                     "target due session must be the next scored session"
                 )
+        elif index + 1 < len(sessions):
+            raise _accounting("only a final scored-session target may have no due session")
         for symbol, _weight in item.weights:
             if symbol not in panel_symbols:
                 raise _accounting(
@@ -270,6 +282,7 @@ def replay_targets(
         if candidate_id is None:
             candidate_id = item_candidate
             binding_sha256 = item_binding
+            binding = item.binding
         elif item_candidate != candidate_id or item_binding != binding_sha256:
             raise _accounting(
                 "all targets must share one strategy binding identity"
@@ -284,8 +297,7 @@ def replay_targets(
         pending,
         friction_bps=friction_bps,
         initial_cash=initial_cash,
-        candidate_id=candidate_id,
-        binding_sha256=binding_sha256,
+        binding=binding,
     )
 
 

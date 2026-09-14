@@ -25,8 +25,7 @@ def cash_benchmark(scored: MarketPanel) -> PortfolioReplay:
         pending,
         friction_bps=0,
         initial_cash=_INITIAL_CASH,
-        candidate_id=None,
-        binding_sha256=None,
+        binding=None,
     )
 
 
@@ -56,8 +55,7 @@ def equal_weight_buy_and_hold(
         pending,
         friction_bps=friction_bps,
         initial_cash=_INITIAL_CASH,
-        candidate_id=None,
-        binding_sha256=None,
+        binding=None,
     )
 
 

@@ -310,6 +310,39 @@ def test_unchanged_target_rebalances_drifted_open_holdings(authority):
     assert replay.states[2].realized_gross_exposure == pytest.approx(0.5)
 
 
+def test_increased_target_buys_only_the_positive_trade_delta(authority):
+    binding = _binding(authority)
+    sessions = _sessions("2024-01-01", periods=3)
+    scored = _scored(
+        {"AAA": [10.0, 10.0, 10.0]},
+        {"AAA": [10.0, 10.0, 10.0]},
+    )
+    first = _target(binding, sessions[0], sessions[1], (("AAA", 0.25),))
+    second = _target(binding, sessions[1], sessions[2], (("AAA", 0.5),))
+
+    replay = replay_targets(scored, [first, second, None], friction_bps=0)
+
+    assert [fill.fill_notional for fill in replay.fills] == pytest.approx(
+        [25000.0, 25000.0]
+    )
+    assert replay.states[2].cash == pytest.approx(50000.0)
+    assert replay.states[2].realized_gross_exposure == pytest.approx(0.5)
+
+
+def test_last_target_intent_is_carried_between_signal_rebalances(authority):
+    binding = _binding(authority)
+    sessions = _sessions("2024-01-01", periods=4)
+    scored = _scored(
+        {"AAA": [10.0, 10.0, 10.0, 10.0]},
+        {"AAA": [10.0, 10.0, 10.0, 10.0]},
+    )
+    first = _target(binding, sessions[0], sessions[1], (("AAA", 0.5),))
+
+    replay = replay_targets(scored, [first, None, None, None], friction_bps=0)
+
+    assert replay.target_gross_exposure == pytest.approx((0.5, 0.5, 0.5, 0.5))
+
+
 def test_open_without_due_target_preserves_units_without_fill(authority):
     binding = _binding(authority)
     sessions = _sessions("2024-01-01", periods=3)
@@ -409,6 +442,21 @@ def test_replay_rejects_target_due_session_mismatch(authority) -> None:
     assert exc_info.value.code == "ACCOUNTING_INVARIANT_FAILURE"
 
 
+def test_replay_rejects_missing_due_session_before_final_close(authority) -> None:
+    binding = _binding(authority)
+    sessions = _sessions("2024-01-01", periods=3)
+    scored = _scored(
+        {"AAA": [10.0, 10.0, 10.0]},
+        {"AAA": [10.0, 10.0, 10.0]},
+    )
+    invalid = _target(binding, sessions[0], None, (("AAA", 0.5),))
+
+    with pytest.raises(Gate2SealError) as exc_info:
+        replay_targets(scored, [invalid, None, None], friction_bps=0)
+
+    assert exc_info.value.code == "ACCOUNTING_INVARIANT_FAILURE"
+
+
 def test_replay_rejects_warmup_role_panel(authority) -> None:
     binding = _binding(authority)
     sessions = _sessions("2024-01-01", periods=2)
@@ -442,3 +490,5 @@ def test_replay_preserves_strategy_identity_on_replay(authority) -> None:
     assert replay.binding_sha256 == binding.binding_sha256
     assert replay.friction_bps == 3
     assert replay.initial_cash == 100000.0
+    assert all(state.binding == binding for state in replay.states)
+    assert all(fill.binding == binding for fill in replay.fills)

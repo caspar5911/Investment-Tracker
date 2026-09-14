@@ -851,6 +851,7 @@ class Fill(FrozenGate2Model):
     units_delta: float
     fill_notional: float
     friction: float
+    binding: FixedStrategyBinding | None = None
 
     @model_validator(mode="after")
     def validate_fill(self) -> "Fill":
@@ -883,6 +884,7 @@ class SessionState(FrozenGate2Model):
     units: tuple[tuple[str, float], ...]
     realized_gross_exposure: float
     target_gross_exposure: float
+    binding: FixedStrategyBinding | None = None
 
     @model_validator(mode="after")
     def validate_state(self) -> "SessionState":
@@ -957,6 +959,22 @@ class PortfolioReplay(FrozenGate2Model):
             previous = fill.fill_timestamp
         if (self.candidate_id is None) != (self.binding_sha256 is None):
             raise ValueError("candidate and binding identities must both be present or absent")
+        nested_bindings = tuple(
+            item.binding for item in (*self.states, *self.fills)
+        )
+        if self.candidate_id is None:
+            if any(binding is not None for binding in nested_bindings):
+                raise ValueError("benchmark replay cannot carry strategy identities")
+        else:
+            if any(binding is None for binding in nested_bindings):
+                raise ValueError("strategy identity must accompany every state and fill")
+            if any(
+                binding.candidate_id != self.candidate_id
+                or binding.binding_sha256 != self.binding_sha256
+                for binding in nested_bindings
+                if binding is not None
+            ):
+                raise ValueError("nested strategy identities must match the replay")
         return self
 
     @property
