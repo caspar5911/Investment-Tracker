@@ -904,7 +904,9 @@ class SessionState(FrozenGate2Model):
         if self.cash < 0.0:
             raise ValueError("session cash must be nonnegative")
         if not 0.0 <= self.realized_gross_exposure <= 1.0 + 1e-12:
-            raise ValueError("realized gross exposure must stay long-only and unlevered")
+            raise ValueError(
+                "realized gross exposure must stay long-only and unlevered"
+            )
         if not 0.0 <= self.target_gross_exposure <= 1.0 + 1e-12:
             raise ValueError("target gross exposure must stay within one")
         symbols = tuple(symbol for symbol, _ in self.units)
@@ -924,9 +926,7 @@ class PortfolioReplay(FrozenGate2Model):
     model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
 
     schema_version: Literal["PHASE4-PORTFOLIO-REPLAY-v1"] = "PHASE4-PORTFOLIO-REPLAY-v1"
-    candidate_id: str | None = Field(
-        default=None, pattern=r"^phase4-[0-9a-f]{64}$"
-    )
+    candidate_id: str | None = Field(default=None, pattern=r"^phase4-[0-9a-f]{64}$")
     binding_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     friction_bps: int
     initial_cash: float
@@ -958,16 +958,18 @@ class PortfolioReplay(FrozenGate2Model):
                 raise ValueError("fills must occur in scored-session order")
             previous = fill.fill_timestamp
         if (self.candidate_id is None) != (self.binding_sha256 is None):
-            raise ValueError("candidate and binding identities must both be present or absent")
-        nested_bindings = tuple(
-            item.binding for item in (*self.states, *self.fills)
-        )
+            raise ValueError(
+                "candidate and binding identities must both be present or absent"
+            )
+        nested_bindings = tuple(item.binding for item in (*self.states, *self.fills))
         if self.candidate_id is None:
             if any(binding is not None for binding in nested_bindings):
                 raise ValueError("benchmark replay cannot carry strategy identities")
         else:
             if any(binding is None for binding in nested_bindings):
-                raise ValueError("strategy identity must accompany every state and fill")
+                raise ValueError(
+                    "strategy identity must accompany every state and fill"
+                )
             if any(
                 binding.candidate_id != self.candidate_id
                 or binding.binding_sha256 != self.binding_sha256
@@ -997,3 +999,194 @@ class PortfolioReplay(FrozenGate2Model):
     def daily_returns(self) -> tuple[float, ...]:
         series = pd.Series(self.close_equity).pct_change()
         return tuple(float(value) for value in series.iloc[1:].to_numpy())
+
+
+MetricStatus = Literal["AVAILABLE", "UNKNOWN"]
+MetricReason = Literal[
+    "OK",
+    "INSUFFICIENT_DATA",
+    "INCOMPLETE_WINDOW",
+    "INCOMPLETE_PERIOD",
+    "EMPTY_SUBSET",
+    "NONPOSITIVE_DENOMINATOR",
+    "INVALID_INPUT",
+]
+
+
+class MetricValue(FrozenGate2Model):
+    schema_version: Literal["PHASE4-METRIC-VALUE-v1"] = "PHASE4-METRIC-VALUE-v1"
+    value: float | None
+    status: MetricStatus
+    reason: MetricReason
+
+    @model_validator(mode="after")
+    def validate_metric(self) -> "MetricValue":
+        if self.status == "AVAILABLE":
+            if self.value is None or not _finite_real(self.value):
+                raise ValueError("available metric must contain one finite value")
+            if self.reason != "OK":
+                raise ValueError("available metric reason must be OK")
+        elif self.value is not None or self.reason == "OK":
+            raise ValueError("unknown metric must be null with a non-OK reason")
+        return self
+
+
+class SupportedMetrics(FrozenGate2Model):
+    schema_version: Literal["PHASE4-SUPPORTED-METRICS-v1"] = (
+        "PHASE4-SUPPORTED-METRICS-v1"
+    )
+    candidate_id: str | None = Field(default=None, pattern=r"^phase4-[0-9a-f]{64}$")
+    binding_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    total_return: MetricValue
+    cagr: MetricValue
+    annualized_volatility: MetricValue
+    sharpe: MetricValue
+    sortino: MetricValue
+    benchmark_excess_return: MetricValue
+    total_one_way_turnover: MetricValue
+    annualized_one_way_turnover: MetricValue
+    average_target_gross_exposure: MetricValue
+    average_realized_gross_exposure: MetricValue
+    time_in_market: MetricValue
+    target_gross_exposure_series: tuple[float, ...]
+    realized_gross_exposure_series: tuple[float, ...]
+    unavailable_statistics: UnavailableStatistics
+
+    @model_validator(mode="after")
+    def validate_supported_metrics(self) -> "SupportedMetrics":
+        if (self.candidate_id is None) != (self.binding_sha256 is None):
+            raise ValueError(
+                "candidate and binding identities must both be present or absent"
+            )
+        if len(self.target_gross_exposure_series) != len(
+            self.realized_gross_exposure_series
+        ):
+            raise ValueError("target and realized exposure series must align")
+        for series in (
+            self.target_gross_exposure_series,
+            self.realized_gross_exposure_series,
+        ):
+            if any(
+                not _finite_real(value) or not 0.0 <= value <= 1.0 + 1e-12
+                for value in series
+            ):
+                raise ValueError(
+                    "exposure series must be finite, long-only, and unlevered"
+                )
+        return self
+
+
+def _expected_session_identity(sessions: tuple[pd.Timestamp, ...]) -> str:
+    if not sessions or any(
+        not _utc_midnight(value, field_name="session") for value in sessions
+    ):
+        raise ValueError("expected sessions must be nonempty UTC-midnight labels")
+    if sessions != tuple(sorted(sessions)) or len(set(sessions)) != len(sessions):
+        raise ValueError("expected sessions must be unique and increasing")
+    return sha256(
+        canonical_json_bytes(
+            {
+                "schema_version": "PHASE4-EXPECTED-SESSION-AUTHORITY-v1",
+                "sessions": [value.isoformat() for value in sessions],
+            }
+        )
+    ).hexdigest()
+
+
+class ExpectedSessionAuthority(FrozenGate2Model):
+    model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
+
+    schema_version: Literal["PHASE4-EXPECTED-SESSION-AUTHORITY-v1"] = (
+        "PHASE4-EXPECTED-SESSION-AUTHORITY-v1"
+    )
+    sessions: tuple[pd.Timestamp, ...] = Field(min_length=1)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def validate_expected_sessions(self) -> "ExpectedSessionAuthority":
+        if self.sha256 != _expected_session_identity(self.sessions):
+            raise ValueError(
+                "expected-session identity does not bind the ordered labels"
+            )
+        return self
+
+
+class RollingWindowEvidence(FrozenGate2Model):
+    model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
+
+    schema_version: Literal["PHASE4-ROLLING-WINDOW-v1"] = "PHASE4-ROLLING-WINDOW-v1"
+    horizon_months: int
+    anchors: tuple[pd.Timestamp, ...] = ()
+    endpoints: tuple[pd.Timestamp, ...] = ()
+    observations: tuple[MetricValue, ...] = ()
+    minimum: MetricValue
+    median: MetricValue
+    positive_fraction: MetricValue
+
+    @model_validator(mode="after")
+    def validate_rolling_window(self) -> "RollingWindowEvidence":
+        if isinstance(self.horizon_months, bool) or self.horizon_months < 1:
+            raise ValueError("rolling horizon must be a positive integer")
+        if not len(self.anchors) == len(self.endpoints) == len(self.observations):
+            raise ValueError("rolling anchors, endpoints, and observations must align")
+        if self.endpoints != tuple(sorted(self.endpoints)) or len(
+            set(self.endpoints)
+        ) != len(self.endpoints):
+            raise ValueError("rolling endpoints must be unique and increasing")
+        for anchor, endpoint in zip(self.anchors, self.endpoints, strict=True):
+            if not _utc_midnight(anchor, field_name="anchor") or not _utc_midnight(
+                endpoint, field_name="endpoint"
+            ):
+                raise ValueError("rolling labels must be UTC-midnight sessions")
+            if anchor >= endpoint:
+                raise ValueError("rolling anchor must precede its endpoint")
+        return self
+
+
+class DurabilityEvidence(FrozenGate2Model):
+    model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
+
+    schema_version: Literal["PHASE4-DURABILITY-EVIDENCE-v1"] = (
+        "PHASE4-DURABILITY-EVIDENCE-v1"
+    )
+    candidate_id: str | None = Field(default=None, pattern=r"^phase4-[0-9a-f]{64}$")
+    binding_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    expected_sessions_authority_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    month_period_labels: tuple[str, ...]
+    month_returns: tuple[MetricValue, ...]
+    year_period_labels: tuple[str, ...]
+    year_returns: tuple[MetricValue, ...]
+    positive_month_fraction: MetricValue
+    positive_year_fraction: MetricValue
+    average_positive_month: MetricValue
+    average_negative_month: MetricValue
+    worst_month: MetricValue
+    worst_year: MetricValue
+    longest_negative_month_streak: MetricValue
+    positive_month_concentration: MetricValue
+    positive_year_concentration: MetricValue
+    top_three_positive_month_concentration: MetricValue
+    rolling_12: RollingWindowEvidence
+    rolling_36: RollingWindowEvidence
+    rolling_60: RollingWindowEvidence | None = None
+    unavailable_statistics: UnavailableStatistics
+
+    @model_validator(mode="after")
+    def validate_durability(self) -> "DurabilityEvidence":
+        if (self.candidate_id is None) != (self.binding_sha256 is None):
+            raise ValueError(
+                "candidate and binding identities must both be present or absent"
+            )
+        if len(self.month_period_labels) != len(self.month_returns):
+            raise ValueError("month labels and returns must align")
+        if len(self.year_period_labels) != len(self.year_returns):
+            raise ValueError("year labels and returns must align")
+        if self.month_period_labels != tuple(sorted(set(self.month_period_labels))):
+            raise ValueError("month period labels must be unique and increasing")
+        if self.year_period_labels != tuple(sorted(set(self.year_period_labels))):
+            raise ValueError("year period labels must be unique and increasing")
+        if self.rolling_12.horizon_months != 12 or self.rolling_36.horizon_months != 36:
+            raise ValueError("Phase 4 rolling evidence must contain 12 and 36 months")
+        if self.rolling_60 is not None and self.rolling_60.horizon_months != 60:
+            raise ValueError("Phase 5 rolling evidence must contain 60 months")
+        return self
