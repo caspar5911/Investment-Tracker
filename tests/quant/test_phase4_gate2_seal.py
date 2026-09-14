@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-import builtins
+import io
 import platform
 import subprocess
 import sys
@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from tests.quant.gate2_boundary_guard import Gate2FilesystemBoundaryGuard
 
 try:
     import investment_tracker.quant.phase4.engine.seal as _seal_module
@@ -56,6 +57,49 @@ NON_FINAL_KINDS = (
     "phase4_engine_report",
 )
 WRITE_ORDER = NON_FINAL_KINDS + ("phase4_engine_manifest",)
+FORBIDDEN_BOUNDARY_RELATIVE_PATHS = (
+    "data/HACK.csv",
+    "data/market_bars.csv",
+    "results/latest.json",
+    "results/phase4/validation_results.json",
+    "FINAL_HOLDOUT/GEV.parquet",
+    "providers/source.py",
+    "cache/provider-response.json",
+    "dynamic/discovery.json",
+)
+
+
+def _filesystem_guard(root: Path) -> Gate2FilesystemBoundaryGuard:
+    from investment_tracker.quant.phase4.engine.authority import (
+        PINNED_DIRECT_DEPENDENCIES,
+    )
+    from investment_tracker.quant.phase4.engine.source_identity import (
+        GATE2_SOURCE_BUNDLES,
+    )
+
+    return Gate2FilesystemBoundaryGuard(
+        root=root,
+        source_paths=(
+            *(root / path for path in GATE2_SOURCE_BUNDLES["engine"]),
+            *(REPOSITORY_ROOT / path for path in GATE2_SOURCE_BUNDLES["engine"]),
+        ),
+        authority_paths=(root / item.path for item in PINNED_DIRECT_DEPENDENCIES),
+        generated_root=root / "results" / "phase4" / "gate2",
+        source_discovery_roots=(
+            root
+            / "src"
+            / "investment_tracker"
+            / "quant"
+            / "phase4"
+            / "engine",
+            REPOSITORY_ROOT
+            / "src"
+            / "investment_tracker"
+            / "quant"
+            / "phase4"
+            / "engine",
+        ),
+    )
 
 
 def _run_git(args: list[str], cwd: Path | None = None) -> None:
@@ -151,56 +195,80 @@ def test_seal_reads_no_market_validation_protected_or_dynamic_resources(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root = _clone_repository(tmp_path / "repo")
-    read_paths: list[Path] = []
-    original_read_bytes = Path.read_bytes
-    original_read_text = Path.read_text
-    original_open = builtins.open
-
-    def observe_read_bytes(path: Path, *args: Any, **kwargs: Any) -> bytes:
-        read_paths.append(path.resolve())
-        return original_read_bytes(path, *args, **kwargs)
-
-    def observe_read_text(path: Path, *args: Any, **kwargs: Any) -> str:
-        read_paths.append(path.resolve())
-        return original_read_text(path, *args, **kwargs)
-
-    def observe_open(file: Any, mode: str = "r", *args: Any, **kwargs: Any) -> Any:
-        if "r" in mode or "+" in mode:
-            try:
-                read_paths.append(Path(file).resolve())
-            except TypeError:
-                pass
-        return original_open(file, mode, *args, **kwargs)
+    guard = _filesystem_guard(root)
 
     def refuse(*args: Any, **kwargs: Any) -> Any:
         raise AssertionError("forbidden external seam reached during seal")
 
-    monkeypatch.setattr(Path, "read_bytes", observe_read_bytes)
-    monkeypatch.setattr(Path, "read_text", observe_read_text)
-    monkeypatch.setattr(builtins, "open", observe_open)
+    guard.install(monkeypatch)
     import socket
     import urllib.request
 
     monkeypatch.setattr(socket.socket, "connect", refuse)
     monkeypatch.setattr(urllib.request, "urlopen", refuse)
+    original_subprocess_run = subprocess.run
+
+    def allow_required_git_only(command: Any, *args: Any, **kwargs: Any) -> Any:
+        if not (
+            isinstance(command, list)
+            and len(command) >= 2
+            and command[0] == "git"
+            and command[1] in {"rev-parse", "merge-base", "cat-file"}
+        ):
+            raise AssertionError("forbidden subprocess reached during seal")
+        return original_subprocess_run(command, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", allow_required_git_only)
+
+    original_conformance = _seal_module.run_synthetic_conformance
+
+    def injected_forbidden_read(*args: Any, **kwargs: Any) -> Any:
+        rejected: list[Path] = []
+        for relative in FORBIDDEN_BOUNDARY_RELATIVE_PATHS:
+            try:
+                with io.open(tmp_path / relative, "rb"):
+                    pass
+            except AssertionError:
+                rejected.append(Path(relative))
+        if len(rejected) != len(FORBIDDEN_BOUNDARY_RELATIVE_PATHS):
+            raise AssertionError("forbidden filesystem read probe was not rejected")
+        raise AssertionError("forbidden filesystem read probes rejected")
+        return original_conformance(*args, **kwargs)
+
+    monkeypatch.setattr(
+        _seal_module, "run_synthetic_conformance", injected_forbidden_read
+    )
+    with pytest.raises(Gate2SealError, match="forbidden filesystem"):
+        seal_gate2(root)
+    monkeypatch.setattr(
+        _seal_module, "run_synthetic_conformance", original_conformance
+    )
+
+    def injected_forbidden_discovery(*args: Any, **kwargs: Any) -> Any:
+        rejected: list[Path] = []
+        for relative in FORBIDDEN_BOUNDARY_RELATIVE_PATHS:
+            try:
+                tuple((tmp_path / relative).iterdir())
+            except AssertionError:
+                rejected.append(Path(relative))
+        if len(rejected) != len(FORBIDDEN_BOUNDARY_RELATIVE_PATHS):
+            raise AssertionError("forbidden filesystem discovery probe was not rejected")
+        raise AssertionError("forbidden filesystem discovery probes rejected")
+        return original_conformance(*args, **kwargs)
+
+    monkeypatch.setattr(
+        _seal_module, "run_synthetic_conformance", injected_forbidden_discovery
+    )
+    with pytest.raises(Gate2SealError, match="forbidden filesystem"):
+        seal_gate2(root)
+    monkeypatch.setattr(
+        _seal_module, "run_synthetic_conformance", original_conformance)
 
     result = seal_gate2(root)
 
     assert result.status == "PHASE4_ENGINE_SEALED"
-    assert read_paths
-    forbidden_components = {
-        "final_holdout",
-        "protected",
-        "provider",
-        "cache",
-        "latest",
-        "dynamic",
-    }
-    for path in read_paths:
-        components = {part.lower() for part in path.parts}
-        assert not components & forbidden_components
-        assert not ({"market", "bars"} <= components)
-        assert not ({"results", "validation"} <= components)
+    assert guard.read_paths
+    assert guard.discovery_paths
 
 
 def test_seal_manifest_schema_status_and_bound_identities(
