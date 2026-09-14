@@ -3,6 +3,7 @@ from __future__ import annotations
 from hashlib import sha256
 import json
 import math
+from numbers import Integral, Real
 from pathlib import PurePosixPath, PureWindowsPath
 import re
 from typing import Literal
@@ -818,3 +819,163 @@ class TargetInstruction(FrozenGate2Model):
         if reconstructed != self.binding:
             raise ValueError("target binding is not an exact fixed binding")
         return self
+
+
+def _utc_midnight(value: object, *, field_name: str) -> bool:
+    return (
+        isinstance(value, pd.Timestamp)
+        and value.tz is not None
+        and str(value.tz) == "UTC"
+        and bool(value == value.normalize())
+    )
+
+
+def _finite_real(value: object) -> bool:
+    return (
+        not isinstance(value, bool)
+        and isinstance(value, Real)
+        and math.isfinite(float(value))
+    )
+
+
+class Fill(FrozenGate2Model):
+    """One deterministic fill executed at a scored session's QFQ-normalized open."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
+
+    schema_version: Literal["PHASE4-FILL-v1"] = "PHASE4-FILL-v1"
+    symbol: str = Field(min_length=1)
+    signal_timestamp: pd.Timestamp
+    fill_timestamp: pd.Timestamp
+    reference_open: float
+    units_delta: float
+    fill_notional: float
+    friction: float
+
+    @model_validator(mode="after")
+    def validate_fill(self) -> "Fill":
+        if not _utc_midnight(self.signal_timestamp, field_name="signal_timestamp"):
+            raise ValueError("fill signal timestamp must be a UTC-midnight session")
+        if not _utc_midnight(self.fill_timestamp, field_name="fill_timestamp"):
+            raise ValueError("fill timestamp must be a UTC-midnight session")
+        if self.signal_timestamp >= self.fill_timestamp:
+            raise ValueError("fill must occur strictly after its signal")
+        if not _finite_real(self.reference_open) or self.reference_open <= 0.0:
+            raise ValueError("fill reference open must be finite and strictly positive")
+        for field_name in ("units_delta", "fill_notional", "friction"):
+            if not _finite_real(getattr(self, field_name)):
+                raise ValueError(f"{field_name} must be a finite real")
+        if self.friction < 0.0:
+            raise ValueError("fill friction must be nonnegative")
+        return self
+
+
+class SessionState(FrozenGate2Model):
+    """Post-fill, close-marked portfolio state for one scored session."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
+
+    schema_version: Literal["PHASE4-SESSION-STATE-v1"] = "PHASE4-SESSION-STATE-v1"
+    session: pd.Timestamp
+    open_equity: float
+    close_equity: float
+    cash: float
+    units: tuple[tuple[str, float], ...]
+    realized_gross_exposure: float
+    target_gross_exposure: float
+
+    @model_validator(mode="after")
+    def validate_state(self) -> "SessionState":
+        if not _utc_midnight(self.session, field_name="session"):
+            raise ValueError("session state must reference a UTC-midnight session")
+        for field_name in (
+            "open_equity",
+            "close_equity",
+            "cash",
+            "realized_gross_exposure",
+            "target_gross_exposure",
+        ):
+            if not _finite_real(getattr(self, field_name)):
+                raise ValueError(f"{field_name} must be a finite real")
+        if self.open_equity <= 0.0 or self.close_equity <= 0.0:
+            raise ValueError("session equity must be strictly positive")
+        if self.cash < 0.0:
+            raise ValueError("session cash must be nonnegative")
+        if not 0.0 <= self.realized_gross_exposure <= 1.0 + 1e-12:
+            raise ValueError("realized gross exposure must stay long-only and unlevered")
+        if not 0.0 <= self.target_gross_exposure <= 1.0 + 1e-12:
+            raise ValueError("target gross exposure must stay within one")
+        symbols = tuple(symbol for symbol, _ in self.units)
+        if symbols != tuple(sorted(symbols)) or len(set(symbols)) != len(symbols):
+            raise ValueError("held symbols must be unique and ascending")
+        for symbol, units in self.units:
+            if not isinstance(symbol, str) or not symbol:
+                raise ValueError("held symbol must be a nonempty string")
+            if not _finite_real(units) or units <= 0.0:
+                raise ValueError("held units must be finite and strictly positive")
+        return self
+
+
+class PortfolioReplay(FrozenGate2Model):
+    """The complete self-financing scored-session replay for one evaluation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
+
+    schema_version: Literal["PHASE4-PORTFOLIO-REPLAY-v1"] = "PHASE4-PORTFOLIO-REPLAY-v1"
+    candidate_id: str | None = Field(
+        default=None, pattern=r"^phase4-[0-9a-f]{64}$"
+    )
+    binding_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    friction_bps: int
+    initial_cash: float
+    states: tuple[SessionState, ...] = Field(min_length=1)
+    fills: tuple[Fill, ...] = ()
+    total_turnover: float
+
+    @model_validator(mode="after")
+    def validate_replay(self) -> "PortfolioReplay":
+        if (
+            isinstance(self.friction_bps, bool)
+            or not isinstance(self.friction_bps, Integral)
+            or self.friction_bps < 0
+        ):
+            raise ValueError("friction_bps must be a nonnegative integer")
+        if not _finite_real(self.initial_cash) or self.initial_cash <= 0.0:
+            raise ValueError("initial_cash must be a finite positive real")
+        if not _finite_real(self.total_turnover) or self.total_turnover < 0.0:
+            raise ValueError("total_turnover must be a finite nonnegative real")
+        sessions = tuple(state.session for state in self.states)
+        if sessions != tuple(sorted(sessions)) or len(set(sessions)) != len(sessions):
+            raise ValueError("replay sessions must be unique and increasing")
+        session_set = set(sessions)
+        previous: pd.Timestamp | None = None
+        for fill in self.fills:
+            if fill.fill_timestamp not in session_set:
+                raise ValueError("fill must occur on a replay scored session")
+            if previous is not None and fill.fill_timestamp < previous:
+                raise ValueError("fills must occur in scored-session order")
+            previous = fill.fill_timestamp
+        if (self.candidate_id is None) != (self.binding_sha256 is None):
+            raise ValueError("candidate and binding identities must both be present or absent")
+        return self
+
+    @property
+    def sessions(self) -> tuple[pd.Timestamp, ...]:
+        return tuple(state.session for state in self.states)
+
+    @property
+    def close_equity(self) -> tuple[float, ...]:
+        return tuple(state.close_equity for state in self.states)
+
+    @property
+    def realized_gross_exposure(self) -> tuple[float, ...]:
+        return tuple(state.realized_gross_exposure for state in self.states)
+
+    @property
+    def target_gross_exposure(self) -> tuple[float, ...]:
+        return tuple(state.target_gross_exposure for state in self.states)
+
+    @property
+    def daily_returns(self) -> tuple[float, ...]:
+        series = pd.Series(self.close_equity).pct_change()
+        return tuple(float(value) for value in series.iloc[1:].to_numpy())
