@@ -1767,7 +1767,7 @@ class CandidateBindingSet(FrozenGate2Model):
             raise ValueError("candidate bindings must be unique")
         if [
             item.budget_position for item in self.bindings
-        ] != tuple(range(1, 181)):
+        ] != list(range(1, 181)):
             raise ValueError(
                 "candidate budget positions must be 1..180 in order"
             )
