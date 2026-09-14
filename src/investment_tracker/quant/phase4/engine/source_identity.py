@@ -69,6 +69,17 @@ GATE2_SOURCE_BUNDLES: dict[str, tuple[str, ...]] = {
     "evidence": _bundle(("evidence.py",)),
     "authority": _bundle(("authority.py",)),
     "artifact": _bundle(("artifacts.py",)),
+    "seal": _bundle(
+        (
+            "seal.py",
+            "artifacts.py",
+            "conformance.py",
+            "models.py",
+            "robustness.py",
+            "source_identity.py",
+        )
+    ),
+    "cli": _bundle(("cli.py", "authority.py", "models.py", "seal.py")),
     "engine": _bundle(_ENGINE_FILES),
 }
 

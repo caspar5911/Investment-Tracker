@@ -25,7 +25,6 @@ from .artifacts import (
 from .authority import load_gate2_authority
 from .conformance import (
     SyntheticConformanceRecord,
-    _implementation_sha256,
     run_synthetic_conformance,
 )
 from .models import (
@@ -35,6 +34,7 @@ from .models import (
     Gate2Authority,
     EngineRuntimeIdentity,
     FamilyBindingSet,
+    FamilyImplementationBinding,
     FixedStrategyBinding,
     Gate2ArtifactIdentity,
     Gate2SealError,
@@ -136,14 +136,6 @@ def _seal(
             "FIXED_STRATEGY_INVARIANT_FAILURE: the sealed candidate "
             f"population holds {len(candidates)} candidates, not 180",
         )
-    candidate_bindings = tuple(
-        FixedStrategyBinding.from_authority(
-            authority,
-            candidate.candidate_id,
-            _implementation_sha256(candidate.candidate_id),
-        )
-        for candidate in candidates
-    )
     families = authority.grids.families
     if len(families) != 4:
         raise Gate2SealError(
@@ -151,11 +143,26 @@ def _seal(
             "FIXED_STRATEGY_INVARIANT_FAILURE: the sealed family population "
             f"holds {len(families)} families, not 4",
         )
-    first_by_family: dict[str, FixedStrategyBinding] = {}
-    for binding in candidate_bindings:
-        first_by_family.setdefault(binding.family_id, binding)
+    family_implementation: dict[str, str] = {
+        family.family_id: bundle_set[
+            f"family:{family.family_semantic_name}"
+        ].bundle_sha256
+        for family in families
+    }
+    candidate_bindings = tuple(
+        FixedStrategyBinding.from_authority(
+            authority,
+            candidate.candidate_id,
+            family_implementation[candidate.family_id],
+        )
+        for candidate in candidates
+    )
     family_bindings = tuple(
-        first_by_family[family.family_id] for family in families
+        FamilyImplementationBinding.from_family(
+            family,
+            family_implementation[family.family_id],
+        )
+        for family in families
     )
 
     store = Gate2ArtifactStore(root, root / "results")

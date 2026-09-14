@@ -205,15 +205,6 @@ def _validated_bundle_set(
     return bundle_set
 
 
-def _implementation_sha256(candidate_id: str) -> str:
-    return canonical_sha256(
-        {
-            "schema_version": "PHASE4-IMPL-BINDING-v1",
-            "candidate_id": candidate_id,
-        }
-    )
-
-
 # Memoization over fully immutable, digested inputs: the authority head
 # revision plus the sealed binding identity pin the binding bytes, and the
 # panel digests pin the market data, so cached results are bit-identical to
@@ -223,9 +214,44 @@ _BINDING_CACHE: dict[tuple[str, str], FixedStrategyBinding] = {}
 _TARGET_CACHE: dict[tuple[str, str, str, str, int], "object"] = {}
 
 
+def _candidate_implementation_sha256(
+    authority: Gate2Authority,
+    candidate_id: str,
+    family_implementation_sha256: dict[str, str],
+) -> str:
+    """The candidate's implementation identity is its family source bundle.
+
+    A candidate binds to the exact committed family source bundle that defines
+    its implementation; the candidate id alone is not an implementation
+    identity.
+    """
+    candidate = next(
+        (
+            item
+            for item in authority.grids.candidates
+            if item.candidate_id == candidate_id
+        ),
+        None,
+    )
+    if candidate is None:
+        raise Gate2SealError(
+            "FIXED_STRATEGY_INVARIANT_FAILURE",
+            "candidate is not a member of the sealed Gate 1 population",
+        )
+    implementation = family_implementation_sha256.get(candidate.family_id)
+    if implementation is None:
+        raise Gate2SealError(
+            "IMPLEMENTATION_BINDING_MISMATCH",
+            "candidate family has no bound source-bundle implementation "
+            "identity",
+        )
+    return implementation
+
+
 def _cached_binding(
     authority: Gate2Authority,
     candidate_id: str,
+    family_implementation_sha256: dict[str, str],
 ) -> FixedStrategyBinding:
     key = (authority.head_revision, candidate_id)
     cached = _BINDING_CACHE.get(key)
@@ -233,7 +259,9 @@ def _cached_binding(
         cached = FixedStrategyBinding.from_authority(
             authority,
             candidate_id,
-            _implementation_sha256(candidate_id),
+            _candidate_implementation_sha256(
+                authority, candidate_id, family_implementation_sha256
+            ),
         )
         _BINDING_CACHE[key] = cached
     return cached
@@ -261,10 +289,13 @@ def _cached_target(
 
 def _assert_all_bindings_construct(
     authority: Gate2Authority,
+    family_implementation_sha256: dict[str, str],
 ) -> dict[str, FixedStrategyBinding]:
     bindings = {
         candidate.candidate_id: _cached_binding(
-            authority, candidate.candidate_id
+            authority,
+            candidate.candidate_id,
+            family_implementation_sha256,
         )
         for candidate in authority.grids.candidates
     }
@@ -621,7 +652,15 @@ def run_synthetic_conformance(
     scored = market_input.scored
     sessions = scored.sessions
 
-    bindings = _assert_all_bindings_construct(authority)
+    family_implementation_sha256 = {
+        family.family_id: validated_bundles[
+            f"family:{family.family_semantic_name}"
+        ].bundle_sha256
+        for family in authority.grids.families
+    }
+    bindings = _assert_all_bindings_construct(
+        authority, family_implementation_sha256
+    )
     by_family, targets = _assert_rebalance_clock(authority, market_input, bindings)
 
     replay = replay_targets(scored, targets, friction_bps=_PRIMARY_FRICTION_BPS)

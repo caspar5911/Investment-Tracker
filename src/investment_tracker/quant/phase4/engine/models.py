@@ -1668,7 +1668,7 @@ class Phase4EngineManifest(FrozenGate2Model):
     readiness_manifest: ReadinessTerminalMetadata
     runtime: EngineRuntimeIdentity
     source_bundles: tuple[Gate2SourceBundleDigest, ...] = Field(
-        min_length=13, max_length=13
+        min_length=15, max_length=15
     )
     execution_convention: Literal["COMPLETED_BAR_SIGNAL_NEXT_BAR_OPEN"] = (
         "COMPLETED_BAR_SIGNAL_NEXT_BAR_OPEN"
@@ -1700,8 +1700,8 @@ class Phase4EngineManifest(FrozenGate2Model):
         bundle_names = [
             item.bundle_name for item in self.source_bundles
         ]
-        if bundle_names != sorted(bundle_names) or len(set(bundle_names)) != 13:
-            raise ValueError("source bundle names must be the sorted unique 13")
+        if bundle_names != sorted(bundle_names) or len(set(bundle_names)) != 15:
+            raise ValueError("source bundle names must be the sorted unique 15")
         if tuple(
             item.kind for item in self.write_ledger
         ) != _NON_FINAL_ARTIFACT_KINDS:
@@ -1774,12 +1774,74 @@ class EngineContract(FrozenGate2Model):
         return self
 
 
+class FamilyImplementationBinding(FrozenGate2Model):
+    """Bind a Gate 1 family/rule-set identity to its family source bundle.
+
+    The implementation identity is the family's source-bundle digest, so a
+    family binding is never derived from an arbitrary first candidate.
+    """
+
+    schema_version: Literal["PHASE4-FAMILY-IMPL-BINDING-v1"] = (
+        "PHASE4-FAMILY-IMPL-BINDING-v1"
+    )
+    family_id: str = Field(pattern=r"^phase4-family-[0-9a-f]{64}$")
+    family_semantic_name: FamilySemanticName
+    rule_set_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    family_definition_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    implementation_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    binding_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @classmethod
+    def from_family(
+        cls,
+        family: StrategyFamilyDefinition,
+        implementation_sha256: str,
+    ) -> "FamilyImplementationBinding":
+        if not isinstance(family, StrategyFamilyDefinition):
+            raise Gate2SealError(
+                "FIXED_STRATEGY_INVARIANT_FAILURE",
+                "family binding requires the exact Gate 1 family definition",
+            )
+        if re.fullmatch(r"[0-9a-f]{64}", implementation_sha256) is None:
+            raise Gate2SealError(
+                "FIXED_STRATEGY_INVARIANT_FAILURE",
+                "family implementation identity must be lowercase SHA-256",
+            )
+        payload: dict[str, object] = {
+            "schema_version": "PHASE4-FAMILY-IMPL-BINDING-v1",
+            "family_id": family.family_id,
+            "family_semantic_name": family.family_semantic_name,
+            "rule_set_sha256": family.rule_set_sha256,
+            "family_definition_sha256": family.family_definition_sha256,
+            "implementation_sha256": implementation_sha256,
+        }
+        payload["binding_sha256"] = sha256(
+            canonical_json_bytes(_binding_identity_payload(payload))
+        ).hexdigest()
+        try:
+            return cls.model_validate(payload)
+        except ValueError as exc:
+            raise Gate2SealError(
+                "FIXED_STRATEGY_INVARIANT_FAILURE",
+                "sealed family binding failed reconstruction",
+            ) from exc
+
+    @model_validator(mode="after")
+    def validate_family_binding(self) -> "FamilyImplementationBinding":
+        recomputed = sha256(
+            canonical_json_bytes(_binding_identity_payload(self.model_dump()))
+        ).hexdigest()
+        if recomputed != self.binding_sha256:
+            raise ValueError("family binding digest does not bind its fields")
+        return self
+
+
 class FamilyBindingSet(FrozenGate2Model):
     schema_version: Literal["PHASE4-FAMILY-BINDINGS-v1"] = (
         "PHASE4-FAMILY-BINDINGS-v1"
     )
     family_count: Literal[4] = 4
-    bindings: tuple[FixedStrategyBinding, ...] = Field(
+    bindings: tuple[FamilyImplementationBinding, ...] = Field(
         min_length=4, max_length=4
     )
 

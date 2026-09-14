@@ -120,6 +120,21 @@ def _store(root: Path) -> "Gate2ArtifactStore":
     return Gate2ArtifactStore(root, root / "results")
 
 
+def _candidate_id_hash(candidate_id: str) -> str:
+    """The superseded candidate-id-only implementation identity.
+
+    The seal must NOT use this; it is asserted only to prove the binding is
+    no longer a hash of the candidate id.
+    """
+    from investment_tracker.quant.phase4.preregistration.canonical import (
+        canonical_sha256,
+    )
+
+    return canonical_sha256(
+        {"schema_version": "PHASE4-IMPL-BINDING-v1", "candidate_id": candidate_id}
+    )
+
+
 def _manifest_of(result: Any, root: Path) -> "Phase4EngineManifest":
     payload = _store(root).verify(result.manifest)
     return Phase4EngineManifest.model_validate(json.loads(payload))
@@ -209,7 +224,7 @@ def test_seal_source_bundles_match_independent_bundle_identity(
     manifest = _manifest_of(sealed_engine, gate2_repo)
     names = [item.bundle_name for item in manifest.source_bundles]
     assert names == sorted(GATE2_SOURCE_BUNDLES)
-    assert len(names) == len(set(names)) == 13
+    assert len(names) == len(set(names)) == 15
     for digest in manifest.source_bundles:
         independent = source_bundle_identity(
             gate2_repo,
@@ -219,6 +234,78 @@ def test_seal_source_bundles_match_independent_bundle_identity(
         assert digest.producing_revision == independent.producing_revision
         assert digest.entry_count == len(independent.entries)
         assert digest.bundle_sha256 == independent.bundle_sha256
+
+
+def _bundle_digest_by_name(manifest: Any) -> dict[str, str]:
+    return {item.bundle_name: item.bundle_sha256 for item in manifest.source_bundles}
+
+
+def test_seal_source_bundles_identify_seal_and_cli_surfaces(
+    sealed_engine,
+    gate2_repo: Path,
+) -> None:
+    manifest = _manifest_of(sealed_engine, gate2_repo)
+    names = [item.bundle_name for item in manifest.source_bundles]
+    assert "seal" in names
+    assert "cli" in names
+    assert names.count("seal") == 1 and names.count("cli") == 1
+    seal_entries = GATE2_SOURCE_BUNDLES["seal"]
+    cli_entries = GATE2_SOURCE_BUNDLES["cli"]
+    prefix = "src/investment_tracker/quant/phase4/engine/"
+    assert f"{prefix}seal.py" in seal_entries
+    assert f"{prefix}cli.py" in cli_entries
+    # The seal and cli surfaces are separately identified, not just the broad
+    # engine bundle: their digests must differ from the engine bundle.
+    digests = _bundle_digest_by_name(manifest)
+    assert digests["seal"] != digests["engine"]
+    assert digests["cli"] != digests["engine"]
+
+
+def test_candidate_bindings_bind_family_source_bundle(
+    sealed_engine,
+    gate2_repo: Path,
+) -> None:
+    manifest = _manifest_of(sealed_engine, gate2_repo)
+    digests = _bundle_digest_by_name(manifest)
+    candidate_payload = _store(gate2_repo).verify(manifest.write_ledger[2])
+    candidate_set = CandidateBindingSet.model_validate(
+        json.loads(candidate_payload)
+    )
+    assert len(candidate_set.bindings) == 180
+    for binding in candidate_set.bindings:
+        expected = digests[f"family:{binding.family_semantic_name}"]
+        # The implementation identity is the candidate's family source-bundle
+        # digest, not a hash of the candidate id.
+        assert binding.implementation_sha256 == expected
+        assert binding.implementation_sha256 != _candidate_id_hash(
+            binding.candidate_id
+        )
+
+
+def test_family_bindings_bind_gate1_family_identity_to_source_bundle(
+    sealed_engine,
+    gate2_repo: Path,
+) -> None:
+    manifest = _manifest_of(sealed_engine, gate2_repo)
+    digests = _bundle_digest_by_name(manifest)
+    authority = load_gate2_authority(gate2_repo)
+    family_payload = _store(gate2_repo).verify(manifest.write_ledger[1])
+    family_set = FamilyBindingSet.model_validate(json.loads(family_payload))
+    families_by_id = {family.family_id: family for family in authority.grids.families}
+    seen_family_ids: list[str] = []
+    for binding in family_set.bindings:
+        family = families_by_id[binding.family_id]
+        seen_family_ids.append(binding.family_id)
+        assert binding.family_semantic_name == family.family_semantic_name
+        assert binding.rule_set_sha256 == family.rule_set_sha256
+        assert binding.family_definition_sha256 == family.family_definition_sha256
+        assert binding.implementation_sha256 == digests[
+            f"family:{family.family_semantic_name}"
+        ]
+        # A family binding must not reuse an arbitrary first candidate row.
+        assert not hasattr(binding, "candidate_id")
+        assert not hasattr(binding, "parameter_tuple_sha256")
+    assert seen_family_ids == [family.family_id for family in authority.grids.families]
 
 
 def test_seal_exact_read_and_write_ledgers(
