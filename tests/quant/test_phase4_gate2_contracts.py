@@ -63,22 +63,48 @@ def test_gate2_contract_models_exist_and_are_closed() -> None:
 
 
 def test_manifest_and_contract_governance_literals() -> None:
+    import typing
+
     models = importlib.import_module("investment_tracker.quant.phase4.engine.models")
     manifest_fields = models.Phase4EngineManifest.model_fields
     contract_fields = models.EngineContract.model_fields
     seal_fields = models.Gate2SealResult.model_fields
 
+    def literal_values(field) -> tuple:
+        # Pin the annotation itself, not just the default: a regression that
+        # loosens a Literal to a plain str (keeping the default) must fail.
+        annotation = field.annotation
+        assert typing.get_origin(annotation) is typing.Literal, annotation
+        return typing.get_args(annotation)
+
     # The terminal status is the explicit Phase 4 Gate 2 identity, not the
     # generic "SEALED" marker used by other gates.
+    assert literal_values(manifest_fields["status"]) == ("PHASE4_ENGINE_SEALED",)
+    assert literal_values(seal_fields["status"]) == ("PHASE4_ENGINE_SEALED",)
     assert manifest_fields["status"].default == "PHASE4_ENGINE_SEALED"
     assert seal_fields["status"].default == "PHASE4_ENGINE_SEALED"
 
     # Fold and regime are bound only at Gate 3, so the manifest and contract
     # record them as explicitly unbound rather than as runtime failure codes.
-    assert manifest_fields["fold_status"].default == "NOT_BOUND_GATE3_REQUIRED"
-    assert manifest_fields["regime_status"].default == "NOT_BOUND_GATE3_REQUIRED"
-    assert contract_fields["fold_status"].default == "NOT_BOUND_GATE3_REQUIRED"
-    assert contract_fields["regime_status"].default == "NOT_BOUND_GATE3_REQUIRED"
+    for fields in (manifest_fields, contract_fields):
+        assert literal_values(fields["fold_status"]) == ("NOT_BOUND_GATE3_REQUIRED",)
+        assert literal_values(fields["regime_status"]) == ("NOT_BOUND_GATE3_REQUIRED",)
+        assert fields["fold_status"].default == "NOT_BOUND_GATE3_REQUIRED"
+        assert fields["regime_status"].default == "NOT_BOUND_GATE3_REQUIRED"
+
+    # The pinned governance identity fields are themselves single-value Literals.
+    assert literal_values(manifest_fields["formula_version"]) == (
+        "PHASE4-ENGINE-FORMULA-v1",
+    )
+    assert literal_values(contract_fields["formula_version"]) == (
+        "PHASE4-ENGINE-FORMULA-v1",
+    )
+    assert literal_values(manifest_fields["qfq_methodology_identity"]) == (
+        "ffee9bac3fe329b14d5aebb0f6152f00fc0a86b28d9186c254b5c8f6f8a322fb",
+    )
+    assert literal_values(manifest_fields["candidate_population_sha256"]) == (
+        "15a33d6dceb52026661ddfba44a84a88fb306b7f64802c36dc60c6ca189a68b3",
+    )
 
     # Spec-required manifest governance fields.
     for name in (
