@@ -194,7 +194,11 @@ class Gate2FilesystemBoundaryGuard:
             return True
         if len(parts) == 2:
             return parts[1] == "sha256"
-        return len(parts) == 3 and _CONTENT_SHA256.fullmatch(parts[2]) is not None
+        return (
+            len(parts) == 3
+            and parts[1] == "sha256"
+            and _CONTENT_SHA256.fullmatch(parts[2]) is not None
+        )
 
 def _read_mode(mode: str) -> bool:
     return "r" in mode or "+" in mode

@@ -501,6 +501,18 @@ def test_generated_root_allows_only_content_addressed_gate2_artifacts() -> None:
         with pytest.raises(Gate2FilesystemViolation, match="forbidden filesystem read"):
             guard._read(generated / relative.format(digest=digest))
 
+    rejected_directories = (
+        "engine_contract/FINAL_HOLDOUT/{digest}",
+        "engine_contract/provider/{digest}",
+        "engine_contract/cache/{digest}",
+        "engine_contract/latest/{digest}",
+    )
+    for relative in rejected_directories:
+        with pytest.raises(
+            Gate2FilesystemViolation, match="forbidden filesystem discovery"
+        ):
+            guard._discovery("iterdir", generated / relative.format(digest=digest))
+
 
 def test_budget_state_machine_transitions_are_inert() -> None:
     from investment_tracker.quant.phase4.engine.authority import (
