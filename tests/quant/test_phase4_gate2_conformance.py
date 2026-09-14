@@ -9,7 +9,10 @@ import numpy as np
 import pandas as pd
 import pytest
 from pydantic import ValidationError
-from tests.quant.gate2_boundary_guard import Gate2FilesystemBoundaryGuard
+from tests.quant.gate2_boundary_guard import (
+    Gate2FilesystemBoundaryGuard,
+    Gate2FilesystemViolation,
+)
 
 try:
     import investment_tracker.quant.phase4.engine.conformance as _conformance_module
@@ -56,6 +59,13 @@ FORBIDDEN_BOUNDARY_RELATIVE_PATHS = (
     "providers/source.py",
     "cache/provider-response.json",
     "dynamic/discovery.json",
+    "results/phase4/gate2/latest.json",
+    "results/phase4/gate2/HACK.csv",
+    "results/phase4/gate2/market_bars.csv",
+    "results/phase4/gate2/validation_results.json",
+    "results/phase4/gate2/providers/source.py",
+    "results/phase4/gate2/cache/data.json",
+    "results/phase4/gate2/dynamic/discovery.json",
 )
 
 
@@ -81,6 +91,20 @@ def _filesystem_guard(root: Path) -> Gate2FilesystemBoundaryGuard:
             / "engine",
         ),
     )
+
+
+def _require_direct_guard_rejection(operation: Any, *, kind: str) -> None:
+    try:
+        operation()
+    except Gate2FilesystemViolation as exc:
+        if str(exc).startswith(f"forbidden filesystem {kind}:"):
+            return
+        raise
+    except Exception as exc:
+        raise AssertionError(
+            f"boundary guard failed before {kind} rejection"
+        ) from exc
+    raise AssertionError(f"boundary guard failed to reject {kind}")
 
 
 @pytest.fixture(autouse=True)
@@ -344,7 +368,6 @@ def test_bundle_set_wrong_path_membership_is_rejected(market_input) -> None:
 def test_no_external_seams_are_reachable_during_conformance(
     market_input,
     monkeypatch,
-    tmp_path: Path,
 ) -> None:
     from investment_tracker.quant.phase4.engine.authority import (
         load_gate2_authority,
@@ -368,37 +391,28 @@ def test_no_external_seams_are_reachable_during_conformance(
     original_static_scan = _conformance_module._assert_static_scan_clean
 
     def injected_forbidden_read() -> None:
-        rejected: list[Path] = []
         for relative in FORBIDDEN_BOUNDARY_RELATIVE_PATHS:
-            try:
-                with io.open(tmp_path / relative, "rb"):
+            def read_probe(relative: str = relative) -> None:
+                with io.open(REPOSITORY_ROOT / relative, "rb"):
                     pass
-            except AssertionError:
-                rejected.append(Path(relative))
-        if len(rejected) != len(FORBIDDEN_BOUNDARY_RELATIVE_PATHS):
-            raise AssertionError("forbidden filesystem read probe was not rejected")
-        raise AssertionError("forbidden filesystem read probes rejected")
+
+            _require_direct_guard_rejection(read_probe, kind="read")
         original_static_scan()
 
     monkeypatch.setattr(
         _conformance_module, "_assert_static_scan_clean", injected_forbidden_read
     )
-    with pytest.raises(AssertionError, match="forbidden filesystem"):
-        run_synthetic_conformance(authority, bundles)
+    run_synthetic_conformance(authority, bundles)
     monkeypatch.setattr(
         _conformance_module, "_assert_static_scan_clean", original_static_scan
     )
 
     def injected_forbidden_discovery() -> None:
-        rejected: list[Path] = []
         for relative in FORBIDDEN_BOUNDARY_RELATIVE_PATHS:
-            try:
-                tuple((tmp_path / relative).iterdir())
-            except AssertionError:
-                rejected.append(Path(relative))
-        if len(rejected) != len(FORBIDDEN_BOUNDARY_RELATIVE_PATHS):
-            raise AssertionError("forbidden filesystem discovery probe was not rejected")
-        raise AssertionError("forbidden filesystem discovery probes rejected")
+            def discovery_probe(relative: str = relative) -> None:
+                tuple((REPOSITORY_ROOT / relative).iterdir())
+
+            _require_direct_guard_rejection(discovery_probe, kind="discovery")
         original_static_scan()
 
     monkeypatch.setattr(
@@ -406,8 +420,7 @@ def test_no_external_seams_are_reachable_during_conformance(
         "_assert_static_scan_clean",
         injected_forbidden_discovery,
     )
-    with pytest.raises(AssertionError, match="forbidden filesystem"):
-        run_synthetic_conformance(authority, bundles)
+    run_synthetic_conformance(authority, bundles)
     monkeypatch.setattr(
         _conformance_module, "_assert_static_scan_clean", original_static_scan
     )
@@ -420,6 +433,73 @@ def test_no_external_seams_are_reachable_during_conformance(
     assert "SYN-" in rendered
     assert guard.read_paths
     assert guard.discovery_paths
+
+
+def test_boundary_oracle_fails_when_read_or_discovery_guard_is_permissive(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    unauthorized_file = tmp_path / "data" / "HACK.csv"
+    unauthorized_file.parent.mkdir()
+    unauthorized_file.write_bytes(b"unauthorized")
+    unauthorized_directory = tmp_path / "providers"
+    unauthorized_directory.mkdir()
+    for method, kind, operation in (
+        (
+            "_read",
+            "read",
+            lambda: io.open(unauthorized_file, "rb"),
+        ),
+        (
+            "_discovery",
+            "discovery",
+            lambda: tuple(unauthorized_directory.iterdir()),
+        ),
+    ):
+        guard = _filesystem_guard(REPOSITORY_ROOT)
+        guard.install(monkeypatch)
+        monkeypatch.setattr(guard, method, lambda *args: None)
+        with pytest.raises(AssertionError, match="boundary guard failed"):
+            _require_direct_guard_rejection(operation, kind=kind)
+        monkeypatch.undo()
+
+
+def test_boundary_oracle_rejects_a_fallback_that_spoofs_guard_error() -> None:
+    def fallback() -> None:
+        raise AssertionError("forbidden filesystem read: fallback")
+
+    with pytest.raises(AssertionError, match="boundary guard failed before read rejection"):
+        _require_direct_guard_rejection(fallback, kind="read")
+
+
+def test_generated_root_allows_only_content_addressed_gate2_artifacts() -> None:
+    from investment_tracker.quant.phase4.engine.models import GATE2_ARTIFACT_FILENAMES
+
+    guard = _filesystem_guard(REPOSITORY_ROOT)
+    generated = REPOSITORY_ROOT / "results" / "phase4" / "gate2"
+    digest = "a" * 64
+    for kind, filename in GATE2_ARTIFACT_FILENAMES.items():
+        guard._read(generated / kind / "sha256" / digest / filename)
+        guard._read(generated / kind / "sha256" / digest / ".tmp-gate2-abcdefgh")
+
+    rejected = (
+        "latest/sha256/{digest}/manifest.json",
+        "HACK/sha256/{digest}/bars.csv",
+        "market_bars/sha256/{digest}/bars.csv",
+        "validation/sha256/{digest}/results.json",
+        "provider/sha256/{digest}/source.py",
+        "cache/sha256/{digest}/response.json",
+        "dynamic/sha256/{digest}/discovery.json",
+        "engine_contract/sha256/{digest}/wrong.json",
+        "engine_contract/sha256/{digest}/.tmp-gate2-not-a-temp",
+        "engine_contract/sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/contract.json",
+        "engine_contract/sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/contract.json",
+        "engine_contract/not-sha256/{digest}/contract.json",
+        "engine_contract/sha256/{digest}/nested/contract.json",
+    )
+    for relative in rejected:
+        with pytest.raises(Gate2FilesystemViolation, match="forbidden filesystem read"):
+            guard._read(generated / relative.format(digest=digest))
 
 
 def test_budget_state_machine_transitions_are_inert() -> None:

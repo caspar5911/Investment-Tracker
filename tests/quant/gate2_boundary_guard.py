@@ -5,11 +5,21 @@ from __future__ import annotations
 import builtins
 import io
 import os
+import re
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
 import pytest
+from investment_tracker.quant.phase4.engine.models import GATE2_ARTIFACT_FILENAMES
+
+
+_CONTENT_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_TEMP_ARTIFACT = re.compile(r"^\.tmp-gate2-[a-z0-9_]{8}$")
+
+
+class Gate2FilesystemViolation(AssertionError):
+    """A direct filesystem-boundary rejection raised by this test guard."""
 
 
 class Gate2FilesystemBoundaryGuard:
@@ -120,9 +130,12 @@ class Gate2FilesystemBoundaryGuard:
     def _read(self, path: Path) -> None:
         resolved = path.resolve()
         self.read_paths.append(resolved)
-        if resolved in self.allowed_reads or _within(resolved, self.generated_root):
+        if (
+            resolved in self.allowed_reads
+            or self._legitimate_generated_artifact(resolved)
+        ):
             return
-        raise AssertionError(f"forbidden filesystem read: {resolved}")
+        raise Gate2FilesystemViolation(f"forbidden filesystem read: {resolved}")
 
     def _discovery(self, operation: str, value: Any) -> None:
         if isinstance(value, int):
@@ -135,25 +148,53 @@ class Gate2FilesystemBoundaryGuard:
             "listdir",
         }
         normalized_operation = operation.replace("\\", "/")
-        if _within(path, self.generated_root) and normalized_operation in {
+        if self._legitimate_generated_directory(path) and normalized_operation in {
             "iterdir",
-            "rglob:*",
-            "glob:**/*",
             "scandir",
             "listdir",
         }:
             allowed = True
+        if path == self.generated_root and normalized_operation in {
+            "rglob:*",
+            "glob:**/*",
+        }:
+            allowed = True
         if not allowed:
-            raise AssertionError(f"forbidden filesystem discovery: {operation} {path}")
+            raise Gate2FilesystemViolation(
+                f"forbidden filesystem discovery: {operation} {path}"
+            )
 
+    def _legitimate_generated_artifact(self, path: Path) -> bool:
+        try:
+            kind, sha256_label, content_sha256, filename = path.relative_to(
+                self.generated_root
+            ).parts
+        except ValueError:
+            return False
+        if (
+            sha256_label != "sha256"
+            or _CONTENT_SHA256.fullmatch(content_sha256) is None
+            or kind not in GATE2_ARTIFACT_FILENAMES
+        ):
+            return False
+        return filename == GATE2_ARTIFACT_FILENAMES[kind] or (
+            _TEMP_ARTIFACT.fullmatch(filename) is not None
+        )
 
-def _within(path: Path, root: Path) -> bool:
-    try:
-        path.relative_to(root)
-    except ValueError:
-        return False
-    return True
-
+    def _legitimate_generated_directory(self, path: Path) -> bool:
+        try:
+            parts = path.relative_to(self.generated_root).parts
+        except ValueError:
+            return False
+        if not parts:
+            return True
+        if parts[0] not in GATE2_ARTIFACT_FILENAMES:
+            return False
+        if len(parts) == 1:
+            return True
+        if len(parts) == 2:
+            return parts[1] == "sha256"
+        return len(parts) == 3 and _CONTENT_SHA256.fullmatch(parts[2]) is not None
 
 def _read_mode(mode: str) -> bool:
     return "r" in mode or "+" in mode

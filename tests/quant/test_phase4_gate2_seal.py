@@ -9,7 +9,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from tests.quant.gate2_boundary_guard import Gate2FilesystemBoundaryGuard
+from tests.quant.gate2_boundary_guard import (
+    Gate2FilesystemBoundaryGuard,
+    Gate2FilesystemViolation,
+)
 
 try:
     import investment_tracker.quant.phase4.engine.seal as _seal_module
@@ -66,6 +69,13 @@ FORBIDDEN_BOUNDARY_RELATIVE_PATHS = (
     "providers/source.py",
     "cache/provider-response.json",
     "dynamic/discovery.json",
+    "results/phase4/gate2/latest.json",
+    "results/phase4/gate2/HACK.csv",
+    "results/phase4/gate2/market_bars.csv",
+    "results/phase4/gate2/validation_results.json",
+    "results/phase4/gate2/providers/source.py",
+    "results/phase4/gate2/cache/data.json",
+    "results/phase4/gate2/dynamic/discovery.json",
 )
 
 
@@ -100,6 +110,20 @@ def _filesystem_guard(root: Path) -> Gate2FilesystemBoundaryGuard:
             / "engine",
         ),
     )
+
+
+def _require_direct_guard_rejection(operation: Any, *, kind: str) -> None:
+    try:
+        operation()
+    except Gate2FilesystemViolation as exc:
+        if str(exc).startswith(f"forbidden filesystem {kind}:"):
+            return
+        raise
+    except Exception as exc:
+        raise AssertionError(
+            f"boundary guard failed before {kind} rejection"
+        ) from exc
+    raise AssertionError(f"boundary guard failed to reject {kind}")
 
 
 def _run_git(args: list[str], cwd: Path | None = None) -> None:
@@ -223,44 +247,36 @@ def test_seal_reads_no_market_validation_protected_or_dynamic_resources(
     original_conformance = _seal_module.run_synthetic_conformance
 
     def injected_forbidden_read(*args: Any, **kwargs: Any) -> Any:
-        rejected: list[Path] = []
         for relative in FORBIDDEN_BOUNDARY_RELATIVE_PATHS:
-            try:
-                with io.open(tmp_path / relative, "rb"):
+            def read_probe(relative: str = relative) -> None:
+                with io.open(root / relative, "rb"):
                     pass
-            except AssertionError:
-                rejected.append(Path(relative))
-        if len(rejected) != len(FORBIDDEN_BOUNDARY_RELATIVE_PATHS):
-            raise AssertionError("forbidden filesystem read probe was not rejected")
-        raise AssertionError("forbidden filesystem read probes rejected")
+
+            _require_direct_guard_rejection(read_probe, kind="read")
         return original_conformance(*args, **kwargs)
 
     monkeypatch.setattr(
         _seal_module, "run_synthetic_conformance", injected_forbidden_read
     )
-    with pytest.raises(Gate2SealError, match="forbidden filesystem"):
-        seal_gate2(root)
+    sealed_after_read_probes = seal_gate2(root)
+    assert sealed_after_read_probes.status == "PHASE4_ENGINE_SEALED"
     monkeypatch.setattr(
         _seal_module, "run_synthetic_conformance", original_conformance
     )
 
     def injected_forbidden_discovery(*args: Any, **kwargs: Any) -> Any:
-        rejected: list[Path] = []
         for relative in FORBIDDEN_BOUNDARY_RELATIVE_PATHS:
-            try:
-                tuple((tmp_path / relative).iterdir())
-            except AssertionError:
-                rejected.append(Path(relative))
-        if len(rejected) != len(FORBIDDEN_BOUNDARY_RELATIVE_PATHS):
-            raise AssertionError("forbidden filesystem discovery probe was not rejected")
-        raise AssertionError("forbidden filesystem discovery probes rejected")
+            def discovery_probe(relative: str = relative) -> None:
+                tuple((root / relative).iterdir())
+
+            _require_direct_guard_rejection(discovery_probe, kind="discovery")
         return original_conformance(*args, **kwargs)
 
     monkeypatch.setattr(
         _seal_module, "run_synthetic_conformance", injected_forbidden_discovery
     )
-    with pytest.raises(Gate2SealError, match="forbidden filesystem"):
-        seal_gate2(root)
+    sealed_after_discovery_probes = seal_gate2(root)
+    assert sealed_after_discovery_probes.status == "PHASE4_ENGINE_SEALED"
     monkeypatch.setattr(
         _seal_module, "run_synthetic_conformance", original_conformance)
 
