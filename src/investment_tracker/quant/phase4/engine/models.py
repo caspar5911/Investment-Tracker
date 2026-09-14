@@ -26,6 +26,10 @@ from investment_tracker.quant.phase4.preregistration.seal import (
     Phase4PreregistrationManifest,
 )
 
+
+MarketRole = Literal["WARMUP", "SCORED"]
+
+
 GATE2_FAILURE_CODES = (
     "GATE1_MANIFEST_MISMATCH",
     "GATE1_DEPENDENCY_MISMATCH",
