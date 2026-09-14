@@ -187,14 +187,14 @@ def _search_for_negative_weight() -> list[tuple[str, float]] | None:
         for excess_exp in range(-16, -8):
             excess = 10**excess_exp
             base = (1.0 + excess) / n
-            tiny_last = 10**(-16)
+            tiny_last = 10 ** (-16)
             remaining = (1.0 + excess) - tiny_last
             per_weight = remaining / (n - 1)
 
             symbols = tuple(chr(ord("A") + i) for i in range(n))
-            weights = tuple(
-                (symbols[i], per_weight) for i in range(n - 1)
-            ) + ((symbols[-1], tiny_last),)
+            weights = tuple((symbols[i], per_weight) for i in range(n - 1)) + (
+                (symbols[-1], tiny_last),
+            )
 
             total = math.fsum(w for _, w in weights)
             if total > 1.0 + 1e-12 or total <= 0:
@@ -230,9 +230,7 @@ class TestCanonicalWeightsNonNegativity:
         if total > 1.0:
             result = _canonical_weights((("AAA", a), ("BBB", b), ("CCC", c)))
             for symbol, weight in result:
-                assert weight >= 0.0, (
-                    f"NEGATIVE WEIGHT: {symbol}={weight!r}"
-                )
+                assert weight >= 0.0, f"NEGATIVE WEIGHT: {symbol}={weight!r}"
 
     def test_comprehensive_edge_cases(self) -> None:
         """Battery of adversarial inputs."""
@@ -256,7 +254,9 @@ class TestCanonicalWeightsNonNegativity:
                         f"(input total={total!r})"
                     )
             except ValueError as e:
-                assert "exceeds one" in str(e).lower() or "nonnegative" in str(e).lower()
+                assert (
+                    "exceeds one" in str(e).lower() or "nonnegative" in str(e).lower()
+                )
 
     def test_idempotence_and_determinism(self) -> None:
         """Repeated canonicalization must be idempotent and deterministic."""

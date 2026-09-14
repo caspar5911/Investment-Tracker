@@ -275,10 +275,16 @@ def test_strategy_targets_are_independent_of_execution_open_prices(authority) ->
     closes = _cross_sectional_closes()
 
     ordinary = generate_target(
-        authority, binding, _market_input(closes, scored_count=2, open_multiplier=1.0), 0
+        authority,
+        binding,
+        _market_input(closes, scored_count=2, open_multiplier=1.0),
+        0,
     )
     substituted_opens = generate_target(
-        authority, binding, _market_input(closes, scored_count=2, open_multiplier=17.0), 0
+        authority,
+        binding,
+        _market_input(closes, scored_count=2, open_multiplier=17.0),
+        0,
     )
 
     assert ordinary is not None and substituted_opens is not None
@@ -303,7 +309,9 @@ def test_time_series_momentum_uses_exact_ddof1_trailing_return_window(
         excluded_multipliers=(1.5, 1.1, 1.01, 1.0),
     )
 
-    target = generate_target(authority, binding, _market_input(closes, scored_count=2), 0)
+    target = generate_target(
+        authority, binding, _market_input(closes, scored_count=2), 0
+    )
 
     assert target is not None
     assert tuple(symbol for symbol, _ in target.weights) == ("AAA", "BBB", "CCC")
@@ -330,7 +338,9 @@ def test_trend_filter_includes_t_and_uses_exact_ddof1_volatility_window(
         direction = 1.0 if offset % 2 else -1.0
         closes[offset:, :3] *= 1.0 + direction * np.asarray((0.005, 0.01, 0.02))
 
-    target = generate_target(authority, binding, _market_input(closes, scored_count=2), 0)
+    target = generate_target(
+        authority, binding, _market_input(closes, scored_count=2), 0
+    )
 
     assert target is not None
     assert tuple(symbol for symbol, _ in target.weights) == ("AAA", "BBB", "CCC")
@@ -358,7 +368,9 @@ def test_volatility_managed_momentum_uses_tie_break_and_covariance_ending_at_t(
         excluded_multipliers=(1.4, 1.4, 1.01),
     )
 
-    target = generate_target(authority, binding, _market_input(closes, scored_count=2), 0)
+    target = generate_target(
+        authority, binding, _market_input(closes, scored_count=2), 0
+    )
 
     assert target is not None
     assert tuple(symbol for symbol, _ in target.weights) == ("AAA", "BBB")
@@ -543,9 +555,9 @@ def _forge_binding() -> FixedStrategyBinding:
     """Construct a FixedStrategyBinding with self-consistent hashes but a
     family_id that is NOT one of the four sealed family IDs."""
     forged_family_id = "phase4-family-" + sha256(b"forged-family-payload").hexdigest()
-    forged_hypothesis_id = "phase4-hypothesis-" + sha256(
-        b"forged-hypothesis"
-    ).hexdigest()
+    forged_hypothesis_id = (
+        "phase4-hypothesis-" + sha256(b"forged-hypothesis").hexdigest()
+    )
 
     parameters = {
         "lookback_sessions": 63,
@@ -618,9 +630,10 @@ class TestForgedBindingRejection:
         binding = _forge_binding()
         assert binding.family_semantic_name == "diversified_time_series_momentum"
         assert binding.candidate_id.startswith("phase4-")
-        assert binding.family_id == "phase4-family-" + sha256(
-            b"forged-family-payload"
-        ).hexdigest()
+        assert (
+            binding.family_id
+            == "phase4-family-" + sha256(b"forged-family-payload").hexdigest()
+        )
 
     def test_forged_binding_rejected_by_generate_target(self, authority) -> None:
         """A forged binding with self-consistent hashes but a family_id outside
@@ -654,7 +667,9 @@ class TestForgedBindingRejection:
         assert exc_info.value.code == "FIXED_STRATEGY_INVARIANT_FAILURE"
         assert "not a member of the sealed" in str(exc_info.value)
 
-    def test_rehashed_authority_identity_substitution_is_rejected(self, authority) -> None:
+    def test_rehashed_authority_identity_substitution_is_rejected(
+        self, authority
+    ) -> None:
         """A real candidate ID cannot authenticate substituted authority metadata."""
 
         binding = FixedStrategyBinding.from_authority(
@@ -666,7 +681,11 @@ class TestForgedBindingRejection:
         payload["family_definition_sha256"] = "0" * 64
         payload["binding_sha256"] = sha256(
             canonical_json_bytes(
-                {key: value for key, value in payload.items() if key != "binding_sha256"}
+                {
+                    key: value
+                    for key, value in payload.items()
+                    if key != "binding_sha256"
+                }
             )
         ).hexdigest()
         substituted = FixedStrategyBinding.model_validate(payload)

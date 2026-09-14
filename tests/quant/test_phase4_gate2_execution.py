@@ -11,7 +11,9 @@ import pytest
 from investment_tracker.quant.phase4.engine.market import MarketPanel
 
 try:
-    _execution_module = import_module("investment_tracker.quant.phase4.engine.execution")
+    _execution_module = import_module(
+        "investment_tracker.quant.phase4.engine.execution"
+    )
     from investment_tracker.quant.phase4.engine.execution import replay_targets
     from investment_tracker.quant.phase4.engine.models import (
         Fill,
@@ -215,7 +217,9 @@ def test_sells_precede_buys_in_ascending_symbol_order(authority) -> None:
 
     replay = replay_targets(scored, [to_aaa, to_bbb, None], friction_bps=0)
 
-    second_day = tuple(fill for fill in replay.fills if fill.fill_timestamp == sessions[2])
+    second_day = tuple(
+        fill for fill in replay.fills if fill.fill_timestamp == sessions[2]
+    )
     assert tuple(fill.symbol for fill in second_day) == ("AAA", "BBB")
     assert second_day[0].fill_notional < 0.0
     assert second_day[1].fill_notional > 0.0
@@ -252,9 +256,7 @@ def test_high_friction_scales_buys_proportionally_without_negative_cash(authorit
         {"AAA": [10.0, 10.0], "BBB": [20.0, 20.0]},
         {"AAA": [10.0, 10.0], "BBB": [20.0, 20.0]},
     )
-    pending = _target(
-        binding, sessions[0], sessions[1], (("AAA", 0.5), ("BBB", 0.5))
-    )
+    pending = _target(binding, sessions[0], sessions[1], (("AAA", 0.5), ("BBB", 0.5)))
 
     replay = replay_targets(scored, [pending, None], friction_bps=1000)
 
@@ -369,16 +371,12 @@ def test_zero_delta_produces_no_fill_within_notional_tolerance(authority):
         {"AAA": [10.0, 10.0, 10.0], "BBB": [20.0, 20.0, 20.0]},
     )
     first = _target(binding, sessions[0], sessions[1], (("AAA", 0.5), ("BBB", 0.5)))
-    second = _target(
-        binding, sessions[1], sessions[2], (("AAA", 0.5), ("BBB", 0.5))
-    )
+    second = _target(binding, sessions[1], sessions[2], (("AAA", 0.5), ("BBB", 0.5)))
 
     replay = replay_targets(scored, [first, second, None], friction_bps=0)
 
     assert len(replay.fills) == 2
-    assert all(
-        fill.fill_timestamp == sessions[1] for fill in replay.fills
-    )
+    assert all(fill.fill_timestamp == sessions[1] for fill in replay.fills)
     assert replay.close_equity == pytest.approx((100000.0, 100000.0, 100000.0))
 
 
@@ -406,7 +404,9 @@ def test_daily_returns_use_scored_close_equity_pct_change(authority) -> None:
         ("boolean", True),
     ],
 )
-def test_replay_rejects_invalid_friction(case: str, friction_bps: object, authority) -> None:
+def test_replay_rejects_invalid_friction(
+    case: str, friction_bps: object, authority
+) -> None:
     binding = _binding(authority)
     sessions = _sessions("2024-01-01", periods=1)
     scored = _scored({"AAA": [10.0]}, {"AAA": [10.0]})
@@ -461,12 +461,8 @@ def test_replay_rejects_warmup_role_panel(authority) -> None:
     binding = _binding(authority)
     sessions = _sessions("2024-01-01", periods=2)
     warmup = MarketPanel.from_frames(
-        pd.DataFrame(
-            np.array([[10.0], [12.0]]), index=sessions, columns=["AAA"]
-        ),
-        pd.DataFrame(
-            np.array([[11.0], [13.0]]), index=sessions, columns=["AAA"]
-        ),
+        pd.DataFrame(np.array([[10.0], [12.0]]), index=sessions, columns=["AAA"]),
+        pd.DataFrame(np.array([[11.0], [13.0]]), index=sessions, columns=["AAA"]),
         role="WARMUP",
     )
 

@@ -23,9 +23,7 @@ _NOTIONAL_TOLERANCE: float = 1e-12
 _EXPOSURE_TOLERANCE: float = 1e-12
 _FLOAT_DUST: float = 1e-9
 
-PendingTarget = Tuple[
-    pd.Timestamp, pd.Timestamp | None, Tuple[Tuple[str, float], ...]
-]
+PendingTarget = Tuple[pd.Timestamp, pd.Timestamp | None, Tuple[Tuple[str, float], ...]]
 
 
 def _accounting(message: str) -> Gate2SealError:
@@ -61,9 +59,7 @@ def _validated_friction(friction_bps: int) -> int:
 
 
 def _validated_cash(initial_cash: float) -> float:
-    if isinstance(initial_cash, bool) or not isinstance(
-        initial_cash, (int, float)
-    ):
+    if isinstance(initial_cash, bool) or not isinstance(initial_cash, (int, float)):
         raise _accounting("initial_cash must be a finite positive value")
     value = float(initial_cash)
     if not math.isfinite(value) or value <= 0.0:
@@ -154,9 +150,7 @@ def _replay(
                 )
 
             if buy_order:
-                desired_buy = np.array(
-                    [delta[j] for j in buy_order], dtype=np.float64
-                )
+                desired_buy = np.array([delta[j] for j in buy_order], dtype=np.float64)
                 total_buy = float(desired_buy.sum())
                 if total_buy > 0.0:
                     if total_buy * (1.0 + friction_rate) > cash:
@@ -267,11 +261,11 @@ def replay_targets(
             raise _accounting("target signal does not align to its scored session")
         if due_ts is not None:
             if index + 1 >= len(sessions) or due_ts != sessions[index + 1]:
-                raise _accounting(
-                    "target due session must be the next scored session"
-                )
+                raise _accounting("target due session must be the next scored session")
         elif index + 1 < len(sessions):
-            raise _accounting("only a final scored-session target may have no due session")
+            raise _accounting(
+                "only a final scored-session target may have no due session"
+            )
         for symbol, _weight in item.weights:
             if symbol not in panel_symbols:
                 raise _accounting(
@@ -284,9 +278,7 @@ def replay_targets(
             binding_sha256 = item_binding
             binding = item.binding
         elif item_candidate != candidate_id or item_binding != binding_sha256:
-            raise _accounting(
-                "all targets must share one strategy binding identity"
-            )
+            raise _accounting("all targets must share one strategy binding identity")
         pending.append((signal_ts, due_ts, item.weights))
 
     return _replay(

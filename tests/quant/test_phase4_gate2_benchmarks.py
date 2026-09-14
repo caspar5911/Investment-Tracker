@@ -103,7 +103,10 @@ def test_equal_weight_buy_and_hold_one_purchase_fill_per_symbol() -> None:
 
     assert replay.candidate_id is None
     assert len(replay.fills) == 2
-    assert tuple(fill.fill_timestamp for fill in replay.fills) == (sessions[1], sessions[1])
+    assert tuple(fill.fill_timestamp for fill in replay.fills) == (
+        sessions[1],
+        sessions[1],
+    )
     assert tuple(fill.symbol for fill in replay.fills) == ("AAA", "BBB")
     assert all(fill.fill_notional > 0.0 for fill in replay.fills)
     assert all(fill.signal_timestamp == sessions[0] for fill in replay.fills)
@@ -145,12 +148,8 @@ def test_equal_weight_buy_and_hold_single_session_creates_no_fill() -> None:
 def test_benchmarks_reject_warmup_role_panel() -> None:
     sessions = _sessions("2024-01-01", periods=2)
     warmup = MarketPanel.from_frames(
-        pd.DataFrame(
-            np.array([[10.0], [12.0]]), index=sessions, columns=["AAA"]
-        ),
-        pd.DataFrame(
-            np.array([[11.0], [13.0]]), index=sessions, columns=["AAA"]
-        ),
+        pd.DataFrame(np.array([[10.0], [12.0]]), index=sessions, columns=["AAA"]),
+        pd.DataFrame(np.array([[11.0], [13.0]]), index=sessions, columns=["AAA"]),
         role="WARMUP",
     )
 
