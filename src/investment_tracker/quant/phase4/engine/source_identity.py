@@ -38,6 +38,7 @@ _ENGINE_FILES = (
     "authority.py",
     "benchmarks.py",
     "budget.py",
+    "conformance.py",
     "durability.py",
     "evidence.py",
     "execution.py",
@@ -45,12 +46,13 @@ _ENGINE_FILES = (
     "metrics.py",
     "models.py",
     "robustness.py",
+    "source_identity.py",
     "strategies.py",
 )
 
 
-def _bundle(name: str) -> tuple[str, ...]:
-    return tuple(sorted({_ENGINE_PREFIX + path for path in name})) if name else ()
+def _bundle(files: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(sorted({_ENGINE_PREFIX + path for path in files})) if files else ()
 
 
 GATE2_SOURCE_BUNDLES: dict[str, tuple[str, ...]] = {

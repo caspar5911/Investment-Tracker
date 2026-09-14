@@ -7,6 +7,8 @@ from typing import Any
 
 import pytest
 
+from investment_tracker.quant.phase4.engine.models import Gate2SealError
+
 try:
     import investment_tracker.quant.phase4.engine.source_identity as _source_module
 
@@ -185,17 +187,44 @@ def test_bundle_membership_rules_cover_signal_target_and_accounting_sources() ->
         assert values == tuple(sorted(set(values)))
 
 
+def test_engine_bundle_binds_every_tracked_top_level_engine_source() -> None:
+    bundles = GATE2_SOURCE_BUNDLES
+    prefix = "src/investment_tracker/quant/phase4/engine/"
+    expected_engine = tuple(
+        f"{prefix}{name}"
+        for name in (
+            "__init__.py",
+            "allocation.py",
+            "artifacts.py",
+            "authority.py",
+            "benchmarks.py",
+            "budget.py",
+            "conformance.py",
+            "durability.py",
+            "evidence.py",
+            "execution.py",
+            "market.py",
+            "metrics.py",
+            "models.py",
+            "robustness.py",
+            "source_identity.py",
+            "strategies.py",
+        )
+    )
+    assert tuple(bundles["engine"]) == expected_engine
+
+
 def test_untracked_source_is_rejected(temp_repository) -> None:
     root: Path = temp_repository["root"]
     engine_dir = root / "src" / "investment_tracker" / "quant" / "phase4" / "engine"
     (engine_dir / "untracked.py").write_bytes(b"UNTRACKED\n")
-    with pytest.raises(Exception) as excinfo:
+    with pytest.raises(Gate2SealError) as excinfo:
         source_bundle_identity(
             root,
             temp_repository["revision_one"],
             ("src/investment_tracker/quant/phase4/engine/untracked.py",),
         )
-    assert "INPUT_BOUNDARY_VIOLATION" in str(excinfo.value)
+    assert excinfo.value.code == "INPUT_BOUNDARY_VIOLATION"
 
 
 def test_dirty_worktree_bytes_are_rejected(temp_repository) -> None:
@@ -210,13 +239,13 @@ def test_dirty_worktree_bytes_are_rejected(temp_repository) -> None:
         / "engine"
         / "strategies.py"
     ).write_bytes(b"STRATEGIES DIRTY UNCOMMITTED\n")
-    with pytest.raises(Exception) as excinfo:
+    with pytest.raises(Gate2SealError) as excinfo:
         source_bundle_identity(
             root,
             revision,
             ("src/investment_tracker/quant/phase4/engine/strategies.py",),
         )
-    assert "IMMUTABLE_ARTIFACT_COLLISION" in str(excinfo.value)
+    assert excinfo.value.code == "IMMUTABLE_ARTIFACT_COLLISION"
 
 
 def test_missing_tracked_file_is_rejected(temp_repository) -> None:
@@ -231,13 +260,13 @@ def test_missing_tracked_file_is_rejected(temp_repository) -> None:
         / "engine"
         / "strategies.py"
     ).unlink()
-    with pytest.raises(Exception) as excinfo:
+    with pytest.raises(Gate2SealError) as excinfo:
         source_bundle_identity(
             root,
             revision,
             ("src/investment_tracker/quant/phase4/engine/strategies.py",),
         )
-    assert "INPUT_BOUNDARY_VIOLATION" in str(excinfo.value)
+    assert excinfo.value.code == "INPUT_BOUNDARY_VIOLATION"
 
 
 def test_symlinked_source_is_rejected(temp_repository, monkeypatch) -> None:
@@ -253,65 +282,65 @@ def test_symlinked_source_is_rejected(temp_repository, monkeypatch) -> None:
         return original(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "is_symlink", pretend)
-    with pytest.raises(Exception) as excinfo:
+    with pytest.raises(Gate2SealError) as excinfo:
         source_bundle_identity(
             root,
             temp_repository["revision_one"],
             ("src/investment_tracker/quant/phase4/engine/market.py",),
         )
-    assert "INPUT_BOUNDARY_VIOLATION" in str(excinfo.value)
+    assert excinfo.value.code == "INPUT_BOUNDARY_VIOLATION"
 
 
 def test_escaped_source_path_is_rejected(temp_repository) -> None:
     root: Path = temp_repository["root"]
-    with pytest.raises(Exception) as excinfo:
+    with pytest.raises(Gate2SealError) as excinfo:
         source_bundle_identity(
             root,
             temp_repository["revision_one"],
             ("src/investment_tracker/quant/phase4/engine/../engine/market.py",),
         )
-    assert "INPUT_BOUNDARY_VIOLATION" in str(excinfo.value)
+    assert excinfo.value.code == "INPUT_BOUNDARY_VIOLATION"
 
 
 def test_reordered_sources_are_rejected(temp_repository) -> None:
     root: Path = temp_repository["root"]
     revision: str = temp_repository["revision_one"]
     ordered = _bundle_paths(revision, ("market.py", "strategies.py"), root)
-    with pytest.raises(Exception) as excinfo:
+    with pytest.raises(Gate2SealError) as excinfo:
         source_bundle_identity(
             root,
             revision,
             (ordered[1], ordered[0]),
         )
-    assert "INPUT_BOUNDARY_VIOLATION" in str(excinfo.value)
+    assert excinfo.value.code == "INPUT_BOUNDARY_VIOLATION"
 
 
 def test_wrong_revision_source_is_rejected(temp_repository) -> None:
     root: Path = temp_repository["root"]
-    with pytest.raises(Exception) as excinfo:
+    with pytest.raises(Gate2SealError) as excinfo:
         source_bundle_identity(
             root,
             temp_repository["revision_one"],
             ("src/investment_tracker/quant/phase4/engine/strategies.py",),
         )
-    assert "IMMUTABLE_ARTIFACT_COLLISION" in str(excinfo.value)
+    assert excinfo.value.code == "IMMUTABLE_ARTIFACT_COLLISION"
 
 
 def test_malformed_producing_revision_is_rejected(temp_repository) -> None:
     root: Path = temp_repository["root"]
-    with pytest.raises(Exception) as excinfo:
+    with pytest.raises(Gate2SealError) as excinfo:
         source_bundle_identity(
             root,
             "deadbeef",
             ("src/investment_tracker/quant/phase4/engine/market.py",),
         )
-    assert "INPUT_BOUNDARY_VIOLATION" in str(excinfo.value)
+    assert excinfo.value.code == "INPUT_BOUNDARY_VIOLATION"
 
 
 def test_duplicate_source_paths_are_rejected(temp_repository) -> None:
     root: Path = temp_repository["root"]
     revision: str = temp_repository["revision_one"]
     path = "src/investment_tracker/quant/phase4/engine/market.py"
-    with pytest.raises(Exception) as excinfo:
+    with pytest.raises(Gate2SealError) as excinfo:
         source_bundle_identity(root, revision, (path, path))
-    assert "INPUT_BOUNDARY_VIOLATION" in str(excinfo.value)
+    assert excinfo.value.code == "INPUT_BOUNDARY_VIOLATION"

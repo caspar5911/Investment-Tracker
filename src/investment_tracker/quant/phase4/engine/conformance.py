@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
-from typing import Final, Literal
+from typing import Any, Final, Literal, Sequence
 
 import numpy as np
 import pandas as pd
@@ -346,6 +346,17 @@ def _on_clock_sample_offsets(total: int, rebalance_sessions: int) -> tuple[int, 
     return tuple(dict.fromkeys((0, mid, largest)))
 
 
+def _representative_candidate(candidates: Sequence[Any], family: Any) -> Any:
+    for candidate in candidates:
+        if candidate.family_id == family.family_id:
+            return candidate
+    raise Gate2SealError(
+        "FIXED_STRATEGY_INVARIANT_FAILURE",
+        "FIXED_STRATEGY_INVARIANT_FAILURE: sealed family has no candidates for "
+        "rebalance-clock verification",
+    )
+
+
 def _assert_rebalance_clock(
     authority: Gate2Authority,
     market_input: ScoredMarketInput,
@@ -366,11 +377,7 @@ def _assert_rebalance_clock(
     families = authority.grids.families
     by_family: dict[str, FixedStrategyBinding] = {}
     for family in families:
-        member = next(
-            candidate
-            for candidate in authority.grids.candidates
-            if candidate.family_id == family.family_id
-        )
+        member = _representative_candidate(authority.grids.candidates, family)
         by_family[family.family_id] = bindings[member.candidate_id]
     symbol_set = set(scored.symbols)
     sequence: list[object] | None = None

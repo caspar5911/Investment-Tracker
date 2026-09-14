@@ -357,3 +357,17 @@ def test_budget_state_machine_transitions_are_inert() -> None:
     failed = BudgetState.from_authority(authority).fail_campaign()
     assert failed.campaign_status == "CAMPAIGN_EXECUTION_FAILED"
     assert failed.campaign_terminated is True
+
+
+def test_family_without_candidates_fails_closed() -> None:
+    import types
+
+    from investment_tracker.quant.phase4.engine.conformance import (
+        _representative_candidate,
+    )
+    from investment_tracker.quant.phase4.engine.models import Gate2SealError
+
+    family = types.SimpleNamespace(family_id="family:conformance_fixture")
+    with pytest.raises(Gate2SealError) as excinfo:
+        _representative_candidate((), family)
+    assert excinfo.value.code == "FIXED_STRATEGY_INVARIANT_FAILURE"
