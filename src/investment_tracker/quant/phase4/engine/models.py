@@ -183,6 +183,61 @@ class TerminalArtifactIdentity(FrozenGate2Model):
         return self
 
 
+Gate2ArtifactKind = Literal[
+    "engine_contract",
+    "family_implementation_bindings",
+    "candidate_implementation_bindings",
+    "synthetic_conformance",
+    "phase4_engine_report",
+    "phase4_engine_manifest",
+]
+
+
+GATE2_ARTIFACT_FILENAMES: dict[str, str] = {
+    "engine_contract": "contract.json",
+    "family_implementation_bindings": "bindings.json",
+    "candidate_implementation_bindings": "bindings.json",
+    "synthetic_conformance": "conformance.json",
+    "phase4_engine_report": "report.md",
+    "phase4_engine_manifest": "manifest.json",
+}
+
+
+class Gate2ArtifactIdentity(FrozenGate2Model):
+    """Exact identity for one immutable Gate 2 artifact."""
+
+    kind: Gate2ArtifactKind
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    path: str = Field(min_length=1)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def validate_identity(self) -> "Gate2ArtifactIdentity":
+        posix = PurePosixPath(self.path)
+        windows = PureWindowsPath(self.path)
+        if (
+            "\\" in self.path
+            or self.path.startswith("/")
+            or windows.drive
+            or windows.is_absolute()
+            or any(part in {"", ".", ".."} for part in posix.parts)
+        ):
+            raise ValueError("artifact path must be repository-relative POSIX")
+        expected_path = (
+            f"results/phase4/gate2/{self.kind}/sha256/{self.content_sha256}/"
+            + GATE2_ARTIFACT_FILENAMES[self.kind]
+        )
+        if self.path != expected_path:
+            raise ValueError("artifact path does not match the fixed Gate 2 layout")
+        if self.sha256 != artifact_envelope_identity(
+            content_sha256=self.content_sha256,
+            kind=self.kind,
+            path=self.path,
+        ):
+            raise ValueError("artifact envelope identity mismatch")
+        return self
+
+
 class TerminalProtectedTreeDigest(FrozenGate2Model):
     path: Literal[
         "results/experiments",
@@ -1456,5 +1511,75 @@ class BudgetState(FrozenGate2Model):
             raise ValueError("unknown row state")
         if self.campaign_status not in _VALID_CAMPAIGN_STATUSES:
             raise ValueError("unknown campaign status")
+        return self
+
+
+EvidenceKind = Literal[
+    "friction",
+    "bootstrap",
+    "neighbor",
+    "fold",
+    "regime",
+    "primary",
+]
+
+
+class Gate2EvaluationContext(FrozenGate2Model):
+    """Identity inputs shared by every Gate 2 evaluation case."""
+
+    campaign_id: str = Field(min_length=1)
+    market_panel_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    warmup_panel_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    scored_panel_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    scored_reset_configuration_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    expected_sessions_authority_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    fold_authority_sha256: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
+    fold_authority_status: str = Field(min_length=1)
+    regime_authority_sha256: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
+    regime_authority_status: str = Field(min_length=1)
+    initial_cash_float64_hex: str = Field(
+        pattern=r"^0x[0-9a-f]+(\.[0-9a-f]+)?p[+-]?[0-9]+$"
+    )
+    primary_friction_bps: int
+    execution_convention: str = Field(min_length=1)
+    execution_series: str = Field(min_length=1)
+    decision_grade: bool
+
+
+class Gate2EvidenceRecord(FrozenGate2Model):
+    """One evaluation-case record bound to unchanged candidate identities."""
+
+    candidate_id: str = Field(min_length=1)
+    family_definition_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    rule_set_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    parameter_tuple_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    engine_implementation_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    evaluation_context_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    evaluation_case_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    evidence_kind: EvidenceKind
+    case_id: str = Field(min_length=1)
+    unavailable_statistics: UnavailableStatistics
+
+    @model_validator(mode="after")
+    def validate_case_identity(self) -> "Gate2EvidenceRecord":
+        from investment_tracker.quant.phase4.engine.evidence import (
+            evaluation_case_identity,
+        )
+
+        if self.evaluation_case_sha256 != evaluation_case_identity(
+            candidate_id=self.candidate_id,
+            family_definition_sha256=self.family_definition_sha256,
+            rule_set_sha256=self.rule_set_sha256,
+            parameter_tuple_sha256=self.parameter_tuple_sha256,
+            engine_implementation_sha256=self.engine_implementation_sha256,
+            evaluation_context_sha256=self.evaluation_context_sha256,
+            evidence_kind=self.evidence_kind,
+            case_id=self.case_id,
+        ):
+            raise ValueError("evidence record case identity mismatch")
         return self
 
