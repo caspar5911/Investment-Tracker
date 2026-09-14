@@ -17,6 +17,7 @@ from investment_tracker.quant.phase4.engine.models import (
     PortfolioReplay,
     RegimeAuthority,
     RegimePartitionEvidence,
+    UnavailableStatistics,
 )
 
 
@@ -62,6 +63,7 @@ def run_friction_cases(
                 total_return=total_return,
                 total_turnover=_finite(float(replay.total_turnover)),
                 close_equity=equity,
+                unavailable_statistics=UnavailableStatistics(),
             )
         )
     if len(identities) != 1:
@@ -88,6 +90,7 @@ def run_friction_cases(
         binding_sha256=binding_sha256,
         cases=tuple(cases),
         friction_retention_ratio=ratio,
+        unavailable_statistics=UnavailableStatistics(),
     )
 
 
@@ -116,6 +119,7 @@ def bootstrap_median_daily_return(
         observed_median=_finite(float(np.median(values))),
         percentile_05=_finite(float(np.percentile(draw_medians, 5))),
         percentile_95=_finite(float(np.percentile(draw_medians, 95))),
+        unavailable_statistics=UnavailableStatistics(),
     )
 
 
@@ -178,6 +182,7 @@ def slice_continuous_folds(
         fold_returns=tuple(fold_returns),
         fold_equity_start=tuple(equity_start),
         fold_equity_end=tuple(equity_end),
+        unavailable_statistics=UnavailableStatistics(),
     )
 
 
@@ -215,6 +220,7 @@ def partition_regimes(
         regime_sessions=tuple(
             tuple(sessions_by_regime[regime]) for regime in regime_ids
         ),
+        unavailable_statistics=UnavailableStatistics(),
     )
 
 

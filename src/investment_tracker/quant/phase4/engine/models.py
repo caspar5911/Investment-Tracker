@@ -1203,6 +1203,7 @@ class FrictionCaseEvidence(FrozenGate2Model):
     total_return: MetricValue
     total_turnover: MetricValue
     close_equity: tuple[float, ...]
+    unavailable_statistics: UnavailableStatistics
 
     @model_validator(mode="after")
     def validate_friction_case(self) -> "FrictionCaseEvidence":
@@ -1224,6 +1225,7 @@ class FrictionEvidence(FrozenGate2Model):
     cases: tuple[FrictionCaseEvidence, ...] = Field(min_length=5)
     primary_bps: Literal[3] = 3
     friction_retention_ratio: MetricValue
+    unavailable_statistics: UnavailableStatistics
 
     @model_validator(mode="after")
     def validate_friction_evidence(self) -> "FrictionEvidence":
@@ -1249,6 +1251,7 @@ class BootstrapEvidence(FrozenGate2Model):
     observed_median: MetricValue
     percentile_05: MetricValue
     percentile_95: MetricValue
+    unavailable_statistics: UnavailableStatistics
 
 
 class FoldAuthority(FrozenGate2Model):
@@ -1283,11 +1286,15 @@ class FoldSliceEvidence(FrozenGate2Model):
     fold_returns: tuple[MetricValue, ...]
     fold_equity_start: tuple[float, ...]
     fold_equity_end: tuple[float, ...]
+    unavailable_statistics: UnavailableStatistics
 
     @model_validator(mode="after")
     def validate_fold_slice(self) -> "FoldSliceEvidence":
-        if len(self.fold_ids) != len(self.fold_returns) or len(self.fold_equity_start) != len(
-            self.fold_equity_end
+        if not (
+            len(self.fold_ids)
+            == len(self.fold_returns)
+            == len(self.fold_equity_start)
+            == len(self.fold_equity_end)
         ):
             raise ValueError("fold ids, returns, and equity endpoints must align")
         if not all(_finite_real(v) for v in (*self.fold_equity_start, *self.fold_equity_end)):
@@ -1331,6 +1338,7 @@ class RegimePartitionEvidence(FrozenGate2Model):
     regime_ids: tuple[str, ...] = Field(min_length=1)
     regime_session_counts: tuple[int, ...]
     regime_sessions: tuple[tuple[pd.Timestamp, ...], ...]
+    unavailable_statistics: UnavailableStatistics
 
     @model_validator(mode="after")
     def validate_regime_partition(self) -> "RegimePartitionEvidence":

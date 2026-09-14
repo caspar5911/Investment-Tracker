@@ -315,3 +315,66 @@ def test_partition_regimes_partial_authority_fails_closed(authority) -> None:
     with pytest.raises(Gate2SealError) as exc_info:
         partition_regimes(replay, regime_authority)
     assert exc_info.value.code == "REGIME_AUTHORITY_MISSING"
+
+
+def test_every_evidence_schema_preserves_unavailable_statistics(authority) -> None:
+    binding = _binding(authority)
+    sessions, replay = _replay(authority, periods=4)
+    scored = _scored(
+        {"AAA": [10.0, 10.5, 11.0, 11.5]}, {"AAA": [10.0, 10.4, 10.9, 11.4]}
+    )
+    first = _target(binding, sessions[0], sessions[1], (("AAA", 1.0),))
+    friction = run_friction_cases(scored, (first, None, None, None))
+    bootstrap = bootstrap_median_daily_return([0.001, -0.002, 0.003])
+    fold_authority = FoldAuthority(
+        fold_ids=("fold-0", "fold-1"),
+        boundaries=((sessions[0], sessions[2]), (sessions[2], sessions[3])),
+    )
+    fold = slice_continuous_folds(replay, fold_authority)
+    regime_authority = RegimeAuthority(
+        regime_ids=("bear", "bull"),
+        session_regime=tuple(
+            (session, "bull" if i % 2 == 0 else "bear")
+            for i, session in enumerate(sessions)
+        ),
+    )
+    regime = partition_regimes(replay, regime_authority)
+
+    for evidence in (friction, *friction.cases, bootstrap, fold, regime):
+        stats = evidence.unavailable_statistics
+        assert stats.max_drawdown is None
+        assert stats.max_drawdown_status == "UNKNOWN"
+        assert stats.calmar is None
+        assert stats.calmar_status == "UNKNOWN"
+        assert stats.dsr is None
+        assert stats.dsr_status == "UNKNOWN"
+        assert stats.dsr_reason == "NOT_IMPLEMENTED"
+        assert stats.pbo is None
+        assert stats.pbo_status == "UNKNOWN"
+        assert stats.pbo_reason == "NOT_IMPLEMENTED"
+
+
+def test_fold_slice_evidence_rejects_misaligned_lengths(authority) -> None:
+    from investment_tracker.quant.phase4.engine.models import (
+        FoldSliceEvidence,
+        MetricValue,
+        UnavailableStatistics,
+    )
+
+    _, replay = _replay(authority, periods=4)
+    # fold_ids == fold_returns (2) and fold_equity_start == fold_equity_end (1),
+    # so the existing start-vs-end length check alone cannot catch the
+    # returns-vs-start/end misalignment; only a fully chained length check can.
+    with pytest.raises(ValueError):
+        FoldSliceEvidence(
+            candidate_id=replay.candidate_id,
+            binding_sha256=replay.binding_sha256,
+            fold_ids=("fold-0", "fold-1"),
+            fold_returns=(
+                MetricValue(value=0.1, status="AVAILABLE", reason="OK"),
+                MetricValue(value=0.2, status="AVAILABLE", reason="OK"),
+            ),
+            fold_equity_start=(1.0,),
+            fold_equity_end=(1.1,),
+            unavailable_statistics=UnavailableStatistics(),
+        )
