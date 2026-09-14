@@ -808,10 +808,9 @@ class TargetInstruction(FrozenGate2Model):
             )
         canonical_total = math.fsum(weight for _, weight in canonical_weights)
         if canonical_total > 1.0 and canonical_weights:
-            last_symbol, last_weight = canonical_weights[-1]
-            canonical_weights = (
-                *canonical_weights[:-1],
-                (last_symbol, last_weight - (canonical_total - 1.0)),
+            scale = 1.0 / canonical_total
+            canonical_weights = tuple(
+                (symbol, weight * scale) for symbol, weight in canonical_weights
             )
         object.__setattr__(self, "weights", canonical_weights)
 

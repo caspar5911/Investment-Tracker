@@ -44,8 +44,8 @@ def _canonical_weights(
     )
     canonical_total = math.fsum(weight for _, weight in result)
     if canonical_total > 1.0 and result:
-        symbol, weight = result[-1]
-        result = (*result[:-1], (symbol, weight - (canonical_total - 1.0)))
+        scale = 1.0 / canonical_total
+        result = tuple((symbol, weight * scale) for symbol, weight in result)
     return result
 
 

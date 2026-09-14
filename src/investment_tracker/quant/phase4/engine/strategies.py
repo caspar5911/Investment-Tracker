@@ -15,6 +15,7 @@ from investment_tracker.quant.phase4.engine.allocation import (
 from investment_tracker.quant.phase4.engine.market import ScoredMarketInput
 from investment_tracker.quant.phase4.engine.models import (
     FixedStrategyBinding,
+    Gate2Authority,
     Gate2SealError,
     TargetInstruction,
 )
@@ -28,9 +29,21 @@ def _invariant_failure(message: str) -> Gate2SealError:
     return Gate2SealError("FIXED_STRATEGY_INVARIANT_FAILURE", message)
 
 
-def _validated_binding(binding: FixedStrategyBinding) -> FixedStrategyBinding:
+def _validated_binding(
+    binding: FixedStrategyBinding, authority: Gate2Authority
+) -> FixedStrategyBinding:
     if not isinstance(binding, FixedStrategyBinding):
         raise _invariant_failure("target generation requires a fixed strategy binding")
+    if not isinstance(authority, Gate2Authority):
+        raise _invariant_failure(
+            "target generation requires the exact Gate 2 authority"
+        )
+    if binding.candidate_id not in {
+        candidate.candidate_id for candidate in authority.grids.candidates
+    }:
+        raise _invariant_failure(
+            "candidate is not a member of the sealed Gate 1 population"
+        )
     try:
         reconstructed = FixedStrategyBinding.model_validate(binding.model_dump())
     except ValueError as exc:
@@ -157,13 +170,14 @@ _TARGET_ALGORITHMS: Final[dict[str, TargetAlgorithm]] = {
 
 
 def generate_target(
+    authority: Gate2Authority,
     binding: FixedStrategyBinding,
     market_input: ScoredMarketInput,
     scored_offset: int,
 ) -> TargetInstruction | None:
     """Generate one causal close target on a fixed sealed rebalance clock."""
 
-    fixed_binding = _validated_binding(binding)
+    fixed_binding = _validated_binding(binding, authority)
     if not isinstance(market_input, ScoredMarketInput):
         raise _invariant_failure("target generation requires a scored market input")
     if (

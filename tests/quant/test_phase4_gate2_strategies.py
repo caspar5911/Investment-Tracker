@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from hashlib import sha256
 from pathlib import Path
 
 import numpy as np
@@ -16,6 +17,12 @@ from investment_tracker.quant.phase4.engine.models import (
     Gate2SealError,
 )
 from investment_tracker.quant.phase4.engine.strategies import generate_target
+from investment_tracker.quant.phase4.preregistration.canonical import (
+    candidate_identity,
+    canonical_json_bytes,
+    parameter_tuple_identity,
+    trial_identity,
+)
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -223,7 +230,7 @@ def test_cross_sectional_momentum_uses_strict_positive_skip_and_tie_breaking(
     )
     market_input = _market_input(_cross_sectional_closes(), scored_count=2)
 
-    target = generate_target(binding, market_input, 0)
+    target = generate_target(authority, binding, market_input, 0)
 
     assert target is not None
     assert target.weights == (("AAA", 0.5), ("BBB", 0.5))
@@ -246,10 +253,10 @@ def test_cross_sectional_momentum_has_no_future_close_lookahead(authority) -> No
     changed_future[85] = (3.0, 80_000.0, 90_000.0)
 
     original_target = generate_target(
-        binding, _market_input(original, scored_count=2), 0
+        authority, binding, _market_input(original, scored_count=2), 0
     )
     changed_target = generate_target(
-        binding, _market_input(changed_future, scored_count=2), 0
+        authority, binding, _market_input(changed_future, scored_count=2), 0
     )
 
     assert original_target is not None and changed_target is not None
@@ -268,10 +275,10 @@ def test_strategy_targets_are_independent_of_execution_open_prices(authority) ->
     closes = _cross_sectional_closes()
 
     ordinary = generate_target(
-        binding, _market_input(closes, scored_count=2, open_multiplier=1.0), 0
+        authority, binding, _market_input(closes, scored_count=2, open_multiplier=1.0), 0
     )
     substituted_opens = generate_target(
-        binding, _market_input(closes, scored_count=2, open_multiplier=17.0), 0
+        authority, binding, _market_input(closes, scored_count=2, open_multiplier=17.0), 0
     )
 
     assert ordinary is not None and substituted_opens is not None
@@ -296,7 +303,7 @@ def test_time_series_momentum_uses_exact_ddof1_trailing_return_window(
         excluded_multipliers=(1.5, 1.1, 1.01, 1.0),
     )
 
-    target = generate_target(binding, _market_input(closes, scored_count=2), 0)
+    target = generate_target(authority, binding, _market_input(closes, scored_count=2), 0)
 
     assert target is not None
     assert tuple(symbol for symbol, _ in target.weights) == ("AAA", "BBB", "CCC")
@@ -323,7 +330,7 @@ def test_trend_filter_includes_t_and_uses_exact_ddof1_volatility_window(
         direction = 1.0 if offset % 2 else -1.0
         closes[offset:, :3] *= 1.0 + direction * np.asarray((0.005, 0.01, 0.02))
 
-    target = generate_target(binding, _market_input(closes, scored_count=2), 0)
+    target = generate_target(authority, binding, _market_input(closes, scored_count=2), 0)
 
     assert target is not None
     assert tuple(symbol for symbol, _ in target.weights) == ("AAA", "BBB", "CCC")
@@ -351,7 +358,7 @@ def test_volatility_managed_momentum_uses_tie_break_and_covariance_ending_at_t(
         excluded_multipliers=(1.4, 1.4, 1.01),
     )
 
-    target = generate_target(binding, _market_input(closes, scored_count=2), 0)
+    target = generate_target(authority, binding, _market_input(closes, scored_count=2), 0)
 
     assert target is not None
     assert tuple(symbol for symbol, _ in target.weights) == ("AAA", "BBB")
@@ -405,7 +412,7 @@ def test_insufficient_history_produces_an_on_clock_cash_target(
     binding = _binding(authority, semantic_name, **parameters)
     market_input = _market_input(np.full((3, 3), 100.0), scored_count=2)
 
-    target = generate_target(binding, market_input, 0)
+    target = generate_target(authority, binding, market_input, 0)
 
     assert target is not None
     assert target.weights == ()
@@ -475,10 +482,10 @@ def test_rebalance_clocks_are_anchored_to_the_first_scored_session(
         scored_count=scored_count,
     )
 
-    assert generate_target(binding, market_input, 0) is not None
-    assert generate_target(binding, market_input, 1) is None
-    assert generate_target(binding, market_input, interval - 1) is None
-    assert generate_target(binding, market_input, interval) is not None
+    assert generate_target(authority, binding, market_input, 0) is not None
+    assert generate_target(authority, binding, market_input, 1) is None
+    assert generate_target(authority, binding, market_input, interval - 1) is None
+    assert generate_target(authority, binding, market_input, interval) is not None
 
 
 def test_final_session_target_has_no_due_session(authority) -> None:
@@ -492,7 +499,7 @@ def test_final_session_target_has_no_due_session(authority) -> None:
     )
     market_input = _market_input(_cross_sectional_closes()[:85], scored_count=1)
 
-    target = generate_target(binding, market_input, 0)
+    target = generate_target(authority, binding, market_input, 0)
 
     assert target is not None
     assert target.due_session is None
@@ -513,7 +520,7 @@ def test_generate_target_rejects_invalid_scored_offsets(
     market_input = _market_input(_cross_sectional_closes(), scored_count=2)
 
     with pytest.raises(Gate2SealError) as caught:
-        generate_target(binding, market_input, scored_offset)
+        generate_target(authority, binding, market_input, scored_offset)
     assert caught.value.code == "FIXED_STRATEGY_INVARIANT_FAILURE"
 
 
@@ -525,3 +532,124 @@ def test_strategy_layer_exposes_no_adaptive_or_selection_surface(authority) -> N
     for forbidden_name in ("fit", "calibrate", "optimize", "select"):
         assert not hasattr(binding, forbidden_name)
         assert not hasattr(strategy_module, forbidden_name)
+
+
+# ============================================================
+# Forged binding rejection regression test
+# ============================================================
+
+
+def _forge_binding() -> FixedStrategyBinding:
+    """Construct a FixedStrategyBinding with self-consistent hashes but a
+    family_id that is NOT one of the four sealed family IDs."""
+    forged_family_id = "phase4-family-" + sha256(b"forged-family-payload").hexdigest()
+    forged_hypothesis_id = "phase4-hypothesis-" + sha256(
+        b"forged-hypothesis"
+    ).hexdigest()
+
+    parameters = {
+        "lookback_sessions": 63,
+        "maximum_asset_weight": 0.25,
+        "rebalance_sessions": 5,
+        "volatility_window": 20,
+    }
+    typed_parameters = {
+        name: {
+            "type": "int" if isinstance(val, int) else "float64_hex",
+            "value": str(val) if isinstance(val, int) else float(val).hex(),
+        }
+        for name, val in parameters.items()
+    }
+
+    campaign_id = "PHASE4-FIXED-LONG-ONLY-2014-2022-v1"
+    candidate_id = candidate_identity(
+        campaign_id=campaign_id,
+        hypothesis_id=forged_hypothesis_id,
+        family_id=forged_family_id,
+        parameters=typed_parameters,
+    )
+    trial_id = trial_identity(campaign_id, candidate_id)
+    parameter_tuple_sha256 = parameter_tuple_identity(
+        forged_family_id, typed_parameters
+    )
+
+    payload = {
+        "schema_version": "PHASE4-FIXED-STRATEGY-BINDING-v1",
+        "implementation_interface": "PHASE4-FIXED-LONG-ONLY-STRATEGY-v1",
+        "campaign_id": campaign_id,
+        "candidate_id": candidate_id,
+        "trial_id": trial_id,
+        "budget_position": 1,
+        "family_id": forged_family_id,
+        "family_semantic_name": "diversified_time_series_momentum",
+        "hypothesis_id": forged_hypothesis_id,
+        "family_definition_sha256": "b" * 64,
+        "rule_set_sha256": "c" * 64,
+        "parameter_tuple_sha256": parameter_tuple_sha256,
+        "grid_spec_sha256": "d" * 64,
+        "implementation_sha256": IMPLEMENTATION_SHA256,
+        "parameters": [
+            {"name": "lookback_sessions", "type": "int", "value": "63"},
+            {
+                "name": "maximum_asset_weight",
+                "type": "float64_hex",
+                "value": float(0.25).hex(),
+            },
+            {"name": "rebalance_sessions", "type": "int", "value": "5"},
+            {"name": "volatility_window", "type": "int", "value": "20"},
+        ],
+        "structural_parameters": [],
+    }
+    payload["binding_sha256"] = sha256(
+        canonical_json_bytes(
+            {k: v for k, v in payload.items() if k != "binding_sha256"}
+        )
+    ).hexdigest()
+
+    return FixedStrategyBinding.model_validate(payload)
+
+
+class TestForgedBindingRejection:
+    """Regression test: a forged binding must be rejected by generate_target."""
+
+    def test_forged_binding_passes_model_validation(self) -> None:
+        """A binding with a fabricated family_id but valid parameter values
+        and correctly computed hashes passes model_validate without error."""
+        binding = _forge_binding()
+        assert binding.family_semantic_name == "diversified_time_series_momentum"
+        assert binding.candidate_id.startswith("phase4-")
+        assert binding.family_id == "phase4-family-" + sha256(
+            b"forged-family-payload"
+        ).hexdigest()
+
+    def test_forged_binding_rejected_by_generate_target(self, authority) -> None:
+        """A forged binding with self-consistent hashes but a family_id outside
+        the sealed population MUST be rejected by generate_target with
+        FIXED_STRATEGY_INVARIANT_FAILURE."""
+        forged = _forge_binding()
+        scored_count = 5
+        warmup_count = 100
+        total = warmup_count + scored_count
+        symbols = ("AAA", "BBB", "CCC")
+        sessions = pd.date_range("2020-01-01", periods=total, freq="D", tz="UTC")
+        closes = pd.DataFrame(
+            np.full((total, 3), 100.0, dtype=np.float64),
+            index=sessions,
+            columns=symbols,
+        )
+        closes.iloc[:, 0] = np.linspace(100.0, 120.0, total)
+        closes.iloc[:, 1] = np.linspace(100.0, 110.0, total)
+        closes.iloc[:, 2] = np.linspace(100.0, 105.0, total)
+        opens = closes.copy()
+        warmup = MarketPanel.from_frames(
+            opens.iloc[:warmup_count], closes.iloc[:warmup_count], role="WARMUP"
+        )
+        scored = MarketPanel.from_frames(
+            opens.iloc[warmup_count:], closes.iloc[warmup_count:], role="SCORED"
+        )
+        market_input = ScoredMarketInput.from_panels(warmup, scored)
+
+        with pytest.raises(Gate2SealError) as exc_info:
+            generate_target(authority, forged, market_input, 0)
+        assert exc_info.value.code == "FIXED_STRATEGY_INVARIANT_FAILURE"
+        assert "not a member of the sealed" in str(exc_info.value)
