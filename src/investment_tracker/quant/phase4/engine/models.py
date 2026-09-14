@@ -1622,3 +1622,173 @@ class Gate2EvidenceRecord(FrozenGate2Model):
             raise ValueError("evidence record case identity mismatch")
         return self
 
+
+class EngineRuntimeIdentity(FrozenGate2Model):
+    python_implementation: str = Field(min_length=1)
+    python_version: str = Field(pattern=r"^\d+\.\d+\.\d+$")
+    platform: str = Field(min_length=1)
+
+
+class Gate2SourceBundleDigest(FrozenGate2Model):
+    bundle_name: str = Field(min_length=1)
+    producing_revision: str = Field(pattern=r"^[0-9a-f]{40}$")
+    entry_count: int = Field(ge=1)
+    bundle_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+_NON_FINAL_ARTIFACT_KINDS = (
+    "engine_contract",
+    "family_implementation_bindings",
+    "candidate_implementation_bindings",
+    "synthetic_conformance",
+    "phase4_engine_report",
+)
+
+
+class Phase4EngineManifest(FrozenGate2Model):
+    schema_version: Literal["PHASE4-ENGINE-MANIFEST-v1"] = (
+        "PHASE4-ENGINE-MANIFEST-v1"
+    )
+    status: Literal["SEALED"] = "SEALED"
+    starting_revision: Literal[
+        "fb1c30a6c9789bddf2033301977fc8e2f3ebc1a0"
+    ] = "fb1c30a6c9789bddf2033301977fc8e2f3ebc1a0"
+    head_revision: str = Field(pattern=r"^[0-9a-f]{40}$")
+    gate1_manifest: Gate1ArtifactIdentity
+    runtime: EngineRuntimeIdentity
+    source_bundles: tuple[Gate2SourceBundleDigest, ...] = Field(
+        min_length=13, max_length=13
+    )
+    execution_convention: Literal["COMPLETED_BAR_SIGNAL_NEXT_BAR_OPEN"] = (
+        "COMPLETED_BAR_SIGNAL_NEXT_BAR_OPEN"
+    )
+    execution_series: Literal["QFQ_NORMALIZED"] = "QFQ_NORMALIZED"
+    primary_friction_bps: Literal[3] = 3
+    decision_grade: Literal[False] = False
+    family_count: Literal[4] = 4
+    candidate_count: Literal[180] = 180
+    historical_phase2_trials: Literal[136] = 136
+    phase4_trials_consumed: Literal[0] = 0
+    fold_status: Literal["FOLD_AUTHORITY_MISSING"] = "FOLD_AUTHORITY_MISSING"
+    regime_status: Literal["REGIME_AUTHORITY_MISSING"] = (
+        "REGIME_AUTHORITY_MISSING"
+    )
+    unavailable_statistics: UnavailableStatistics
+    safety: SafetyAccessState
+    read_ledger: tuple[DirectDependencyIdentity, ...] = Field(
+        min_length=15, max_length=15
+    )
+    write_ledger: tuple[Gate2ArtifactIdentity, ...] = Field(
+        min_length=5, max_length=5
+    )
+
+    @model_validator(mode="after")
+    def validate_gate2_ledgers(self) -> "Phase4EngineManifest":
+        bundle_names = [
+            item.bundle_name for item in self.source_bundles
+        ]
+        if bundle_names != sorted(bundle_names) or len(set(bundle_names)) != 13:
+            raise ValueError("source bundle names must be the sorted unique 13")
+        if tuple(
+            item.kind for item in self.write_ledger
+        ) != _NON_FINAL_ARTIFACT_KINDS:
+            raise ValueError(
+                "write ledger must bind the five non-final kinds in order"
+            )
+        if self.read_ledger[0].kind != "phase4_preregistration_manifest":
+            raise ValueError(
+                "read ledger must begin with the Gate 1 preregistration manifest"
+            )
+        return self
+
+
+class EngineContract(FrozenGate2Model):
+    schema_version: Literal["PHASE4-ENGINE-CONTRACT-v1"] = (
+        "PHASE4-ENGINE-CONTRACT-v1"
+    )
+    implementation_interface: Literal[
+        "PHASE4-FIXED-LONG-ONLY-STRATEGY-v1"
+    ] = "PHASE4-FIXED-LONG-ONLY-STRATEGY-v1"
+    campaign_id: Literal[
+        "PHASE4-FIXED-LONG-ONLY-2014-2022-v1"
+    ] = "PHASE4-FIXED-LONG-ONLY-2014-2022-v1"
+    execution_convention: Literal["COMPLETED_BAR_SIGNAL_NEXT_BAR_OPEN"] = (
+        "COMPLETED_BAR_SIGNAL_NEXT_BAR_OPEN"
+    )
+    execution_series: Literal["QFQ_NORMALIZED"] = "QFQ_NORMALIZED"
+    primary_friction_bps: Literal[3] = 3
+    decision_grade: Literal[False] = False
+    family_count: Literal[4] = 4
+    candidate_count: Literal[180] = 180
+    historical_phase2_trials: Literal[136] = 136
+    phase4_trials_consumed: Literal[0] = 0
+    fold_status: Literal["FOLD_AUTHORITY_MISSING"] = "FOLD_AUTHORITY_MISSING"
+    regime_status: Literal["REGIME_AUTHORITY_MISSING"] = (
+        "REGIME_AUTHORITY_MISSING"
+    )
+    unavailable_statistics: UnavailableStatistics
+    safety: SafetyAccessState
+
+
+class FamilyBindingSet(FrozenGate2Model):
+    schema_version: Literal["PHASE4-FAMILY-BINDINGS-v1"] = (
+        "PHASE4-FAMILY-BINDINGS-v1"
+    )
+    family_count: Literal[4] = 4
+    bindings: tuple[FixedStrategyBinding, ...] = Field(
+        min_length=4, max_length=4
+    )
+
+    @model_validator(mode="after")
+    def validate_family_binding_set(self) -> "FamilyBindingSet":
+        family_ids = [
+            item.family_id for item in self.bindings
+        ]
+        if len(set(family_ids)) != len(family_ids):
+            raise ValueError("family bindings must cover unique families")
+        return self
+
+
+class CandidateBindingSet(FrozenGate2Model):
+    schema_version: Literal["PHASE4-CANDIDATE-BINDINGS-v1"] = (
+        "PHASE4-CANDIDATE-BINDINGS-v1"
+    )
+    candidate_count: Literal[180] = 180
+    bindings: tuple[FixedStrategyBinding, ...] = Field(
+        min_length=180, max_length=180
+    )
+
+    @model_validator(mode="after")
+    def validate_candidate_binding_set(self) -> "CandidateBindingSet":
+        candidate_ids = [
+            item.candidate_id for item in self.bindings
+        ]
+        if len(set(candidate_ids)) != len(candidate_ids):
+            raise ValueError("candidate bindings must be unique")
+        if [
+            item.budget_position for item in self.bindings
+        ] != tuple(range(1, 181)):
+            raise ValueError(
+                "candidate budget positions must be 1..180 in order"
+            )
+        return self
+
+
+class Gate2SealResult(FrozenGate2Model):
+    status: Literal["SEALED"] = "SEALED"
+    head_revision: str = Field(pattern=r"^[0-9a-f]{40}$")
+    manifest: Gate2ArtifactIdentity
+    written: tuple[Gate2ArtifactIdentity, ...] = Field(
+        min_length=6, max_length=6
+    )
+
+    @model_validator(mode="after")
+    def validate_gate2_seal_result(self) -> "Gate2SealResult":
+        if self.written[-1].kind != "phase4_engine_manifest" or (
+            self.written[-1] != self.manifest
+        ):
+            raise ValueError(
+                "the manifest must be the final written Gate 2 artifact"
+            )
+        return self
+

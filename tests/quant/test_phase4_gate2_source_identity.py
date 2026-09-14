@@ -199,6 +199,7 @@ def test_engine_bundle_binds_every_tracked_top_level_engine_source() -> None:
             "authority.py",
             "benchmarks.py",
             "budget.py",
+            "cli.py",
             "conformance.py",
             "durability.py",
             "evidence.py",
@@ -207,6 +208,7 @@ def test_engine_bundle_binds_every_tracked_top_level_engine_source() -> None:
             "metrics.py",
             "models.py",
             "robustness.py",
+            "seal.py",
             "source_identity.py",
             "strategies.py",
         )

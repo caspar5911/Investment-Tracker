@@ -38,6 +38,7 @@ _ENGINE_FILES = (
     "authority.py",
     "benchmarks.py",
     "budget.py",
+    "cli.py",
     "conformance.py",
     "durability.py",
     "evidence.py",
@@ -46,6 +47,7 @@ _ENGINE_FILES = (
     "metrics.py",
     "models.py",
     "robustness.py",
+    "seal.py",
     "source_identity.py",
     "strategies.py",
 )
