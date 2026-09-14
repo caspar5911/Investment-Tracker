@@ -653,3 +653,28 @@ class TestForgedBindingRejection:
             generate_target(authority, forged, market_input, 0)
         assert exc_info.value.code == "FIXED_STRATEGY_INVARIANT_FAILURE"
         assert "not a member of the sealed" in str(exc_info.value)
+
+    def test_rehashed_authority_identity_substitution_is_rejected(self, authority) -> None:
+        """A real candidate ID cannot authenticate substituted authority metadata."""
+
+        binding = FixedStrategyBinding.from_authority(
+            authority,
+            authority.grids.candidates[0].candidate_id,
+            IMPLEMENTATION_SHA256,
+        )
+        payload = binding.model_dump(mode="json")
+        payload["family_definition_sha256"] = "0" * 64
+        payload["binding_sha256"] = sha256(
+            canonical_json_bytes(
+                {key: value for key, value in payload.items() if key != "binding_sha256"}
+            )
+        ).hexdigest()
+        substituted = FixedStrategyBinding.model_validate(payload)
+        market_input = _market_input(
+            np.full((3, 1), 100.0, dtype=np.float64), scored_count=2
+        )
+
+        with pytest.raises(Gate2SealError) as exc_info:
+            generate_target(authority, substituted, market_input, 0)
+
+        assert exc_info.value.code == "FIXED_STRATEGY_INVARIANT_FAILURE"

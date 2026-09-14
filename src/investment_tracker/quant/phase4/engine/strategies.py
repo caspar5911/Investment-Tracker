@@ -50,6 +50,13 @@ def _validated_binding(
         raise _invariant_failure("fixed strategy binding identity changed") from exc
     if reconstructed != binding:
         raise _invariant_failure("fixed strategy binding reconstruction mismatch")
+    authoritative = FixedStrategyBinding.from_authority(
+        authority,
+        binding.candidate_id,
+        binding.implementation_sha256,
+    )
+    if reconstructed != authoritative:
+        raise _invariant_failure("fixed strategy binding differs from sealed authority")
     return reconstructed
 
 
