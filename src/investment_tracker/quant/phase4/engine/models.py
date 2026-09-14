@@ -1649,12 +1649,23 @@ class Phase4EngineManifest(FrozenGate2Model):
     schema_version: Literal["PHASE4-ENGINE-MANIFEST-v1"] = (
         "PHASE4-ENGINE-MANIFEST-v1"
     )
-    status: Literal["SEALED"] = "SEALED"
+    formula_version: Literal["PHASE4-ENGINE-FORMULA-v1"] = (
+        "PHASE4-ENGINE-FORMULA-v1"
+    )
+    status: Literal["PHASE4_ENGINE_SEALED"] = "PHASE4_ENGINE_SEALED"
     starting_revision: Literal[
         "fb1c30a6c9789bddf2033301977fc8e2f3ebc1a0"
     ] = "fb1c30a6c9789bddf2033301977fc8e2f3ebc1a0"
     head_revision: str = Field(pattern=r"^[0-9a-f]{40}$")
     gate1_manifest: Gate1ArtifactIdentity
+    qfq_methodology_identity: Literal[
+        "ffee9bac3fe329b14d5aebb0f6152f00fc0a86b28d9186c254b5c8f6f8a322fb"
+    ] = "ffee9bac3fe329b14d5aebb0f6152f00fc0a86b28d9186c254b5c8f6f8a322fb"
+    candidate_population_sha256: Literal[
+        "15a33d6dceb52026661ddfba44a84a88fb306b7f64802c36dc60c6ca189a68b3"
+    ] = "15a33d6dceb52026661ddfba44a84a88fb306b7f64802c36dc60c6ca189a68b3"
+    family_identities: tuple[str, ...] = Field(min_length=4, max_length=4)
+    readiness_manifest: ReadinessTerminalMetadata
     runtime: EngineRuntimeIdentity
     source_bundles: tuple[Gate2SourceBundleDigest, ...] = Field(
         min_length=13, max_length=13
@@ -1669,9 +1680,11 @@ class Phase4EngineManifest(FrozenGate2Model):
     candidate_count: Literal[180] = 180
     historical_phase2_trials: Literal[136] = 136
     phase4_trials_consumed: Literal[0] = 0
-    fold_status: Literal["FOLD_AUTHORITY_MISSING"] = "FOLD_AUTHORITY_MISSING"
-    regime_status: Literal["REGIME_AUTHORITY_MISSING"] = (
-        "REGIME_AUTHORITY_MISSING"
+    fold_status: Literal["NOT_BOUND_GATE3_REQUIRED"] = (
+        "NOT_BOUND_GATE3_REQUIRED"
+    )
+    regime_status: Literal["NOT_BOUND_GATE3_REQUIRED"] = (
+        "NOT_BOUND_GATE3_REQUIRED"
     )
     unavailable_statistics: UnavailableStatistics
     safety: SafetyAccessState
@@ -1701,10 +1714,24 @@ class Phase4EngineManifest(FrozenGate2Model):
             )
         return self
 
+    @model_validator(mode="after")
+    def validate_family_identities(self) -> "Phase4EngineManifest":
+        if len(set(self.family_identities)) != 4:
+            raise ValueError("family identities must be four unique ids")
+        for family_id in self.family_identities:
+            if re.fullmatch(r"phase4-family-[0-9a-f]{64}", family_id) is None:
+                raise ValueError(
+                    "family identities must match the sealed family id pattern"
+                )
+        return self
+
 
 class EngineContract(FrozenGate2Model):
     schema_version: Literal["PHASE4-ENGINE-CONTRACT-v1"] = (
         "PHASE4-ENGINE-CONTRACT-v1"
+    )
+    formula_version: Literal["PHASE4-ENGINE-FORMULA-v1"] = (
+        "PHASE4-ENGINE-FORMULA-v1"
     )
     implementation_interface: Literal[
         "PHASE4-FIXED-LONG-ONLY-STRATEGY-v1"
@@ -1712,22 +1739,39 @@ class EngineContract(FrozenGate2Model):
     campaign_id: Literal[
         "PHASE4-FIXED-LONG-ONLY-2014-2022-v1"
     ] = "PHASE4-FIXED-LONG-ONLY-2014-2022-v1"
+    gate1_manifest: Gate1ArtifactIdentity
+    qfq_methodology_identity: Literal[
+        "ffee9bac3fe329b14d5aebb0f6152f00fc0a86b28d9186c254b5c8f6f8a322fb"
+    ] = "ffee9bac3fe329b14d5aebb0f6152f00fc0a86b28d9186c254b5c8f6f8a322fb"
     execution_convention: Literal["COMPLETED_BAR_SIGNAL_NEXT_BAR_OPEN"] = (
         "COMPLETED_BAR_SIGNAL_NEXT_BAR_OPEN"
     )
     execution_series: Literal["QFQ_NORMALIZED"] = "QFQ_NORMALIZED"
+    friction_cases_bps: tuple[int, ...] = (0, 3, 10, 25, 50)
     primary_friction_bps: Literal[3] = 3
     decision_grade: Literal[False] = False
     family_count: Literal[4] = 4
     candidate_count: Literal[180] = 180
     historical_phase2_trials: Literal[136] = 136
     phase4_trials_consumed: Literal[0] = 0
-    fold_status: Literal["FOLD_AUTHORITY_MISSING"] = "FOLD_AUTHORITY_MISSING"
-    regime_status: Literal["REGIME_AUTHORITY_MISSING"] = (
-        "REGIME_AUTHORITY_MISSING"
+    fold_status: Literal["NOT_BOUND_GATE3_REQUIRED"] = (
+        "NOT_BOUND_GATE3_REQUIRED"
+    )
+    regime_status: Literal["NOT_BOUND_GATE3_REQUIRED"] = (
+        "NOT_BOUND_GATE3_REQUIRED"
     )
     unavailable_statistics: UnavailableStatistics
     safety: SafetyAccessState
+
+    @model_validator(mode="after")
+    def validate_friction_cases(self) -> "EngineContract":
+        if self.friction_cases_bps != (0, 3, 10, 25, 50):
+            raise ValueError(
+                "friction cases must be the pinned ladder (0, 3, 10, 25, 50)"
+            )
+        if self.primary_friction_bps not in self.friction_cases_bps:
+            raise ValueError("primary friction must be a friction case")
+        return self
 
 
 class FamilyBindingSet(FrozenGate2Model):
@@ -1775,7 +1819,7 @@ class CandidateBindingSet(FrozenGate2Model):
 
 
 class Gate2SealResult(FrozenGate2Model):
-    status: Literal["SEALED"] = "SEALED"
+    status: Literal["PHASE4_ENGINE_SEALED"] = "PHASE4_ENGINE_SEALED"
     head_revision: str = Field(pattern=r"^[0-9a-f]{40}$")
     manifest: Gate2ArtifactIdentity
     written: tuple[Gate2ArtifactIdentity, ...] = Field(

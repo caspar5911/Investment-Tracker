@@ -76,9 +76,17 @@ def test_cli_main_success_prints_sealed_manifest_json(
     captured = capsys.readouterr()
     assert exit_code == 0
     payload = json.loads(captured.out)
-    assert payload["status"] == "SEALED"
+    assert payload["status"] == "PHASE4_ENGINE_SEALED"
     manifest = payload["manifest"]
     assert manifest["kind"] == "phase4_engine_manifest"
+    assert manifest["status"] == "PHASE4_ENGINE_SEALED"
+    assert manifest["fold_status"] == "NOT_BOUND_GATE3_REQUIRED"
+    assert manifest["regime_status"] == "NOT_BOUND_GATE3_REQUIRED"
+    assert manifest["formula_version"] == "PHASE4-ENGINE-FORMULA-v1"
+    assert manifest["candidate_population_sha256"] == (
+        "15a33d6dceb52026661ddfba44a84a88fb306b7f64802c36dc60c6ca189a68b3"
+    )
+    assert len(manifest["family_identities"]) == 4
     assert manifest["path"].startswith(
         "results/phase4/gate2/phase4_engine_manifest/sha256/"
     )

@@ -185,6 +185,9 @@ def _seal(
         publish_json(
             "engine_contract",
             EngineContract(
+                gate1_manifest=authority.manifest_identity,
+                qfq_methodology_identity=authority.qfq_methodology_identity,
+                friction_cases_bps=(0, 3, 10, 25, 50),
                 unavailable_statistics=authority.unavailable_statistics,
                 safety=authority.safety,
             ).model_dump(mode="json"),
@@ -237,6 +240,14 @@ def _seal(
     manifest = Phase4EngineManifest(
         head_revision=authority.head_revision,
         gate1_manifest=authority.manifest_identity,
+        qfq_methodology_identity=authority.qfq_methodology_identity,
+        candidate_population_sha256=(
+            authority.grids.candidate_parameter_population_sha256
+        ),
+        family_identities=tuple(
+            family.family_id for family in families
+        ),
+        readiness_manifest=authority.readiness_manifest,
         runtime=EngineRuntimeIdentity(
             python_implementation=platform.python_implementation(),
             python_version=platform.python_version(),
@@ -270,21 +281,25 @@ def _report_bytes(
     lines = [
         "# Phase 4 Gate 2 Engine Seal Report",
         "",
-        "Status: SEALED",
+        "Status: PHASE4_ENGINE_SEALED",
         "",
         "- Schema: PHASE4-ENGINE-MANIFEST-v1",
+        "- Formula: PHASE4-ENGINE-FORMULA-v1",
         f"- Head revision: {authority.head_revision}",
         f"- Gate 1 manifest: {authority.manifest_identity.content_sha256}",
+        f"- QFQ methodology: {authority.qfq_methodology_identity}",
+        f"- Candidate population: "
+        f"{authority.grids.candidate_parameter_population_sha256}",
         f"- Execution: {authority.execution_convention} on "
         f"{authority.execution_series}; primary friction "
-        f"{authority.primary_friction_bps} bps",
+        f"{authority.primary_friction_bps} bps; cases (0, 3, 10, 25, 50) bps",
         f"- Decision grade: {authority.decision_grade}",
         f"- Families: 4; candidates: 180",
         f"- Historical Phase 2 trials: "
         f"{authority.historical_phase2_trials}; Phase 4 trials consumed: "
         f"{authority.phase4_trials_consumed}",
-        "- Fold status: FOLD_AUTHORITY_MISSING (Gate 3 requirement)",
-        "- Regime status: REGIME_AUTHORITY_MISSING (Gate 3 requirement)",
+        "- Fold status: NOT_BOUND_GATE3_REQUIRED (Gate 3 requirement)",
+        "- Regime status: NOT_BOUND_GATE3_REQUIRED (Gate 3 requirement)",
         "",
         "Synthetic conformance invariants:",
     ]
@@ -293,9 +308,9 @@ def _report_bytes(
     lines.extend(
         (
             "",
-            "Unavailable statistics: max drawdown, calmar, dsr, and pbo "
-            "remain UNKNOWN (NOT_IMPLEMENTED); QFQ normalized series is "
-            "not decision-grade.",
+            "Unavailable statistics: max drawdown and calmar remain "
+            "UNKNOWN (null); DSR and PBO remain UNKNOWN (NOT_IMPLEMENTED, "
+            "null); QFQ normalized series is not decision-grade.",
             "No Phase 4 train/validation replay, validation metric access, "
             "candidate ranking, survivor selection, provider call, or "
             "trading capability occurred.",

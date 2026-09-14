@@ -62,6 +62,44 @@ def test_gate2_contract_models_exist_and_are_closed() -> None:
         package.SafetyAccessState(provider_calls=1)
 
 
+def test_manifest_and_contract_governance_literals() -> None:
+    models = importlib.import_module("investment_tracker.quant.phase4.engine.models")
+    manifest_fields = models.Phase4EngineManifest.model_fields
+    contract_fields = models.EngineContract.model_fields
+    seal_fields = models.Gate2SealResult.model_fields
+
+    # The terminal status is the explicit Phase 4 Gate 2 identity, not the
+    # generic "SEALED" marker used by other gates.
+    assert manifest_fields["status"].default == "PHASE4_ENGINE_SEALED"
+    assert seal_fields["status"].default == "PHASE4_ENGINE_SEALED"
+
+    # Fold and regime are bound only at Gate 3, so the manifest and contract
+    # record them as explicitly unbound rather than as runtime failure codes.
+    assert manifest_fields["fold_status"].default == "NOT_BOUND_GATE3_REQUIRED"
+    assert manifest_fields["regime_status"].default == "NOT_BOUND_GATE3_REQUIRED"
+    assert contract_fields["fold_status"].default == "NOT_BOUND_GATE3_REQUIRED"
+    assert contract_fields["regime_status"].default == "NOT_BOUND_GATE3_REQUIRED"
+
+    # Spec-required manifest governance fields.
+    for name in (
+        "candidate_population_sha256",
+        "family_identities",
+        "qfq_methodology_identity",
+        "readiness_manifest",
+        "formula_version",
+    ):
+        assert name in manifest_fields, name
+
+    # Spec-required engine-contract bindings.
+    for name in (
+        "gate1_manifest",
+        "qfq_methodology_identity",
+        "friction_cases_bps",
+        "formula_version",
+    ):
+        assert name in contract_fields, name
+
+
 def test_direct_dependency_paths_are_portable_and_envelopes_validate() -> None:
     package = importlib.import_module("investment_tracker.quant.phase4.engine")
     with pytest.raises(ValidationError):

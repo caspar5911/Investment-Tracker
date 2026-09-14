@@ -1,7 +1,8 @@
 """Provider-free CLI for sealing the Phase 4 Gate 2 research engine.
 
 The only accepted option is --repository-root.  On success a single line of
-canonical JSON reports the SEALED status and the manifest identity; on
+canonical JSON reports the PHASE4_ENGINE_SEALED status and the manifest
+identity; on
 failure the frozen Gate 2 failure code is written to stderr and the process
 exits nonzero.  There is no data, candidate, parameter, provider, export,
 order, or trading surface here.

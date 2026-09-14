@@ -135,16 +135,29 @@ def test_seal_manifest_schema_status_and_bound_identities(
     gate2_repo: Path,
 ) -> None:
     result: Gate2SealResult = sealed_engine
-    assert result.status == "SEALED"
+    assert result.status == "PHASE4_ENGINE_SEALED"
     assert result.manifest.kind == "phase4_engine_manifest"
     manifest = _manifest_of(result, gate2_repo)
     assert manifest.schema_version == "PHASE4-ENGINE-MANIFEST-v1"
-    assert manifest.status == "SEALED"
+    assert manifest.formula_version == "PHASE4-ENGINE-FORMULA-v1"
+    assert manifest.status == "PHASE4_ENGINE_SEALED"
     assert manifest.starting_revision == STARTING_REVISION
     assert manifest.head_revision == _head_revision(gate2_repo)
     assert manifest.gate1_manifest.content_sha256 == (
         GATE1_MANIFEST_CONTENT_SHA256
     )
+    assert manifest.qfq_methodology_identity == (
+        "ffee9bac3fe329b14d5aebb0f6152f00fc0a86b28d9186c254b5c8f6f8a322fb"
+    )
+    assert manifest.candidate_population_sha256 == (
+        "15a33d6dceb52026661ddfba44a84a88fb306b7f64802c36dc60c6ca189a68b3"
+    )
+    authority = load_gate2_authority(gate2_repo)
+    assert manifest.family_identities == tuple(
+        family.family_id for family in authority.grids.families
+    )
+    assert len(set(manifest.family_identities)) == 4
+    assert manifest.readiness_manifest == authority.readiness_manifest
     assert manifest.runtime.python_implementation == (
         platform.python_implementation()
     )
@@ -158,8 +171,8 @@ def test_seal_manifest_schema_status_and_bound_identities(
     assert manifest.candidate_count == 180
     assert manifest.historical_phase2_trials == 136
     assert manifest.phase4_trials_consumed == 0
-    assert manifest.fold_status == "FOLD_AUTHORITY_MISSING"
-    assert manifest.regime_status == "REGIME_AUTHORITY_MISSING"
+    assert manifest.fold_status == "NOT_BOUND_GATE3_REQUIRED"
+    assert manifest.regime_status == "NOT_BOUND_GATE3_REQUIRED"
     unavailable = manifest.unavailable_statistics
     assert (
         unavailable.max_drawdown is None
@@ -325,15 +338,26 @@ def test_seal_contract_artifact_binds_the_engine_surface(
     payload = _store(gate2_repo).verify(manifest.write_ledger[0])
     contract = EngineContract.model_validate(json.loads(payload))
     assert contract.schema_version == "PHASE4-ENGINE-CONTRACT-v1"
+    assert contract.formula_version == "PHASE4-ENGINE-FORMULA-v1"
     assert contract.implementation_interface == (
         "PHASE4-FIXED-LONG-ONLY-STRATEGY-v1"
     )
     assert contract.campaign_id == "PHASE4-FIXED-LONG-ONLY-2014-2022-v1"
+    assert contract.gate1_manifest.content_sha256 == (
+        GATE1_MANIFEST_CONTENT_SHA256
+    )
+    assert contract.qfq_methodology_identity == (
+        "ffee9bac3fe329b14d5aebb0f6152f00fc0a86b28d9186c254b5c8f6f8a322fb"
+    )
     assert contract.execution_convention == "COMPLETED_BAR_SIGNAL_NEXT_BAR_OPEN"
     assert contract.execution_series == "QFQ_NORMALIZED"
+    assert contract.friction_cases_bps == (0, 3, 10, 25, 50)
+    assert contract.primary_friction_bps == 3
     assert contract.candidate_count == 180
     assert contract.family_count == 4
     assert contract.decision_grade is False
+    assert contract.fold_status == "NOT_BOUND_GATE3_REQUIRED"
+    assert contract.regime_status == "NOT_BOUND_GATE3_REQUIRED"
 
 
 def test_seal_report_artifact_is_utf8_markdown(
@@ -345,7 +369,15 @@ def test_seal_report_artifact_is_utf8_markdown(
     text = payload.decode("utf-8")
     assert text.startswith("# ")
     assert "PHASE4-ENGINE-MANIFEST-v1" in text
-    assert "SEALED" in text
+    assert "PHASE4-ENGINE-FORMULA-v1" in text
+    assert "Status: PHASE4_ENGINE_SEALED" in text
+    assert "NOT_BOUND_GATE3_REQUIRED" in text
+    # Max drawdown and Calmar are governed as UNKNOWN (null); only DSR and
+    # PBO carry the NOT_IMPLEMENTED reason.
+    assert "max drawdown and calmar remain UNKNOWN (null)" in text
+    assert "DSR and PBO remain UNKNOWN (NOT_IMPLEMENTED" in text
+    drawdown_clause = text.split("max drawdown")[1].split(";")[0]
+    assert "NOT_IMPLEMENTED" not in drawdown_clause
 
 
 def test_seal_write_observer_records_the_sealed_write_order(
