@@ -9,6 +9,7 @@ import shutil
 import subprocess
 
 import pytest
+from pydantic import ValidationError
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -184,6 +185,97 @@ def test_nested_gate1_dictionaries_cannot_mutate_returned_authority() -> None:
     assert authority.baselines.provenance_class_counts == provenance_counts
     assert authority.manifest.baseline_provenance_class_counts == manifest_counts
     assert authority.grids.candidate_parameter_population_sha256 == population_digest
+
+
+def test_reconstruction_rejects_malformed_retained_family_payload() -> None:
+    payload = load_authority(REPOSITORY_ROOT).model_dump()
+    payload["family_definitions_payload"] = b"not-json"
+
+    with pytest.raises(ValidationError):
+        authority_module().Gate2Authority.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    "payload_field",
+    (
+        "manifest_payload",
+        "baseline_definitions_payload",
+        "deterministic_grids_payload",
+        "family_definitions_payload",
+    ),
+)
+def test_reconstruction_requires_canonical_bytes_for_every_retained_payload(
+    payload_field: str,
+) -> None:
+    payload = load_authority(REPOSITORY_ROOT).model_dump()
+    payload[payload_field] += b" "
+
+    with pytest.raises(ValidationError):
+        authority_module().Gate2Authority.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("payload_field", "dependency_kind"),
+    (
+        ("manifest_payload", "phase4_preregistration_manifest"),
+        ("baseline_definitions_payload", "baseline_definitions"),
+        ("deterministic_grids_payload", "deterministic_grids"),
+        ("family_definitions_payload", "strategy_family_definitions"),
+    ),
+)
+def test_reconstruction_digest_binds_every_retained_payload(
+    payload_field: str,
+    dependency_kind: str,
+) -> None:
+    module = authority_module()
+    payload = load_authority(REPOSITORY_ROOT).model_dump()
+    dependencies = list(payload["direct_dependencies"])
+    dependency_index = next(
+        index
+        for index, dependency in enumerate(dependencies)
+        if dependency["kind"] == dependency_kind
+    )
+    dependency = dict(dependencies[dependency_index])
+    mismatched_digest = sha256(payload[payload_field] + b"different").hexdigest()
+    dependency["content_sha256"] = mismatched_digest
+    dependency["sha256"] = module.artifact_envelope_identity(
+        content_sha256=mismatched_digest,
+        kind=dependency["kind"],
+        path=dependency["path"],
+    )
+    dependencies[dependency_index] = dependency
+    payload["direct_dependencies"] = tuple(dependencies)
+
+    with pytest.raises(ValidationError):
+        module.Gate2Authority.model_validate(payload)
+
+
+def test_reconstruction_rejects_digest_bound_family_grid_disagreement() -> None:
+    module = authority_module()
+    payload = load_authority(REPOSITORY_ROOT).model_dump()
+    family_payload = json.loads(payload["family_definitions_payload"])
+    family_payload["families"].reverse()
+    mismatched_bytes = module.canonical_json_bytes(family_payload)
+    mismatched_content_sha256 = sha256(mismatched_bytes).hexdigest()
+    dependencies = list(payload["direct_dependencies"])
+    family_index = next(
+        index
+        for index, dependency in enumerate(dependencies)
+        if dependency["kind"] == "strategy_family_definitions"
+    )
+    family_dependency = dict(dependencies[family_index])
+    family_dependency["content_sha256"] = mismatched_content_sha256
+    family_dependency["sha256"] = module.artifact_envelope_identity(
+        content_sha256=mismatched_content_sha256,
+        kind=family_dependency["kind"],
+        path=family_dependency["path"],
+    )
+    dependencies[family_index] = family_dependency
+    payload["direct_dependencies"] = tuple(dependencies)
+    payload["family_definitions_payload"] = mismatched_bytes
+
+    with pytest.raises(ValidationError):
+        module.Gate2Authority.model_validate(payload)
 
 
 @pytest.mark.parametrize("mode", ["missing", "mutated"])

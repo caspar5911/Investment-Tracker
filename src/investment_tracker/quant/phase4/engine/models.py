@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from hashlib import sha256
+import json
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Literal
 
@@ -10,6 +12,7 @@ from investment_tracker.quant.phase4.preregistration.baselines import (
 )
 from investment_tracker.quant.phase4.preregistration.canonical import (
     artifact_envelope_identity,
+    canonical_json_bytes,
     trial_identity,
 )
 from investment_tracker.quant.phase4.preregistration.grids import (
@@ -321,7 +324,15 @@ class Gate2Authority(FrozenGate2Model):
 
     @property
     def family_definitions(self) -> tuple[StrategyFamilyDefinition, ...]:
-        return self.grids.families
+        payload = json.loads(self.family_definitions_payload)
+        return tuple(
+            StrategyFamilyDefinition.model_validate(
+                {**family_payload, "candidates": grid_family.candidates}
+            )
+            for family_payload, grid_family in zip(
+                payload["families"], self.grids.families, strict=True
+            )
+        )
 
     @property
     def baselines(self) -> BaselineDefinitionSet:
@@ -329,13 +340,68 @@ class Gate2Authority(FrozenGate2Model):
             self.baseline_definitions_payload
         )
 
+    def _validated_retained_payload(
+        self,
+        *,
+        field_name: str,
+        dependency_kind: DirectDependencyKind,
+        payload: bytes,
+    ) -> object:
+        dependencies = tuple(
+            item for item in self.direct_dependencies if item.kind == dependency_kind
+        )
+        if len(dependencies) != 1:
+            raise ValueError(
+                f"{field_name} must have exactly one corresponding direct dependency"
+            )
+        try:
+            parsed = json.loads(payload)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError(f"{field_name} must be valid JSON") from exc
+        if canonical_json_bytes(parsed) != payload:
+            raise ValueError(f"{field_name} must use exact canonical JSON bytes")
+        if sha256(payload).hexdigest() != dependencies[0].content_sha256:
+            raise ValueError(f"{field_name} content digest mismatch")
+        return parsed
+
     @model_validator(mode="after")
     def validate_authority_links(self) -> "Gate2Authority":
-        manifest = self.manifest
-        grids = self.grids
-        self.baselines
         if len({item.path for item in self.direct_dependencies}) != 15:
             raise ValueError("direct dependency paths must be unique")
+        manifest_payload = self._validated_retained_payload(
+            field_name="manifest_payload",
+            dependency_kind="phase4_preregistration_manifest",
+            payload=self.manifest_payload,
+        )
+        baseline_payload = self._validated_retained_payload(
+            field_name="baseline_definitions_payload",
+            dependency_kind="baseline_definitions",
+            payload=self.baseline_definitions_payload,
+        )
+        grids_payload = self._validated_retained_payload(
+            field_name="deterministic_grids_payload",
+            dependency_kind="deterministic_grids",
+            payload=self.deterministic_grids_payload,
+        )
+        family_payload = self._validated_retained_payload(
+            field_name="family_definitions_payload",
+            dependency_kind="strategy_family_definitions",
+            payload=self.family_definitions_payload,
+        )
+        manifest = Phase4PreregistrationManifest.model_validate(manifest_payload)
+        BaselineDefinitionSet.model_validate(baseline_payload)
+        grids = PreregisteredGrids.model_validate(grids_payload)
+        expected_family_payload = {
+            "schema_version": "PHASE4-STRATEGY-FAMILY-DEFINITION-SET-v1",
+            "families": [
+                family.model_dump(mode="json", exclude={"candidates"})
+                for family in grids.families
+            ],
+        }
+        if family_payload != expected_family_payload:
+            raise ValueError(
+                "retained family definitions differ from deterministic grids"
+            )
         if manifest.candidate_parameter_population_sha256 != (
             grids.candidate_parameter_population_sha256
         ):
