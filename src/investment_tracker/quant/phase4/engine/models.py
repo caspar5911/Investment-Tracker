@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from hashlib import sha256
 import json
+import math
 from pathlib import PurePosixPath, PureWindowsPath
+import re
 from typing import Literal
 
+import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from investment_tracker.quant.phase4.preregistration.baselines import (
@@ -12,7 +15,9 @@ from investment_tracker.quant.phase4.preregistration.baselines import (
 )
 from investment_tracker.quant.phase4.preregistration.canonical import (
     artifact_envelope_identity,
+    candidate_identity,
     canonical_json_bytes,
+    parameter_tuple_identity,
     trial_identity,
 )
 from investment_tracker.quant.phase4.preregistration.grids import (
@@ -480,4 +485,337 @@ class Gate2Authority(FrozenGate2Model):
             raise ValueError("historical trial count differs from Gate 1 manifest")
         if manifest.phase4_initial_consumption != self.phase4_trials_consumed:
             raise ValueError("Phase 4 consumption differs from Gate 1 manifest")
+        return self
+
+
+FamilySemanticName = Literal[
+    "cross_sectional_absolute_momentum_rotation",
+    "diversified_time_series_momentum",
+    "trend_filtered_equal_risk_allocation",
+    "volatility_managed_relative_momentum",
+]
+
+
+_SEALED_PARAMETER_VALUES: dict[str, dict[str, tuple[int | float, ...]]] = {
+    "cross_sectional_absolute_momentum_rotation": {
+        "lookback_sessions": (63, 126, 252),
+        "rebalance_sessions": (21, 42, 63),
+        "skip_sessions": (0, 21),
+        "top_k": (1, 2, 3),
+    },
+    "diversified_time_series_momentum": {
+        "lookback_sessions": (63, 126, 252),
+        "maximum_asset_weight": (0.25, 0.5),
+        "rebalance_sessions": (5, 21),
+        "volatility_window": (20, 60, 120),
+    },
+    "trend_filtered_equal_risk_allocation": {
+        "maximum_asset_weight": (0.25, 0.5),
+        "rebalance_sessions": (5, 21),
+        "trend_window": (100, 150, 200),
+        "volatility_window": (20, 60, 120),
+    },
+    "volatility_managed_relative_momentum": {
+        "lookback_sessions": (63, 126, 252),
+        "target_portfolio_volatility": (0.08, 0.12, 0.16),
+        "top_k": (1, 2, 3),
+        "volatility_window": (20, 60),
+    },
+}
+
+
+class SealedStrategyParameter(FrozenGate2Model):
+    name: str = Field(min_length=1)
+    type: Literal["int", "float64_hex"]
+    value: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_canonical_value(self) -> "SealedStrategyParameter":
+        if self.type == "int":
+            try:
+                decoded = int(self.value)
+            except ValueError as exc:
+                raise ValueError("invalid sealed integer parameter") from exc
+            if str(decoded) != self.value:
+                raise ValueError("noncanonical sealed integer parameter")
+        else:
+            try:
+                decoded = float.fromhex(self.value)
+            except ValueError as exc:
+                raise ValueError("invalid sealed float parameter") from exc
+            if not math.isfinite(decoded) or decoded.hex() != self.value:
+                raise ValueError("noncanonical sealed float parameter")
+        return self
+
+    @property
+    def decoded(self) -> int | float:
+        if self.type == "int":
+            return int(self.value)
+        return float.fromhex(self.value)
+
+    @property
+    def typed_value(self) -> dict[str, object]:
+        return {"type": self.type, "value": self.value}
+
+
+def _binding_identity_payload(payload: dict[str, object]) -> dict[str, object]:
+    return {key: value for key, value in payload.items() if key != "binding_sha256"}
+
+
+class FixedStrategyBinding(FrozenGate2Model):
+    schema_version: Literal["PHASE4-FIXED-STRATEGY-BINDING-v1"] = (
+        "PHASE4-FIXED-STRATEGY-BINDING-v1"
+    )
+    implementation_interface: Literal["PHASE4-FIXED-LONG-ONLY-STRATEGY-v1"]
+    campaign_id: Literal["PHASE4-FIXED-LONG-ONLY-2014-2022-v1"]
+    candidate_id: str = Field(pattern=r"^phase4-[0-9a-f]{64}$")
+    trial_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    budget_position: int = Field(ge=1, le=180)
+    family_id: str = Field(pattern=r"^phase4-family-[0-9a-f]{64}$")
+    family_semantic_name: FamilySemanticName
+    hypothesis_id: str = Field(min_length=1)
+    family_definition_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    rule_set_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    parameter_tuple_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    grid_spec_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    implementation_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    parameters: tuple[SealedStrategyParameter, ...]
+    structural_parameters: tuple[SealedStrategyParameter, ...] = ()
+    binding_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    def model_copy(
+        self, *, update: dict[str, object] | None = None, deep: bool = False
+    ) -> "FixedStrategyBinding":
+        if update:
+            raise TypeError("fixed strategy bindings do not permit replacement")
+        return super().model_copy(deep=deep)
+
+    def copy(
+        self,
+        *,
+        include: object = None,
+        exclude: object = None,
+        update: dict[str, object] | None = None,
+        deep: bool = False,
+    ) -> "FixedStrategyBinding":
+        if include is not None or exclude is not None or update:
+            raise TypeError("fixed strategy bindings do not permit replacement")
+        return self.model_copy(deep=deep)
+
+    @classmethod
+    def from_authority(
+        cls,
+        authority: Gate2Authority,
+        candidate_id: str,
+        implementation_sha256: str,
+    ) -> "FixedStrategyBinding":
+        if not isinstance(authority, Gate2Authority):
+            raise Gate2SealError(
+                "FIXED_STRATEGY_INVARIANT_FAILURE",
+                "strategy binding requires the exact Gate 2 authority",
+            )
+        if re.fullmatch(r"[0-9a-f]{64}", implementation_sha256) is None:
+            raise Gate2SealError(
+                "FIXED_STRATEGY_INVARIANT_FAILURE",
+                "strategy implementation identity must be lowercase SHA-256",
+            )
+        candidates = tuple(
+            candidate
+            for candidate in authority.grids.candidates
+            if candidate.candidate_id == candidate_id
+        )
+        if len(candidates) != 1:
+            raise Gate2SealError(
+                "FIXED_STRATEGY_INVARIANT_FAILURE",
+                "candidate is not present exactly once in the sealed population",
+            )
+        candidate = candidates[0]
+        families = tuple(
+            family
+            for family in authority.family_definitions
+            if family.family_id == candidate.family_id
+        )
+        if len(families) != 1 or candidate not in families[0].candidates:
+            raise Gate2SealError(
+                "FIXED_STRATEGY_INVARIANT_FAILURE",
+                "candidate and family authority do not agree",
+            )
+        family = families[0]
+        if family.family_semantic_name not in _SEALED_PARAMETER_VALUES:
+            raise Gate2SealError(
+                "FIXED_STRATEGY_INVARIANT_FAILURE",
+                "family semantic name is not one of the four sealed implementations",
+            )
+
+        parameters = tuple(
+            {
+                "name": name,
+                "type": candidate.parameters[name]["type"],
+                "value": candidate.parameters[name]["value"],
+            }
+            for name in sorted(candidate.parameters)
+        )
+        structural_parameters = tuple(
+            {
+                "name": name,
+                "type": family.structural_parameters[name]["type"],
+                "value": family.structural_parameters[name]["value"],
+            }
+            for name in sorted(family.structural_parameters)
+        )
+        payload: dict[str, object] = {
+            "schema_version": "PHASE4-FIXED-STRATEGY-BINDING-v1",
+            "implementation_interface": family.implementation_interface,
+            "campaign_id": candidate.campaign_id,
+            "candidate_id": candidate.candidate_id,
+            "trial_id": candidate.trial_id,
+            "budget_position": candidate.budget_position,
+            "family_id": candidate.family_id,
+            "family_semantic_name": family.family_semantic_name,
+            "hypothesis_id": candidate.hypothesis_id,
+            "family_definition_sha256": family.family_definition_sha256,
+            "rule_set_sha256": family.rule_set_sha256,
+            "parameter_tuple_sha256": candidate.parameter_tuple_sha256,
+            "grid_spec_sha256": family.grid_spec_sha256,
+            "implementation_sha256": implementation_sha256,
+            "parameters": parameters,
+            "structural_parameters": structural_parameters,
+        }
+        payload["binding_sha256"] = sha256(
+            canonical_json_bytes(_binding_identity_payload(payload))
+        ).hexdigest()
+        try:
+            return cls.model_validate(payload)
+        except ValueError as exc:
+            raise Gate2SealError(
+                "FIXED_STRATEGY_INVARIANT_FAILURE",
+                "sealed strategy binding failed reconstruction",
+            ) from exc
+
+    @property
+    def parameters_dict(self) -> dict[str, int | float]:
+        return {parameter.name: parameter.decoded for parameter in self.parameters}
+
+    @property
+    def structural_parameters_dict(self) -> dict[str, int | float]:
+        return {
+            parameter.name: parameter.decoded
+            for parameter in self.structural_parameters
+        }
+
+    @model_validator(mode="after")
+    def validate_binding(self) -> "FixedStrategyBinding":
+        if tuple(parameter.name for parameter in self.parameters) != tuple(
+            sorted(parameter.name for parameter in self.parameters)
+        ) or len({parameter.name for parameter in self.parameters}) != len(
+            self.parameters
+        ):
+            raise ValueError("strategy parameters must be unique and name-sorted")
+        if tuple(parameter.name for parameter in self.structural_parameters) != tuple(
+            sorted(parameter.name for parameter in self.structural_parameters)
+        ) or len({parameter.name for parameter in self.structural_parameters}) != len(
+            self.structural_parameters
+        ):
+            raise ValueError("structural parameters must be unique and name-sorted")
+
+        raw_parameters = self.parameters_dict
+        expected_values = _SEALED_PARAMETER_VALUES[self.family_semantic_name]
+        if tuple(raw_parameters) != tuple(expected_values) or any(
+            raw_parameters[name] not in allowed
+            for name, allowed in expected_values.items()
+        ):
+            raise ValueError("parameters are not one exact sealed tuple")
+        expected_structural = (
+            {"rebalance_sessions": 21}
+            if self.family_semantic_name == "volatility_managed_relative_momentum"
+            else {}
+        )
+        if self.structural_parameters_dict != expected_structural:
+            raise ValueError("structural parameters differ from sealed authority")
+
+        typed_parameters = {
+            parameter.name: parameter.typed_value for parameter in self.parameters
+        }
+        if self.parameter_tuple_sha256 != parameter_tuple_identity(
+            self.family_id, typed_parameters
+        ):
+            raise ValueError("strategy parameter tuple identity mismatch")
+        if self.candidate_id != candidate_identity(
+            campaign_id=self.campaign_id,
+            hypothesis_id=self.hypothesis_id,
+            family_id=self.family_id,
+            parameters=typed_parameters,
+        ):
+            raise ValueError("strategy candidate identity mismatch")
+        if self.trial_id != trial_identity(self.campaign_id, self.candidate_id):
+            raise ValueError("strategy trial identity mismatch")
+        payload = self.model_dump(mode="json")
+        expected_binding_sha256 = sha256(
+            canonical_json_bytes(_binding_identity_payload(payload))
+        ).hexdigest()
+        if self.binding_sha256 != expected_binding_sha256:
+            raise ValueError("strategy binding identity mismatch")
+        return self
+
+
+class TargetInstruction(FrozenGate2Model):
+    model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
+
+    schema_version: Literal["PHASE4-TARGET-INSTRUCTION-v1"] = (
+        "PHASE4-TARGET-INSTRUCTION-v1"
+    )
+    signal_timestamp: pd.Timestamp
+    due_session: pd.Timestamp | None
+    weights: tuple[tuple[str, float], ...]
+    binding: FixedStrategyBinding
+
+    @model_validator(mode="after")
+    def validate_target(self) -> "TargetInstruction":
+        for field_name, timestamp in (
+            ("signal_timestamp", self.signal_timestamp),
+            ("due_session", self.due_session),
+        ):
+            if timestamp is None:
+                continue
+            if not isinstance(timestamp, pd.Timestamp):
+                raise ValueError(f"{field_name} must be a pandas Timestamp")
+            if timestamp.tz is None or str(timestamp.tz) != "UTC":
+                raise ValueError(f"{field_name} must use UTC")
+            if timestamp != timestamp.normalize():
+                raise ValueError(f"{field_name} must be a UTC-midnight session")
+        if self.due_session is not None and self.due_session <= self.signal_timestamp:
+            raise ValueError("due session must be strictly after signal timestamp")
+
+        symbols = tuple(symbol for symbol, _ in self.weights)
+        if symbols != tuple(sorted(symbols)) or len(set(symbols)) != len(symbols):
+            raise ValueError("target symbols must be unique and ascending")
+        if any(not isinstance(symbol, str) or not symbol for symbol in symbols):
+            raise ValueError("target symbols must be nonempty strings")
+        numeric_weights = tuple(float(weight) for _, weight in self.weights)
+        if any(not math.isfinite(weight) or weight < 0.0 for weight in numeric_weights):
+            raise ValueError("target weights must be finite and nonnegative")
+        total = math.fsum(numeric_weights)
+        if total > 1.0 + 1e-12:
+            raise ValueError("target gross exposure exceeds one")
+        canonical_weights = tuple(
+            (symbol, weight)
+            for (symbol, _), weight in zip(self.weights, numeric_weights, strict=True)
+            if weight > 0.0
+        )
+        if total > 1.0:
+            canonical_weights = tuple(
+                (symbol, weight / total) for symbol, weight in canonical_weights
+            )
+        canonical_total = math.fsum(weight for _, weight in canonical_weights)
+        if canonical_total > 1.0 and canonical_weights:
+            last_symbol, last_weight = canonical_weights[-1]
+            canonical_weights = (
+                *canonical_weights[:-1],
+                (last_symbol, last_weight - (canonical_total - 1.0)),
+            )
+        object.__setattr__(self, "weights", canonical_weights)
+
+        reconstructed = FixedStrategyBinding.model_validate(self.binding.model_dump())
+        if reconstructed != self.binding:
+            raise ValueError("target binding is not an exact fixed binding")
         return self
