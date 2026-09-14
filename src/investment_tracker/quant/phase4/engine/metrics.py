@@ -15,7 +15,10 @@ from investment_tracker.quant.phase4.engine.models import (
 
 
 def _available(value: float) -> MetricValue:
-    return MetricValue(value=float(value), status="AVAILABLE", reason="OK")
+    numeric = float(value)
+    if not math.isfinite(numeric):
+        return MetricValue(value=None, status="UNKNOWN", reason="INVALID_INPUT")
+    return MetricValue(value=numeric, status="AVAILABLE", reason="OK")
 
 
 def _unknown(reason: MetricReason) -> MetricValue:

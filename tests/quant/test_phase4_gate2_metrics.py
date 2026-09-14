@@ -170,6 +170,16 @@ def test_nonfinite_derived_values_fail_closed_instead_of_raising() -> None:
     assert result.benchmark_excess_return.status == "UNKNOWN"
 
 
+def test_nonfinite_annualized_turnover_fails_closed() -> None:
+    extreme = _replay((1e-300, 1e-300), turnover=1e300)
+
+    result = calculate_metrics(extreme, extreme)
+
+    assert result.total_one_way_turnover.value == 1e300
+    assert result.annualized_one_way_turnover.status == "UNKNOWN"
+    assert result.annualized_one_way_turnover.reason == "INVALID_INPUT"
+
+
 def test_governed_drawdown_and_search_aware_statistics_remain_exactly_unavailable() -> (
     None
 ):
