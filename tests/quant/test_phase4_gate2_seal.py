@@ -183,9 +183,11 @@ def test_seal_exact_read_and_write_ledgers(sealed_engine) -> None:
     assert manifest.read_ledger == authority.direct_dependencies
     assert len(manifest.read_ledger) == 15
     assert manifest.read_ledger[0].kind == "phase4_preregistration_manifest"
-    assert tuple(
-        item.kind for item in manifest.read_ledger[-3:]
-    ) == ("readiness_manifest", "split_manifest", "trial_authority")
+    assert tuple(item.kind for item in manifest.read_ledger[-3:]) == (
+        "phase4_readiness_manifest",
+        "phase4_split_manifest",
+        "trial_authority",
+    )
     assert tuple(item.kind for item in manifest.write_ledger) == NON_FINAL_KINDS
     for identity in manifest.write_ledger:
         assert isinstance(identity, Gate2ArtifactIdentity)
@@ -244,7 +246,7 @@ def test_seal_bindings_are_ordered_and_free_of_performance_fields(
     assert [item.candidate_id for item in candidate_set.bindings] == [
         candidate.candidate_id for candidate in authority.grids.candidates
     ]
-    assert [item.budget_position for item in candidate_set.bindings] == tuple(
+    assert [item.budget_position for item in candidate_set.bindings] == list(
         range(1, 181)
     )
     for payload in (family_payload, candidate_payload):

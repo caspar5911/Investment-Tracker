@@ -99,6 +99,13 @@ def _seal(
     write_observer: Callable[[str], None] | None,
 ) -> Gate2SealResult:
     authority = load_gate2_authority(root)
+    for identity in authority.direct_dependencies:
+        payload = _reread_dependency(root, identity)
+        if sha256(payload).hexdigest() != identity.content_sha256:
+            raise Gate2SealError(
+                "HISTORICAL_ARTIFACT_MUTATION",
+                f"dependency changed between load and commit: {identity.kind}",
+            )
 
     def observe(kind: str) -> None:
         if write_observer is not None:
