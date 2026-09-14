@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import platform
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -43,7 +42,7 @@ except (ImportError, AttributeError) as _exc:  # pragma: no cover - RED marker
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-GATE2_RESULTS = REPOSITORY_ROOT / "results" / "phase4" / "gate2"
+BRANCH = "codex/phase4-gate2"
 STARTING_REVISION = "fb1c30a6c9789bddf2033301977fc8e2f3ebc1a0"
 GATE1_MANIFEST_CONTENT_SHA256 = (
     "dd175f7c61a9ea01353f5923c7c407720768553f92c73301e46cbc02b0723a89"
@@ -58,6 +57,32 @@ NON_FINAL_KINDS = (
 WRITE_ORDER = NON_FINAL_KINDS + ("phase4_engine_manifest",)
 
 
+def _run_git(args: list[str], cwd: Path | None = None) -> None:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=str(cwd) if cwd else None,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"git {' '.join(args)} failed rc={result.returncode}: {result.stderr}"
+        )
+
+
+def _clone_repository(dest: Path) -> Path:
+    """Create a hermetic clone of the repository checked out at the Gate 2 branch.
+
+    The seal reads Gate 1 authority and source bundles from the git history and
+    worktree, so it must run against a repository that preserves the Gate 1
+    ancestry. A local clone provides a clean, independent copy so the full suite
+    never writes to or mutates the canonical results/phase4/gate2/ evidence.
+    """
+    _run_git(["clone", "--quiet", str(REPOSITORY_ROOT), str(dest)])
+    _run_git(["checkout", "-q", BRANCH], cwd=dest)
+    return dest
+
+
 @pytest.fixture(autouse=True)
 def require_seal_types(request: pytest.FixtureRequest) -> None:
     if _SEAL_IMPORT_ERROR is not None and (
@@ -67,14 +92,37 @@ def require_seal_types(request: pytest.FixtureRequest) -> None:
 
 
 @pytest.fixture(scope="module")
-def sealed_engine() -> Any:
-    preexisting = GATE2_RESULTS.exists()
-    result = seal_gate2(REPOSITORY_ROOT)
-    try:
-        yield result
-    finally:
-        if not preexisting and GATE2_RESULTS.exists():
-            shutil.rmtree(GATE2_RESULTS)
+def gate2_repo(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    dest = tmp_path_factory.mktemp("gate2-seal") / "repo"
+    return _clone_repository(dest)
+
+
+@pytest.fixture(scope="module")
+def sealed_engine(gate2_repo: Path) -> Any:
+    return seal_gate2(gate2_repo)
+
+
+def _head_revision(root: Path) -> str:
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=str(root),
+        check=True,
+        capture_output=True,
+        env={
+            "GIT_CONFIG_GLOBAL": "NUL",
+            "GIT_CONFIG_SYSTEM": "NUL",
+            "HOME": str(root),
+        },
+    ).stdout.decode("ascii").strip()
+
+
+def _store(root: Path) -> "Gate2ArtifactStore":
+    return Gate2ArtifactStore(root, root / "results")
+
+
+def _manifest_of(result: Any, root: Path) -> "Phase4EngineManifest":
+    payload = _store(root).verify(result.manifest)
+    return Phase4EngineManifest.model_validate(json.loads(payload))
 
 
 def test_seal_types_are_available() -> None:
@@ -82,38 +130,18 @@ def test_seal_types_are_available() -> None:
     assert callable(seal_gate2)
 
 
-def _head_revision() -> str:
-    return subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=REPOSITORY_ROOT,
-        check=True,
-        capture_output=True,
-        env={
-            "GIT_CONFIG_GLOBAL": "NUL",
-            "GIT_CONFIG_SYSTEM": "NUL",
-            "HOME": str(REPOSITORY_ROOT),
-        },
-    ).stdout.decode("ascii").strip()
-
-
-def _store() -> "Gate2ArtifactStore":
-    return Gate2ArtifactStore(REPOSITORY_ROOT, REPOSITORY_ROOT / "results")
-
-
-def _manifest_of(result: Any) -> "Phase4EngineManifest":
-    payload = _store().verify(result.manifest)
-    return Phase4EngineManifest.model_validate(json.loads(payload))
-
-
-def test_seal_manifest_schema_status_and_bound_identities(sealed_engine) -> None:
+def test_seal_manifest_schema_status_and_bound_identities(
+    sealed_engine,
+    gate2_repo: Path,
+) -> None:
     result: Gate2SealResult = sealed_engine
     assert result.status == "SEALED"
     assert result.manifest.kind == "phase4_engine_manifest"
-    manifest = _manifest_of(result)
+    manifest = _manifest_of(result, gate2_repo)
     assert manifest.schema_version == "PHASE4-ENGINE-MANIFEST-v1"
     assert manifest.status == "SEALED"
     assert manifest.starting_revision == STARTING_REVISION
-    assert manifest.head_revision == _head_revision()
+    assert manifest.head_revision == _head_revision(gate2_repo)
     assert manifest.gate1_manifest.content_sha256 == (
         GATE1_MANIFEST_CONTENT_SHA256
     )
@@ -161,14 +189,17 @@ def test_seal_manifest_schema_status_and_bound_identities(sealed_engine) -> None
     assert safety.phase4_trials_consumed == 0
 
 
-def test_seal_source_bundles_match_independent_bundle_identity(sealed_engine) -> None:
-    manifest = _manifest_of(sealed_engine)
+def test_seal_source_bundles_match_independent_bundle_identity(
+    sealed_engine,
+    gate2_repo: Path,
+) -> None:
+    manifest = _manifest_of(sealed_engine, gate2_repo)
     names = [item.bundle_name for item in manifest.source_bundles]
     assert names == sorted(GATE2_SOURCE_BUNDLES)
     assert len(names) == len(set(names)) == 13
     for digest in manifest.source_bundles:
         independent = source_bundle_identity(
-            REPOSITORY_ROOT,
+            gate2_repo,
             manifest.head_revision,
             GATE2_SOURCE_BUNDLES[digest.bundle_name],
         )
@@ -177,9 +208,12 @@ def test_seal_source_bundles_match_independent_bundle_identity(sealed_engine) ->
         assert digest.bundle_sha256 == independent.bundle_sha256
 
 
-def test_seal_exact_read_and_write_ledgers(sealed_engine) -> None:
-    manifest = _manifest_of(sealed_engine)
-    authority = load_gate2_authority(REPOSITORY_ROOT)
+def test_seal_exact_read_and_write_ledgers(
+    sealed_engine,
+    gate2_repo: Path,
+) -> None:
+    manifest = _manifest_of(sealed_engine, gate2_repo)
+    authority = load_gate2_authority(gate2_repo)
     assert manifest.read_ledger == authority.direct_dependencies
     assert len(manifest.read_ledger) == 15
     assert manifest.read_ledger[0].kind == "phase4_preregistration_manifest"
@@ -226,10 +260,11 @@ _FORBIDDEN_KEY_FRAGMENTS = (
 
 def test_seal_bindings_are_ordered_and_free_of_performance_fields(
     sealed_engine,
+    gate2_repo: Path,
 ) -> None:
-    manifest = _manifest_of(sealed_engine)
-    authority = load_gate2_authority(REPOSITORY_ROOT)
-    store = _store()
+    manifest = _manifest_of(sealed_engine, gate2_repo)
+    authority = load_gate2_authority(gate2_repo)
+    store = _store(gate2_repo)
     family_payload = store.verify(manifest.write_ledger[1])
     family_set = FamilyBindingSet.model_validate(json.loads(family_payload))
     assert family_set.schema_version == "PHASE4-FAMILY-BINDINGS-v1"
@@ -255,9 +290,12 @@ def test_seal_bindings_are_ordered_and_free_of_performance_fields(
                 assert fragment not in key.lower(), (key, fragment)
 
 
-def test_seal_conformance_artifact_round_trips(sealed_engine) -> None:
-    manifest = _manifest_of(sealed_engine)
-    payload = _store().verify(manifest.write_ledger[3])
+def test_seal_conformance_artifact_round_trips(
+    sealed_engine,
+    gate2_repo: Path,
+) -> None:
+    manifest = _manifest_of(sealed_engine, gate2_repo)
+    payload = _store(gate2_repo).verify(manifest.write_ledger[3])
     record = SyntheticConformanceRecord.model_validate(json.loads(payload))
     assert record.label == "SYNTHETIC_CONFORMANCE_ONLY"
     assert record.phase4_trials_consumed == 0
@@ -279,9 +317,12 @@ def test_seal_conformance_artifact_round_trips(sealed_engine) -> None:
     ]
 
 
-def test_seal_contract_artifact_binds_the_engine_surface(sealed_engine) -> None:
-    manifest = _manifest_of(sealed_engine)
-    payload = _store().verify(manifest.write_ledger[0])
+def test_seal_contract_artifact_binds_the_engine_surface(
+    sealed_engine,
+    gate2_repo: Path,
+) -> None:
+    manifest = _manifest_of(sealed_engine, gate2_repo)
+    payload = _store(gate2_repo).verify(manifest.write_ledger[0])
     contract = EngineContract.model_validate(json.loads(payload))
     assert contract.schema_version == "PHASE4-ENGINE-CONTRACT-v1"
     assert contract.implementation_interface == (
@@ -295,35 +336,44 @@ def test_seal_contract_artifact_binds_the_engine_surface(sealed_engine) -> None:
     assert contract.decision_grade is False
 
 
-def test_seal_report_artifact_is_utf8_markdown(sealed_engine) -> None:
-    manifest = _manifest_of(sealed_engine)
-    payload = _store().verify(manifest.write_ledger[4])
+def test_seal_report_artifact_is_utf8_markdown(
+    sealed_engine,
+    gate2_repo: Path,
+) -> None:
+    manifest = _manifest_of(sealed_engine, gate2_repo)
+    payload = _store(gate2_repo).verify(manifest.write_ledger[4])
     text = payload.decode("utf-8")
     assert text.startswith("# ")
     assert "PHASE4-ENGINE-MANIFEST-v1" in text
     assert "SEALED" in text
 
 
-def test_seal_write_observer_records_the_sealed_write_order() -> None:
+def test_seal_write_observer_records_the_sealed_write_order(
+    gate2_repo: Path,
+) -> None:
     observed: list[str] = []
-    result = seal_gate2(REPOSITORY_ROOT, write_observer=observed.append)
+    result = seal_gate2(gate2_repo, write_observer=observed.append)
     assert observed == list(WRITE_ORDER)
     assert result.manifest.kind == "phase4_engine_manifest"
 
 
-def test_seal_repeat_run_is_byte_identical(sealed_engine) -> None:
-    again = seal_gate2(REPOSITORY_ROOT)
+def test_seal_repeat_run_is_byte_identical(sealed_engine, gate2_repo: Path) -> None:
+    again = seal_gate2(gate2_repo)
     assert again.manifest == sealed_engine.manifest
     assert again.written == sealed_engine.written
 
 
-def test_seal_failure_after_each_non_final_kind_writes_nothing_new() -> None:
+def test_seal_failure_after_each_non_final_kind_writes_nothing_new(
+    gate2_repo: Path,
+) -> None:
+    results_root = gate2_repo / "results" / "phase4" / "gate2"
+
     def gate2_files() -> set[Path]:
-        if not GATE2_RESULTS.exists():
+        if not results_root.exists():
             return set()
         return {
             path
-            for path in GATE2_RESULTS.rglob("*")
+            for path in results_root.rglob("*")
             if path.is_file()
         }
 
@@ -332,7 +382,7 @@ def test_seal_failure_after_each_non_final_kind_writes_nothing_new() -> None:
         before = gate2_files()
         with pytest.raises(Gate2SealError) as excinfo:
             seal_gate2(
-                REPOSITORY_ROOT,
+                gate2_repo,
                 fail_after_kind=kind,
                 write_observer=observed.append,
             )
@@ -342,12 +392,12 @@ def test_seal_failure_after_each_non_final_kind_writes_nothing_new() -> None:
         assert gate2_files() == before
 
 
-def test_seal_rejects_invalid_fail_after_kind() -> None:
+def test_seal_rejects_invalid_fail_after_kind(gate2_repo: Path) -> None:
     for invalid in ("phase4_engine_manifest", "bogus_kind", ""):
         observed: list[str] = []
         with pytest.raises(Gate2SealError) as excinfo:
             seal_gate2(
-                REPOSITORY_ROOT,
+                gate2_repo,
                 fail_after_kind=invalid,
                 write_observer=observed.append,
             )
@@ -356,6 +406,7 @@ def test_seal_rejects_invalid_fail_after_kind() -> None:
 
 
 def test_seal_detects_dependency_mutation_between_load_and_commit(
+    gate2_repo: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     original = _seal_module._reread_dependency
@@ -367,23 +418,26 @@ def test_seal_detects_dependency_mutation_between_load_and_commit(
     observed: list[str] = []
     with pytest.raises(Gate2SealError) as excinfo:
         seal_gate2(
-            REPOSITORY_ROOT,
+            gate2_repo,
             write_observer=observed.append,
         )
     assert excinfo.value.code == "HISTORICAL_ARTIFACT_MUTATION"
     assert "phase4_engine_manifest" not in observed
 
 
-def test_seal_existing_collision_fails_closed(sealed_engine) -> None:
-    manifest = _manifest_of(sealed_engine)
-    store = _store()
+def test_seal_existing_collision_fails_closed(
+    sealed_engine,
+    gate2_repo: Path,
+) -> None:
+    manifest = _manifest_of(sealed_engine, gate2_repo)
+    store = _store(gate2_repo)
     identity = manifest.write_ledger[0]
     payload = store.verify(identity)
-    destination = REPOSITORY_ROOT.joinpath(*Path(identity.path).parts)
+    destination = gate2_repo.joinpath(*Path(identity.path).parts)
     destination.write_bytes(payload + b"corruption")
     try:
         with pytest.raises(Gate2SealError) as excinfo:
-            seal_gate2(REPOSITORY_ROOT)
+            seal_gate2(gate2_repo)
         assert excinfo.value.code == "IMMUTABLE_ARTIFACT_COLLISION"
     finally:
         destination.write_bytes(payload)

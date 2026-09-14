@@ -19,7 +19,40 @@ except (ImportError, AttributeError) as _exc:  # pragma: no cover - RED marker
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-GATE2_RESULTS = REPOSITORY_ROOT / "results" / "phase4" / "gate2"
+BRANCH = "codex/phase4-gate2"
+
+
+def _run_git(args: list[str], cwd: Path | None = None) -> None:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=str(cwd) if cwd else None,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"git {' '.join(args)} failed rc={result.returncode}: {result.stderr}"
+        )
+
+
+def _clone_repository(dest: Path) -> Path:
+    """Create a hermetic clone of the repository at the Gate 2 branch.
+
+    The CLI seal reads Gate 1 authority and source bundles from the git
+    history and worktree, so it must run against a repository that preserves
+    the Gate 1 ancestry. A local clone provides a clean, independent copy so
+    the full suite never writes to or mutates the canonical
+    results/phase4/gate2/ evidence.
+    """
+    _run_git(["clone", "--quiet", str(REPOSITORY_ROOT), str(dest)])
+    _run_git(["checkout", "-q", BRANCH], cwd=dest)
+    return dest
+
+
+@pytest.fixture(scope="module")
+def gate2_repo(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    dest = tmp_path_factory.mktemp("gate2-cli") / "repo"
+    return _clone_repository(dest)
 
 
 @pytest.fixture(autouse=True)
@@ -37,8 +70,9 @@ def test_cli_types_are_available() -> None:
 
 def test_cli_main_success_prints_sealed_manifest_json(
     capsys: pytest.CaptureFixture[str],
+    gate2_repo: Path,
 ) -> None:
-    exit_code = _cli_module.main(["--repository-root", str(REPOSITORY_ROOT)])
+    exit_code = _cli_module.main(["--repository-root", str(gate2_repo)])
     captured = capsys.readouterr()
     assert exit_code == 0
     payload = json.loads(captured.out)
@@ -49,10 +83,11 @@ def test_cli_main_success_prints_sealed_manifest_json(
         "results/phase4/gate2/phase4_engine_manifest/sha256/"
     )
     assert set(manifest) == {"kind", "content_sha256", "path", "sha256"}
-    # The seal must write only beneath results/phase4/gate2/.
-    if GATE2_RESULTS.exists():
-        for path in GATE2_RESULTS.rglob("*"):
-            relative = path.relative_to(REPOSITORY_ROOT).as_posix()
+    # The seal must write only beneath results/phase4/gate2/ in the clone.
+    gate2_results = gate2_repo / "results" / "phase4" / "gate2"
+    if gate2_results.exists():
+        for path in gate2_results.rglob("*"):
+            relative = path.relative_to(gate2_repo).as_posix()
             assert relative.startswith("results/phase4/gate2/")
 
 
@@ -70,10 +105,11 @@ def test_cli_rejects_unknown_options() -> None:
 
 def test_cli_repeat_run_is_byte_identical(
     capsys: pytest.CaptureFixture[str],
+    gate2_repo: Path,
 ) -> None:
-    assert _cli_module.main(["--repository-root", str(REPOSITORY_ROOT)]) == 0
+    assert _cli_module.main(["--repository-root", str(gate2_repo)]) == 0
     first = capsys.readouterr().out
-    assert _cli_module.main(["--repository-root", str(REPOSITORY_ROOT)]) == 0
+    assert _cli_module.main(["--repository-root", str(gate2_repo)]) == 0
     second = capsys.readouterr().out
     assert first == second
 
