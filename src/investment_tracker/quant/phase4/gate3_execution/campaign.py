@@ -95,12 +95,16 @@ class TrialRecord(FrozenGate3Model):
     parameter_tuple_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     status: TrialStatus
     reason: str
+    # Preparation schema only. A future campaign must preregister a complete
+    # typed result schema before an EXECUTED candidate can be recorded.
     result: dict[str, object] | None = None
 
     @model_validator(mode="after")
     def validate_record(self) -> "TrialRecord":
         if self.trial_id != trial_identity(self.campaign_id, self.candidate_id):
             raise ValueError("TRIAL_IDENTITY_INVALID")
+        if self.status == "EXECUTED" or self.result is not None:
+            raise ValueError("PREPARATION_ONLY: authoritative campaign result schema is not sealed")
         if self.status != "EXECUTED" and not self.reason:
             raise ValueError("REASON_REQUIRED: non-executed trial needs an original reason")
         if self.status != "EXECUTED" and self.result is not None:
