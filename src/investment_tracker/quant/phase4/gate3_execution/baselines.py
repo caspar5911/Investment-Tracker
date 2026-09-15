@@ -10,6 +10,7 @@ from investment_tracker.quant.phase4.engine.execution import _replay, _validated
 from investment_tracker.quant.phase4.engine.market import MarketPanel, ScoredMarketInput
 from investment_tracker.quant.phase4.engine.models import Gate2Authority, PortfolioReplay
 from investment_tracker.quant.phase4.gate3.authorities import SYMBOLS
+from investment_tracker.quant.phase4.preregistration.canonical import canonical_sha256
 from investment_tracker.quant.strategies.registry import build_strategy
 
 
@@ -21,15 +22,33 @@ PRIMARY_FRICTION_BPS = 3
 class SleeveReplay:
     symbol: str
     replay: PortfolioReplay
+    replay_sha256: str
+    sleeve_sha256: str
 
 
 @dataclass(frozen=True)
 class BaselineComparison:
     baseline_id: str
     provenance_class: str
+    family: str
+    parameters: tuple[tuple[str, int | float], ...]
+    phase2_comparator_candidate_id: str
+    baseline_definition_sha256: str
+    parameter_tuple_sha256: str
+    rule_set_sha256: str
+    implementation_bundle_sha256: str
+    generator_revision: str
+    generator_path: str
+    generator_blob: str
+    generator_content_sha256: str
+    execution_series: str
+    decision_grade: bool
+    primary_friction_bps: int
     sleeves: tuple[SleeveReplay, ...]
     close_equity: tuple[float, ...]
     daily_returns: tuple[float, ...]
+    aggregate_equity_sha256: str
+    aggregate_returns_sha256: str
     eligible_for_selection: bool = False
 
 
@@ -130,13 +149,23 @@ def simulate_baseline(
     if definition.frozen_universe != SYMBOLS or definition.eligible_for_selection:
         raise ValueError("BASELINE_AUTHORITY_INVALID: comparison provenance changed")
 
-    sleeves = tuple(
-        SleeveReplay(
+    sleeves_list = []
+    for symbol in SYMBOLS:
+        replay = _replay_one_sleeve(market, symbol, definition.family, definition.parameters)
+        replay_sha = canonical_sha256(replay.model_dump(mode="json"))
+        sleeves_list.append(SleeveReplay(
             symbol=symbol,
-            replay=_replay_one_sleeve(market, symbol, definition.family, definition.parameters),
-        )
-        for symbol in SYMBOLS
-    )
+            replay=replay,
+            replay_sha256=replay_sha,
+            sleeve_sha256=canonical_sha256({
+                "baseline_id": baseline_id,
+                "symbol": symbol,
+                "replay_sha256": replay_sha,
+                "initial_cash": INITIAL_SLEEVE_CASH,
+                "execution_series": "QFQ_NORMALIZED",
+            }),
+        ))
+    sleeves = tuple(sleeves_list)
     count = len(market.scored.sessions)
     if any(item.replay.sessions != market.scored.sessions for item in sleeves):
         raise ValueError("BASELINE_REPLAY_INVALID: sleeve session mismatch")
@@ -150,7 +179,27 @@ def simulate_baseline(
     return BaselineComparison(
         baseline_id=definition.baseline_id,
         provenance_class=definition.provenance_class,
+        family=definition.family,
+        parameters=tuple(sorted(definition.parameters.items())),
+        phase2_comparator_candidate_id=definition.candidate_id,
+        baseline_definition_sha256=canonical_sha256(definition.model_dump(mode="json")),
+        parameter_tuple_sha256=canonical_sha256({"family": definition.family, "parameters": definition.parameters}),
+        rule_set_sha256=canonical_sha256({
+            "family": definition.family,
+            "generator_content_sha256": definition.generator_content_sha256,
+            "implementation_bundle_sha256": definition.implementation_bundle_sha256,
+        }),
+        implementation_bundle_sha256=definition.implementation_bundle_sha256,
+        generator_revision=definition.generator_revision,
+        generator_path=definition.generator_path,
+        generator_blob=definition.generator_blob,
+        generator_content_sha256=definition.generator_content_sha256,
+        execution_series="QFQ_NORMALIZED",
+        decision_grade=False,
+        primary_friction_bps=PRIMARY_FRICTION_BPS,
         sleeves=sleeves,
         close_equity=equity,
         daily_returns=daily_returns,
+        aggregate_equity_sha256=canonical_sha256(equity),
+        aggregate_returns_sha256=canonical_sha256(daily_returns),
     )

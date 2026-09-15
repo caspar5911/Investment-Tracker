@@ -41,6 +41,12 @@ def test_exact_spec_and_canonical_semantic_records_have_stable_identities():
     assert regime["actual_return_count"] == 1007
     assert regime["first_session_return"] is None
     assert "median" not in regime["conditional_metrics"]
+    assert regime["regime_definition_sha256"] == "f8f78a3eff8c5785b6da3a8079b4e3d44c6a186459ae180074d9c40b65e4499b"
+    assert set(baseline["output_identity_fields"]) >= {
+        "baseline_definition_sha256", "parameter_tuple_sha256", "rule_set_sha256",
+        "implementation_bundle_sha256", "sleeve_sha256", "replay_sha256",
+        "aggregate_equity_sha256", "aggregate_returns_sha256",
+    }
     assert canonical_json_bytes(baseline) == canonical_json_bytes(api.semantic_method_records(ROOT)[0])
     changed = {**baseline, "initial_cash_per_sleeve": 12501.0}
     assert sha256(canonical_json_bytes(changed)).hexdigest() != sha256(canonical_json_bytes(baseline)).hexdigest()

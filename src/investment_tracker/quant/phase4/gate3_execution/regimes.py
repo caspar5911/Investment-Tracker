@@ -9,7 +9,11 @@ from investment_tracker.quant.phase4.engine.models import PortfolioReplay
 from investment_tracker.quant.phase4.gate3.authorities import (
     LaggedReturnRegimeAuthority,
     REGIME_IDS,
+    canonical_authority_sha256,
 )
+
+
+FROZEN_REGIME_DEFINITION_SHA256 = "f8f78a3eff8c5785b6da3a8079b4e3d44c6a186459ae180074d9c40b65e4499b"
 
 
 @dataclass(frozen=True)
@@ -33,6 +37,19 @@ class RegimeAttribution:
     regimes: tuple[ConditionalRegime, ...]
 
 
+def _conditional_metrics(values: tuple[float, ...]) -> tuple[int, int, float | None, float | None, float | None, str, str]:
+    count = len(values)
+    positive = sum(value > 0.0 for value in values)
+    if count == 0:
+        return 0, 0, None, None, None, "UNKNOWN", "NO_RETURN_OBSERVATIONS"
+    fraction = positive / count
+    mean = math.fsum(values) / count
+    compounded = math.prod(1.0 + value for value in values) - 1.0
+    if not all(math.isfinite(value) for value in (fraction, mean, compounded)):
+        raise ValueError("REGIME_REPLAY_INVALID: conditional summary is nonfinite")
+    return count, positive, fraction, mean, compounded, "AVAILABLE", "OK"
+
+
 def attribute_regime_returns(
     replay: PortfolioReplay,
     authority: LaggedReturnRegimeAuthority,
@@ -41,8 +58,11 @@ def attribute_regime_returns(
 
     if not isinstance(replay, PortfolioReplay) or not isinstance(authority, LaggedReturnRegimeAuthority):
         raise ValueError("REGIME_INPUT_INVALID: replay and frozen authority are required")
-    if authority.regime_ids != REGIME_IDS:
-        raise ValueError("REGIME_AUTHORITY_INVALID: regime labels changed")
+    if (
+        authority.regime_ids != REGIME_IDS
+        or canonical_authority_sha256(authority) != FROZEN_REGIME_DEFINITION_SHA256
+    ):
+        raise ValueError("REGIME_AUTHORITY_INVALID: exact frozen definition or mapping changed")
     sessions = replay.sessions
     returns = replay.daily_returns
     if len(sessions) < 2 or len(returns) != len(sessions) - 1:
@@ -72,18 +92,7 @@ def attribute_regime_returns(
     regimes = []
     for regime_id in REGIME_IDS:
         values = tuple(vectors[regime_id])
-        count = len(values)
-        positive = sum(value > 0.0 for value in values)
-        if count == 0:
-            fraction = mean = compounded = None
-            status, reason = "UNKNOWN", "NO_RETURN_OBSERVATIONS"
-        else:
-            fraction = positive / count
-            mean = math.fsum(values) / count
-            compounded = math.prod(1.0 + value for value in values) - 1.0
-            if not all(math.isfinite(value) for value in (fraction, mean, compounded)):
-                raise ValueError("REGIME_REPLAY_INVALID: conditional summary is nonfinite")
-            status, reason = "AVAILABLE", "OK"
+        count, positive, fraction, mean, compounded, status, reason = _conditional_metrics(values)
         regimes.append(
             ConditionalRegime(
                 regime_id=regime_id,

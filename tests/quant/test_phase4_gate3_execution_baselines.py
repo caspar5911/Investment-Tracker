@@ -9,6 +9,7 @@ import pytest
 
 from investment_tracker.quant.phase4.engine.authority import load_gate2_authority
 from investment_tracker.quant.phase4.engine.market import MarketPanel, ScoredMarketInput
+from investment_tracker.quant.phase4.preregistration.canonical import canonical_sha256
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -58,6 +59,7 @@ def _market(*, crash: bool = False, glc_change: float = 0.0) -> ScoredMarketInpu
 @pytest.mark.parametrize("baseline_id", BASELINES)
 def test_each_baseline_has_eight_self_financing_sleeves(authority, baseline_id):
     result = _simulate()(authority, _market(), baseline_id)
+    definition = next(item for item in authority.baselines.baselines if item.baseline_id == baseline_id)
     assert tuple(item.symbol for item in result.sleeves) == SYMBOLS
     assert len(result.sleeves) == 8
     assert all(item.replay.initial_cash == 12500.0 for item in result.sleeves)
@@ -72,6 +74,38 @@ def test_each_baseline_has_eight_self_financing_sleeves(authority, baseline_id):
     )
     assert len(result.daily_returns) == len(result.close_equity) - 1
     assert result.eligible_for_selection is False
+    assert result.family == definition.family
+    assert result.parameters == tuple(sorted(definition.parameters.items()))
+    assert result.phase2_comparator_candidate_id == definition.candidate_id
+    assert result.baseline_definition_sha256 == canonical_sha256(definition.model_dump(mode="json"))
+    assert result.implementation_bundle_sha256 == definition.implementation_bundle_sha256
+    assert result.generator_revision == definition.generator_revision
+    assert result.generator_path == definition.generator_path
+    assert result.generator_blob == definition.generator_blob
+    assert result.generator_content_sha256 == definition.generator_content_sha256
+    assert result.parameter_tuple_sha256 == canonical_sha256({
+        "family": definition.family, "parameters": definition.parameters,
+    })
+    assert result.rule_set_sha256 == canonical_sha256({
+        "family": definition.family,
+        "generator_content_sha256": definition.generator_content_sha256,
+        "implementation_bundle_sha256": definition.implementation_bundle_sha256,
+    })
+    assert result.execution_series == "QFQ_NORMALIZED"
+    assert result.decision_grade is False
+    assert result.primary_friction_bps == 3
+    assert result.aggregate_equity_sha256 == canonical_sha256(result.close_equity)
+    assert result.aggregate_returns_sha256 == canonical_sha256(result.daily_returns)
+    assert len({item.sleeve_sha256 for item in result.sleeves}) == 8
+    for item in result.sleeves:
+        assert item.replay_sha256 == canonical_sha256(item.replay.model_dump(mode="json"))
+        assert item.sleeve_sha256 == canonical_sha256({
+            "baseline_id": baseline_id,
+            "symbol": item.symbol,
+            "replay_sha256": item.replay_sha256,
+            "initial_cash": 12500.0,
+            "execution_series": "QFQ_NORMALIZED",
+        })
 
 
 def test_baseline_fill_uses_next_open_and_zero_target_liquidates(authority):

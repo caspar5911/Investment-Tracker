@@ -33,10 +33,12 @@ from investment_tracker.quant.phase4.gate3.seal import (
 from investment_tracker.quant.phase4.preregistration.canonical import (
     artifact_envelope_identity,
     canonical_json_bytes,
+    canonical_sha256,
 )
 
 from .artifacts import MethodologyEvidenceStore
 from .campaign import POPULATION_SHA256
+from .regimes import FROZEN_REGIME_DEFINITION_SHA256
 
 
 SPEC_PATH = "docs/superpowers/specs/2026-09-15-phase-4-gate-3-execution-methodology-design.md"
@@ -132,6 +134,14 @@ def semantic_method_records(repository_root: Path) -> tuple[dict[str, object], d
                 "parameters": item.parameters,
                 "provenance_class": item.provenance_class,
                 "implementation_bundle_sha256": item.implementation_bundle_sha256,
+                "generator_revision": item.generator_revision,
+                "generator_content_sha256": item.generator_content_sha256,
+                "parameter_tuple_sha256": canonical_sha256({"family": item.family, "parameters": item.parameters}),
+                "rule_set_sha256": canonical_sha256({
+                    "family": item.family,
+                    "generator_content_sha256": item.generator_content_sha256,
+                    "implementation_bundle_sha256": item.implementation_bundle_sha256,
+                }),
                 "eligible_for_selection": False,
             }
             for item in authority.baselines.baselines
@@ -153,11 +163,17 @@ def semantic_method_records(repository_root: Path) -> tuple[dict[str, object], d
         "leverage": False,
         "decision_grade": False,
         "eligible_for_selection": False,
+        "output_identity_fields": [
+            "baseline_definition_sha256", "parameter_tuple_sha256", "rule_set_sha256",
+            "implementation_bundle_sha256", "replay_sha256", "sleeve_sha256",
+            "aggregate_equity_sha256", "aggregate_returns_sha256",
+        ],
     }
     regime = {
         "schema_version": "PHASE4-GATE3-RETURN-ENDING-REGIME-METHOD-v1",
         "kind": "regime_return_method",
         "regime_authority_content_sha256": "9d6e1d81c1e5fdac2fbf50d6e2e1f933ea2bb1d20d6f6e277574704028449454",
+        "regime_definition_sha256": FROZEN_REGIME_DEFINITION_SHA256,
         "validation_session_count": 1008,
         "actual_return_count": 1007,
         "first_session_labelled": True,
