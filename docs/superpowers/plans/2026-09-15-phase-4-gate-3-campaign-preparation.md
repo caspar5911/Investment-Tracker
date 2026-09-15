@@ -130,11 +130,11 @@ if len({item.trial_id for item in rows}) != 180:
 
 **Interfaces:** Consume explicit corrected Gate 3 authority content digest and source revision; produce `seal_execution_methodology(repository_root: Path, source_revision: str) -> ArtifactIdentity` and `preflight_execution_methodology(repository_root: Path, manifest_content_sha256: str) -> MethodologyPreflight`. CLI has only `seal/preflight`, no candidate evaluation command.
 
-- [ ] **Step 1: RED tests.** In a temporary contained repository fixture, pin exact spec bytes/envelope, Gate 1/Gate 2/Gate 3 authority manifests, population/TRAIN/VALIDATION identities, two canonical method records, runner source-bundle bytes/Git commit. Assert different method fields change digest; changed dependency/spec/source bytes fail closed; superseded Gate 3 manifest fails; extra/malformed/symlink/junction reference fails before read; `preflight` returns baseline/regime `BOUND`, Gate 3 `GATE3_CAMPAIGN_READY_TO_EXECUTE`, and safety false/zero without calling any strategy or data provider. Existing authority-only preflight output remains `READY` unchanged.
+- [ ] **Step 1: RED tests.** Against the real repository's read-only sealed dependency metadata and a temporary contained evidence store, assert exact spec bytes/envelope, Gate 1/Gate 2/Gate 3 manifest references, population/TRAIN/VALIDATION identities, and two canonical method records. Changing a semantic method field must change its digest; changed dependency/spec/source bytes, superseded Gate 3 manifest, extra/malformed reference, and symlink/junction evidence path must fail closed. Test the pure manifest validator's positive bound result using exact preflight inputs without writing repository evidence. A positive source-commit-integrated CLI preflight is tested in Task 5 only, after all runner files are committed and methodology evidence is sealed. The existing authority-only preflight stays `READY`.
 
 ```python
-def test_methodology_preflight_is_nonexecuting(repo_fixture, pinned_manifest):
-    result = preflight_execution_methodology(repo_fixture, pinned_manifest)
+def test_methodology_validation_is_nonexecuting(exact_dependency_fixture, semantic_manifest):
+    result = validate_execution_methodology(exact_dependency_fixture, semantic_manifest)
     assert result.gate3 == "GATE3_CAMPAIGN_READY_TO_EXECUTE"
     assert result.baseline_methodology == "BOUND"
     assert result.regime_attribution_methodology == "BOUND"
@@ -152,7 +152,7 @@ if manifest.candidate_population_sha256 != POPULATION_SHA256:
     raise ValueError("CANDIDATE_POPULATION_MISMATCH")
 ```
 
-- [ ] **Step 4: GREEN/regression.** Run focused test, all `tests/quant/test_phase4_gate3_*.py`, and Phase 4 regressions. Check no sealed file changed and no candidate performance was calculated.
+- [ ] **Step 4: GREEN/regression.** Run focused pure-validator/artifact/fail-closed tests, all `tests/quant/test_phase4_gate3_*.py`, and Phase 4 regressions. Check no sealed file changed and no candidate performance was calculated. Keep the positive committed-source integration assertion in Task 5.
 - [ ] **Step 5: Commit implementation only.** `git add src/investment_tracker/quant/phase4/gate3_execution/methodology.py src/investment_tracker/quant/phase4/gate3_execution/cli.py tests/quant/test_phase4_gate3_execution_methodology.py`; `git commit -m "feat: bind Gate 3 execution methodology without campaign access"`.
 
 ### Task 5: Verification, independent review, and methodology evidence seal
@@ -162,5 +162,5 @@ if manifest.candidate_population_sha256 != POPULATION_SHA256:
 - [ ] **Step 1: Fresh tests.** Run all focused Gate 3 execution tests, Phase 4 regression tests, and `pytest -q tests/quant`; record exact pass/skip/failure counts. The unchanged Windows symlink security test must run normally.
 - [ ] **Step 2: Fresh independent post-commit review.** Give reviewer the spec, plan, implementation commit range, test output, and access boundaries. Require 0 Critical/0 Important; fix genuine defects via new RED/GREEN cycle and commit before sealing.
 - [ ] **Step 3: Evidence seal.** From a clean implementation HEAD, run quote-free `python -m investment_tracker.quant.phase4.gate3_execution.cli seal --repository-root . --source-revision <full implementation HEAD>`. Stage only new execution-methodology evidence, verify exact bytes and `git diff --cached --check`, and commit `evidence: seal Gate 3 execution methodology`.
-- [ ] **Step 4: Final preflight/determinism.** Run the additive explicit-hash CLI preflight on the committed evidence twice and require identical output/identity; rerun the old Gate 3 authority-only preflight and require its `READY` unchanged. Check exact 180 identity-only rows, zero real candidate evaluation, no provider/holdout/protected/trading access, and clean git status.
+- [ ] **Step 4: Final preflight/determinism.** First run the positive committed-source integration test for `preflight_execution_methodology()` on the newly sealed evidence. Then run the additive explicit-hash CLI preflight on committed evidence twice and require identical output/identity; rerun the old Gate 3 authority-only preflight and require its `READY` unchanged. Check exact 180 identity-only rows, zero real candidate evaluation, no provider/holdout/protected/trading access, and clean git status.
 - [ ] **Step 5: Stop/report.** Report spec path/commit, two method digests, combined manifest identity, implementation/evidence commits, focused/regression/full quant counts, two review verdicts, final `GATE3_CAMPAIGN_READY_TO_EXECUTE`, and all negative safety/access facts. Do not execute candidate #1 or start Phase 4 Gate 3 campaign.
