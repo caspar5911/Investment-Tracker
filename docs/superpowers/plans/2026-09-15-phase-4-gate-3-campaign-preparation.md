@@ -130,15 +130,16 @@ if len({item.trial_id for item in rows}) != 180:
 
 **Interfaces:** Consume explicit corrected Gate 3 authority content digest and source revision; produce `seal_execution_methodology(repository_root: Path, source_revision: str) -> ArtifactIdentity` and `preflight_execution_methodology(repository_root: Path, manifest_content_sha256: str) -> MethodologyPreflight`. CLI has only `seal/preflight`, no candidate evaluation command.
 
-- [ ] **Step 1: RED tests.** Against the real repository's read-only sealed dependency metadata and a temporary contained evidence store, assert exact spec bytes/envelope, Gate 1/Gate 2/Gate 3 manifest references, population/TRAIN/VALIDATION identities, and two canonical method records. Changing a semantic method field must change its digest; changed dependency/spec/source bytes, superseded Gate 3 manifest, extra/malformed reference, and symlink/junction evidence path must fail closed. Test the pure manifest validator's positive bound result using exact preflight inputs without writing repository evidence. A positive source-commit-integrated CLI preflight is tested in Task 5 only, after all runner files are committed and methodology evidence is sealed. The existing authority-only preflight stays `READY`.
+- [ ] **Step 1: RED tests.** Against the real repository's read-only sealed dependency metadata and a temporary contained evidence store, assert exact spec bytes/envelope, Gate 1/Gate 2/Gate 3 manifest references, population/TRAIN/VALIDATION identities, and two canonical method records. Changing a semantic method field must change its digest; changed dependency/spec/source bytes, superseded Gate 3 manifest, extra/malformed reference, and symlink/junction evidence path must fail closed. The pure manifest validator may report only `STRUCTURALLY_BOUND` with source/evidence `DECLARED`; it must not report campaign readiness without committed-source and artifact verification. A positive source-commit-integrated CLI preflight is tested in Task 5 only, after all runner files are committed and methodology evidence is sealed. The existing authority-only preflight stays `READY`.
 
 ```python
 def test_methodology_validation_is_nonexecuting(exact_dependency_fixture, semantic_manifest):
     result = validate_execution_methodology(exact_dependency_fixture, semantic_manifest)
-    assert result.gate3 == "GATE3_CAMPAIGN_READY_TO_EXECUTE"
+    assert result.gate3 == "STRUCTURALLY_BOUND"
     assert result.baseline_methodology == "BOUND"
     assert result.regime_attribution_methodology == "BOUND"
     assert result.candidate_population == 180
+    assert result.source_bundle == "DECLARED"
     assert result.safety.candidate_executed is False
 ```
 
