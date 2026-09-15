@@ -213,7 +213,7 @@ def _record_identity(store: MethodologyEvidenceStore, kind: str, record: object)
 
 def _source_bundle(root: Path, revision: str) -> SourceBundleIdentity:
     _validate_source_revision(root, revision)
-    verify_frozen_strategy_worktree()
+    verify_frozen_strategy_worktree(root)
     for relative in SOURCE_FILES:
         contained_path(root, tuple(relative.split("/")), code="SOURCE_BUNDLE_MISMATCH")
     return source_bundle_identity(root, revision, SOURCE_FILES)

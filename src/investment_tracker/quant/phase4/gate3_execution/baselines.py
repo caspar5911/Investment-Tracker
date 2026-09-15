@@ -12,7 +12,7 @@ from investment_tracker.quant.phase4.engine.execution import _replay, _validated
 from investment_tracker.quant.phase4.engine.market import MarketPanel, ScoredMarketInput
 from investment_tracker.quant.phase4.engine.models import Gate2Authority, PortfolioReplay
 from investment_tracker.quant.phase4.gate3.authorities import SYMBOLS
-from investment_tracker.quant.phase4.gate3.filesystem import contained_path
+from investment_tracker.quant.phase4.gate3.filesystem import contained_path, resolve_repository_root
 from investment_tracker.quant.phase4.gate3.models import Gate3AuthorityError
 from investment_tracker.quant.phase4.preregistration.canonical import canonical_sha256
 from investment_tracker.quant.phase4.preregistration.provenance import STRATEGY_GIT_OBJECTS
@@ -24,10 +24,19 @@ PRIMARY_FRICTION_BPS = 3
 FROZEN_STRATEGY_FILES = tuple(sorted(identity.path for identity in STRATEGY_GIT_OBJECTS.values()))
 
 
-def verify_frozen_strategy_worktree() -> None:
+def verify_frozen_strategy_worktree(repository_root: Path | None = None) -> None:
     """Executed strategy bytes must match the exact frozen Phase 2 Git objects."""
 
-    root = Path(__file__).resolve().parents[5]
+    active_root = Path(__file__).resolve().parents[5]
+    if repository_root is None:
+        root = active_root
+    else:
+        try:
+            root = resolve_repository_root(repository_root, code="BASELINE_IMPLEMENTATION_MISMATCH")
+        except Gate3AuthorityError as exc:
+            raise ValueError("BASELINE_IMPLEMENTATION_MISMATCH: target repository unavailable") from exc
+        if root != active_root:
+            raise ValueError("BASELINE_IMPLEMENTATION_MISMATCH: loaded code belongs to another repository")
     for identity in sorted(STRATEGY_GIT_OBJECTS.values(), key=lambda item: item.path):
         try:
             path = contained_path(

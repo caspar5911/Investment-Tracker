@@ -5,6 +5,7 @@ from importlib import import_module
 from pathlib import Path
 import json
 import os
+import subprocess
 
 import pytest
 
@@ -193,6 +194,37 @@ def test_source_bundle_has_all_approved_runner_and_executed_phase2_source_files(
         "src/investment_tracker/quant/strategies/" + name
         for name in ("base.py", "indicators.py", "registry.py", "trend.py", "momentum.py", "trend_momentum.py", "risk_managed.py")
     ))
+
+
+def test_source_bundle_guard_uses_explicit_repository_root_and_fails_cross_worktree(tmp_path, monkeypatch):
+    api = _api()
+    from investment_tracker.quant.phase4.gate3_execution.baselines import verify_frozen_strategy_worktree
+
+    verify_frozen_strategy_worktree(ROOT)
+    with pytest.raises(ValueError, match="BASELINE_IMPLEMENTATION_MISMATCH"):
+        verify_frozen_strategy_worktree(tmp_path)
+
+    calls = []
+    original = api.verify_frozen_strategy_worktree
+
+    def check_explicit_root(root):
+        calls.append(Path(root).resolve())
+        return original(root)
+
+    monkeypatch.setattr(api, "verify_frozen_strategy_worktree", check_explicit_root)
+    sentinel = object()
+    bundle_calls = []
+
+    def identity_without_uncommitted_git_comparison(root, revision, paths):
+        bundle_calls.append((Path(root).resolve(), revision, tuple(paths)))
+        return sentinel
+
+    monkeypatch.setattr(api, "source_bundle_identity", identity_without_uncommitted_git_comparison)
+    revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT).decode().strip()
+    bundle = api._source_bundle(ROOT, revision)
+    assert calls == [ROOT]
+    assert bundle is sentinel
+    assert bundle_calls == [(ROOT, revision, api.SOURCE_FILES)]
 
 
 def test_cli_exposes_only_quote_free_seal_and_explicit_preflight():
