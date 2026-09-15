@@ -18,6 +18,7 @@ from investment_tracker.quant.phase4.preregistration.canonical import (
 from investment_tracker.quant.phase4.preregistration.seal import Phase4PreregistrationManifest
 
 from .authorities import SYMBOLS
+from .filesystem import contained_path, resolve_repository_root
 from .models import ArtifactIdentity, DataPartitionIdentity, Gate3AuthorityError
 
 
@@ -38,13 +39,9 @@ def _safe_path(root: Path, relative: str) -> Path:
     posix = PurePosixPath(relative)
     if relative.startswith("/") or "\\" in relative or any(part in {"", ".", ".."} for part in posix.parts):
         raise Gate3AuthorityError("INPUT_IDENTITY_MISMATCH: invalid repository path")
-    path = root.joinpath(*posix.parts)
-    current = root
-    for part in posix.parts:
-        current = current / part
-        if current.is_symlink():
-            raise Gate3AuthorityError("INPUT_IDENTITY_MISMATCH: symlinked input rejected")
-    return path
+    return contained_path(
+        root, tuple(posix.parts), code="INPUT_IDENTITY_MISMATCH"
+    )
 
 
 def _read_identity(root: Path, identity: ArtifactIdentity) -> bytes:
@@ -101,7 +98,9 @@ def load_frozen_authority_inputs(
     gate1_identity: ArtifactIdentity,
     gate2_identity: ArtifactIdentity,
 ) -> FrozenAuthorityInputs:
-    root = Path(repository_root).resolve(strict=True)
+    root = resolve_repository_root(
+        repository_root, code="INPUT_IDENTITY_MISMATCH"
+    )
     gate1_payload = _read_identity(root, gate1_identity)
     gate2_payload = _read_identity(root, gate2_identity)
     try:

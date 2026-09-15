@@ -88,10 +88,14 @@ mutated, noncanonical, incomplete, or mismatched evidence. Success reports:
 The terminal authority status is `GATE3_AUTHORITIES_SEALED`. This status does
 not authorize Gate 3 campaign execution.
 
+All approved dependency identities and canonical authority kind/path layouts
+must be validated before any manifest-selected reference is dereferenced.
+Symlinks, Windows junctions, and other reparse-point redirects are rejected
+before reads or writes. A superseded manifest is never accepted by preflight.
+
 ## Safety state
 
 At seal and preflight: candidate execution, validation candidate performance
 access, ranking, survivor selection, provider calls, downloads, strategy
 search, FINAL_HOLDOUT access, protected-symbol access, and trading capability
 must all remain false, empty, or zero. Phase 4 trial consumption remains zero.
-

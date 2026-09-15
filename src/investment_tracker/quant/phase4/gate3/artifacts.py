@@ -12,6 +12,7 @@ from investment_tracker.quant.phase4.preregistration.canonical import (
 )
 
 from .models import ArtifactIdentity, Gate3AuthorityError
+from .filesystem import contained_path, resolve_repository_root
 
 
 FILENAMES = {
@@ -23,9 +24,9 @@ FILENAMES = {
 
 class Gate3ArtifactStore:
     def __init__(self, repository_root: Path) -> None:
-        self.root = Path(repository_root).resolve(strict=True)
-        if not self.root.is_dir():
-            raise Gate3AuthorityError("ARTIFACT_ROOT_INVALID: repository root is not a directory")
+        self.root = resolve_repository_root(
+            repository_root, code="ARTIFACT_PATH_INVALID"
+        )
         self.output_root = self.root / "results" / "phase4" / "gate3"
         self._assert_no_symlink(self.output_root)
 
@@ -34,11 +35,11 @@ class Gate3ArtifactStore:
             relative = path.relative_to(self.root)
         except ValueError as exc:
             raise Gate3AuthorityError("ARTIFACT_PATH_INVALID: path escaped repository") from exc
-        current = self.root
-        for component in relative.parts:
-            current = current / component
-            if current.is_symlink():
-                raise Gate3AuthorityError("ARTIFACT_PATH_INVALID: symlink component rejected")
+        contained_path(
+            self.root,
+            tuple(relative.parts),
+            code="ARTIFACT_PATH_INVALID",
+        )
 
     def _identity(self, kind: str, destination: Path, payload: bytes) -> ArtifactIdentity:
         content = sha256(payload).hexdigest()
@@ -96,4 +97,3 @@ class Gate3ArtifactStore:
         if expected != identity:
             raise Gate3AuthorityError("AUTHORITY_ARTIFACT_MISMATCH: referenced artifact changed")
         return payload
-

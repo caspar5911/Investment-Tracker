@@ -75,6 +75,9 @@ class Gate3AuthorityManifest(FrozenGate3Model):
     )
     status: Literal["GATE3_AUTHORITIES_SEALED"] = "GATE3_AUTHORITIES_SEALED"
     source_revision: str = Field(pattern=r"^[0-9a-f]{40}$")
+    supersedes_manifest_content_sha256: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
     gate1_manifest: ArtifactIdentity
     gate2_manifest: ArtifactIdentity
     universe_manifest: ArtifactIdentity
@@ -103,4 +106,3 @@ class Gate3Preflight(FrozenGate3Model):
     candidate_population: Literal[180] = 180
     gate3: Literal["READY"] = "READY"
     safety: SafetyState
-
