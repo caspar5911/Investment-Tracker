@@ -137,3 +137,17 @@ def test_one_sleeve_change_does_not_mutate_another_sleeve(authority):
 def test_unsealed_baseline_id_is_rejected(authority):
     with pytest.raises(ValueError, match="BASELINE"):
         _simulate()(authority, _market(), "baseline-unsealed-v1")
+
+
+def test_changed_current_strategy_source_cannot_claim_frozen_implementation(authority, monkeypatch):
+    original = Path.read_bytes
+    pinned_path = ROOT / "src/investment_tracker/quant/strategies/trend.py"
+
+    def read_with_tampered_strategy(path):
+        if Path(path) == pinned_path:
+            return b"tampered strategy bytes"
+        return original(path)
+
+    monkeypatch.setattr(Path, "read_bytes", read_with_tampered_strategy)
+    with pytest.raises(ValueError, match="BASELINE_IMPLEMENTATION_MISMATCH"):
+        _simulate()(authority, _market(), "baseline-trend-v1")

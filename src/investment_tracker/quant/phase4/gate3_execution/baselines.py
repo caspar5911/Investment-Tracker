@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from hashlib import sha256
 import math
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -10,12 +12,32 @@ from investment_tracker.quant.phase4.engine.execution import _replay, _validated
 from investment_tracker.quant.phase4.engine.market import MarketPanel, ScoredMarketInput
 from investment_tracker.quant.phase4.engine.models import Gate2Authority, PortfolioReplay
 from investment_tracker.quant.phase4.gate3.authorities import SYMBOLS
+from investment_tracker.quant.phase4.gate3.filesystem import contained_path
+from investment_tracker.quant.phase4.gate3.models import Gate3AuthorityError
 from investment_tracker.quant.phase4.preregistration.canonical import canonical_sha256
+from investment_tracker.quant.phase4.preregistration.provenance import STRATEGY_GIT_OBJECTS
 from investment_tracker.quant.strategies.registry import build_strategy
 
 
 INITIAL_SLEEVE_CASH = 12500.0
 PRIMARY_FRICTION_BPS = 3
+FROZEN_STRATEGY_FILES = tuple(sorted(identity.path for identity in STRATEGY_GIT_OBJECTS.values()))
+
+
+def verify_frozen_strategy_worktree() -> None:
+    """Executed strategy bytes must match the exact frozen Phase 2 Git objects."""
+
+    root = Path(__file__).resolve().parents[5]
+    for identity in sorted(STRATEGY_GIT_OBJECTS.values(), key=lambda item: item.path):
+        try:
+            path = contained_path(
+                root, tuple(identity.path.split("/")), code="BASELINE_IMPLEMENTATION_MISMATCH"
+            )
+            content = sha256(path.read_bytes()).hexdigest()
+        except (Gate3AuthorityError, OSError) as exc:
+            raise ValueError("BASELINE_IMPLEMENTATION_MISMATCH: frozen strategy source unavailable") from exc
+        if content != identity.content_sha256:
+            raise ValueError("BASELINE_IMPLEMENTATION_MISMATCH: current strategy bytes differ from frozen Phase 2")
 
 
 @dataclass(frozen=True)
@@ -148,6 +170,8 @@ def simulate_baseline(
         raise ValueError("BASELINE_ID_INVALID: baseline is not a sealed comparison control") from exc
     if definition.frozen_universe != SYMBOLS or definition.eligible_for_selection:
         raise ValueError("BASELINE_AUTHORITY_INVALID: comparison provenance changed")
+
+    verify_frozen_strategy_worktree()
 
     sleeves_list = []
     for symbol in SYMBOLS:

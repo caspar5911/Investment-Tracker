@@ -47,6 +47,8 @@ def test_exact_spec_and_canonical_semantic_records_have_stable_identities():
         "implementation_bundle_sha256", "sleeve_sha256", "replay_sha256",
         "aggregate_equity_sha256", "aggregate_returns_sha256",
     }
+    assert baseline["runtime_strategy_source_guard"] == "EXACT_CURRENT_BYTES_EQUAL_FROZEN_PHASE2_GIT_OBJECTS"
+    assert len(baseline["runtime_strategy_git_objects"]) == 7
     assert canonical_json_bytes(baseline) == canonical_json_bytes(api.semantic_method_records(ROOT)[0])
     changed = {**baseline, "initial_cash_per_sleeve": 12501.0}
     assert sha256(canonical_json_bytes(changed)).hexdigest() != sha256(canonical_json_bytes(baseline)).hexdigest()
@@ -182,11 +184,14 @@ def test_pure_validator_rejects_mutated_dependencies_and_superseded_authority():
         api.ExecutionMethodologyManifest.model_validate({**manifest.model_dump(mode="json"), "extra": "not allowed"})
 
 
-def test_source_bundle_has_exact_seven_approved_files_and_no_latest_discovery():
+def test_source_bundle_has_all_approved_runner_and_executed_phase2_source_files():
     api = _api()
     assert api.SOURCE_FILES == tuple(sorted(
         "src/investment_tracker/quant/phase4/gate3_execution/" + name
         for name in ("__init__.py", "baselines.py", "regimes.py", "campaign.py", "artifacts.py", "methodology.py", "cli.py")
+    ) + sorted(
+        "src/investment_tracker/quant/strategies/" + name
+        for name in ("base.py", "indicators.py", "registry.py", "trend.py", "momentum.py", "trend_momentum.py", "risk_managed.py")
     ))
 
 

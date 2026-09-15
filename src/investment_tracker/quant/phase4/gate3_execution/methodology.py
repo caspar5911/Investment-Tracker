@@ -35,8 +35,10 @@ from investment_tracker.quant.phase4.preregistration.canonical import (
     canonical_json_bytes,
     canonical_sha256,
 )
+from investment_tracker.quant.phase4.preregistration.provenance import STRATEGY_GIT_OBJECTS
 
 from .artifacts import MethodologyEvidenceStore
+from .baselines import FROZEN_STRATEGY_FILES, verify_frozen_strategy_worktree
 from .campaign import POPULATION_SHA256
 from .regimes import FROZEN_REGIME_DEFINITION_SHA256
 
@@ -49,13 +51,16 @@ CORRECTED_GATE3_MANIFEST = ArtifactIdentity(
     path="results/phase4/gate3/gate3_authority_manifest/sha256/705935c9b06b8f592e66e5e71e4541d910b585be6e9a30e46b99fe97b7591d4f/manifest.json",
     sha256="646a7c004c13db3e5f9561d46897a15c27e7f305303559d04d2dc8828ee7f049",
 )
-SOURCE_FILES = tuple(sorted(
-    "src/investment_tracker/quant/phase4/gate3_execution/" + name
-    for name in (
-        "__init__.py", "baselines.py", "regimes.py", "campaign.py",
-        "artifacts.py", "methodology.py", "cli.py",
-    )
-))
+SOURCE_FILES = tuple(sorted((
+    *(
+        "src/investment_tracker/quant/phase4/gate3_execution/" + name
+        for name in (
+            "__init__.py", "baselines.py", "regimes.py", "campaign.py",
+            "artifacts.py", "methodology.py", "cli.py",
+        )
+    ),
+    *FROZEN_STRATEGY_FILES,
+)))
 
 
 class ExecutionMethodologyManifest(FrozenGate3Model):
@@ -163,6 +168,11 @@ def semantic_method_records(repository_root: Path) -> tuple[dict[str, object], d
         "leverage": False,
         "decision_grade": False,
         "eligible_for_selection": False,
+        "runtime_strategy_source_guard": "EXACT_CURRENT_BYTES_EQUAL_FROZEN_PHASE2_GIT_OBJECTS",
+        "runtime_strategy_git_objects": [
+            identity.model_dump(mode="json")
+            for identity in sorted(STRATEGY_GIT_OBJECTS.values(), key=lambda item: item.path)
+        ],
         "output_identity_fields": [
             "baseline_definition_sha256", "parameter_tuple_sha256", "rule_set_sha256",
             "implementation_bundle_sha256", "replay_sha256", "sleeve_sha256",
@@ -203,6 +213,7 @@ def _record_identity(store: MethodologyEvidenceStore, kind: str, record: object)
 
 def _source_bundle(root: Path, revision: str) -> SourceBundleIdentity:
     _validate_source_revision(root, revision)
+    verify_frozen_strategy_worktree()
     for relative in SOURCE_FILES:
         contained_path(root, tuple(relative.split("/")), code="SOURCE_BUNDLE_MISMATCH")
     return source_bundle_identity(root, revision, SOURCE_FILES)
