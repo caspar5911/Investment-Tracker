@@ -100,3 +100,34 @@ def test_symlink_redirect_is_rejected(tmp_path: Path):
     (tmp_path / "results").symlink_to(outside, target_is_directory=True)
     with pytest.raises(ValueError, match="ARTIFACT_PATH_INVALID"):
         RunnerStateStore(tmp_path)
+
+
+def test_receipt_binds_exact_runner_manifest(tmp_path: Path):
+    manifest_a = identity(
+        "gate3_campaign_runner_manifest",
+        "results/phase4/gate3/campaign_runner/a.json",
+        "a" * 64,
+    )
+    manifest_b = identity(
+        "gate3_campaign_runner_manifest",
+        "results/phase4/gate3/campaign_runner/b.json",
+        "b" * 64,
+    )
+    store = RunnerStateStore(tmp_path)
+    record = attempt(manifest_a)
+    store.write_attempt(record)
+    receipt = PositionReceipt(
+        population_position=1,
+        candidate_id=record.candidate_id,
+        trial_id=record.trial_id,
+        runner_manifest=manifest_b,
+        result_artifact=identity(
+            "phase4_gate3_candidate_result",
+            "results/result.json",
+            "4" * 64,
+        ),
+        result_status="UNKNOWN",
+    )
+    with pytest.raises(ValueError, match="RUNNER_RECEIPT_ATTEMPT_MISMATCH"):
+        store.write_receipt(receipt)
+    assert store.read_receipt(1) is None
