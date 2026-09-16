@@ -130,7 +130,7 @@ class RunnerStateStore:
         if canonical_json_bytes(parsed) != payload:
             raise ValueError("ARTIFACT_BYTES_INVALID")
         try:
-            value = model.model_validate(parsed, strict=True)
+            value = model.model_validate_json(payload)
         except ValueError as exc:
             raise ValueError("ARTIFACT_BYTES_INVALID") from exc
         if self._payload(value) != payload:
