@@ -56,6 +56,7 @@ def test_receipt_requires_matching_attempt_before_publish(tmp_path: Path):
         population_position=1,
         candidate_id="phase4-" + "9" * 64,
         trial_id=record.trial_id,
+        runner_manifest=manifest,
         result_artifact=identity(
             "phase4_gate3_candidate_result",
             "results/forged.json",
