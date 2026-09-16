@@ -51,7 +51,7 @@ def _expected(sessions: tuple[pd.Timestamp, ...]) -> ExpectedSessionAuthority:
     return ExpectedSessionAuthority(sessions=sessions, sha256=expected_session_identity(sessions))
 
 
-def _validate_replay(replay: PortfolioReplay, *, binding, sessions, friction_bps: int, benchmark: bool = False) -> None:
+def _validate_replay(replay: PortfolioReplay, *, binding, sessions, market, friction_bps: int, benchmark: bool = False) -> None:
     if replay.sessions != sessions or replay.initial_cash != 100000.0 or replay.friction_bps != friction_bps:
         raise ValueError('REPLAY_CONTEXT_MISMATCH')
     if benchmark:
@@ -60,6 +60,10 @@ def _validate_replay(replay: PortfolioReplay, *, binding, sessions, friction_bps
     elif replay.candidate_id != binding.candidate_id or replay.binding_sha256 != binding.binding_sha256:
         raise ValueError('REPLAY_BINDING_MISMATCH')
     allowed_symbols = frozenset(SYMBOLS)
+    if market.role != 'SCORED' or market.sessions != sessions or frozenset(market.symbols) != allowed_symbols:
+        raise ValueError('MARKET_PANEL_CONTEXT_INVALID')
+    opens = market.open_prices
+    closes = market.close_prices
     if any(fill.symbol not in allowed_symbols for fill in replay.fills) or any(
         symbol not in allowed_symbols for state in replay.states for symbol, _ in state.units
     ):
@@ -74,6 +78,12 @@ def _validate_replay(replay: PortfolioReplay, *, binding, sessions, friction_bps
     current = next(fills, None)
     previous_session = None
     for state in replay.states:
+        expected_open = cash + math.fsum(
+            units.get(symbol, 0.0) * float(opens.at[state.session, symbol])
+            for symbol in market.symbols
+        )
+        if not math.isclose(state.open_equity, expected_open, rel_tol=1e-12, abs_tol=_TOL):
+            raise ValueError('MARKET_VALUATION_INVALID')
         while current is not None and current.fill_timestamp == state.session:
             if (
                 current.signal_timestamp not in session_index
@@ -81,6 +91,9 @@ def _validate_replay(replay: PortfolioReplay, *, binding, sessions, friction_bps
                 or session_index[current.fill_timestamp] != session_index[current.signal_timestamp] + 1
             ):
                 raise ValueError('FILL_NEXT_SESSION_INVALID')
+            expected_open_price = float(opens.at[current.fill_timestamp, current.symbol])
+            if not math.isclose(current.reference_open, expected_open_price, rel_tol=1e-12, abs_tol=_TOL):
+                raise ValueError('MARKET_VALUATION_INVALID')
             expected_notional = current.units_delta * current.reference_open
             if not math.isclose(current.fill_notional, expected_notional, rel_tol=1e-12, abs_tol=_TOL):
                 raise ValueError('FILL_NOTIONAL_INVALID')
@@ -104,7 +117,14 @@ def _validate_replay(replay: PortfolioReplay, *, binding, sessions, friction_bps
         expected_cash = 0.0 if -_TOL <= cash < 0.0 else cash
         if not math.isclose(state.cash, expected_cash, rel_tol=1e-12, abs_tol=_TOL):
             raise ValueError('CASH_LINKAGE_INVALID')
-        realized = (state.close_equity - state.cash) / state.close_equity
+        risky_close = math.fsum(
+            units.get(symbol, 0.0) * float(closes.at[state.session, symbol])
+            for symbol in market.symbols
+        )
+        expected_close = expected_cash + risky_close
+        if not math.isclose(state.close_equity, expected_close, rel_tol=1e-12, abs_tol=_TOL):
+            raise ValueError('MARKET_VALUATION_INVALID')
+        realized = risky_close / expected_close
         if not math.isclose(state.realized_gross_exposure, realized, rel_tol=1e-12, abs_tol=_TOL):
             raise ValueError('EXPOSURE_LINKAGE_INVALID')
         if previous_session is not None and state.session <= previous_session:
@@ -162,7 +182,7 @@ def _neighborhood(observations: tuple[NeighborObservation, ...], benchmark: Port
         if item.binding not in expected:
             raise ValueError('NEIGHBOR_BINDING_INVALID')
         if item.replay is not None:
-            _validate_replay(item.replay, binding=item.binding, sessions=deps.sessions, friction_bps=3)
+            _validate_replay(item.replay, binding=item.binding, sessions=deps.sessions, market=deps.scored_panel, friction_bps=3)
             metrics.append(calculate_metrics(item.replay, benchmark))
     valid = [m for m in metrics if m.total_return.value is not None and m.benchmark_excess_return.value is not None]
     positive = sum(m.total_return.value > 0 for m in valid)
@@ -180,10 +200,10 @@ def derive_evidence(replays, benchmark, cash, neighbors, deps: Dependencies) -> 
         raise ValueError('FRICTION_CASES_INVALID')
     binding = next(b for b in deps.bindings if b.candidate_id == replays[0].candidate_id)
     for replay in replays:
-        _validate_replay(replay, binding=binding, sessions=deps.sessions, friction_bps=replay.friction_bps)
-    _validate_replay(benchmark, binding=None, sessions=deps.sessions, friction_bps=3, benchmark=True)
+        _validate_replay(replay, binding=binding, sessions=deps.sessions, market=deps.scored_panel, friction_bps=replay.friction_bps)
+    _validate_replay(benchmark, binding=None, sessions=deps.sessions, market=deps.scored_panel, friction_bps=3, benchmark=True)
     _validate_equal_weight_benchmark(benchmark, deps.sessions)
-    _validate_replay(cash, binding=None, sessions=deps.sessions, friction_bps=0, benchmark=True)
+    _validate_replay(cash, binding=None, sessions=deps.sessions, market=deps.scored_panel, friction_bps=0, benchmark=True)
     if cash.fills or cash.total_turnover != 0 or any(state.cash != 100000.0 or state.close_equity != 100000.0 for state in cash.states):
         raise ValueError('CASH_BENCHMARK_INVALID')
     primary = replays[1]
@@ -217,7 +237,9 @@ def make_provenance(authority: ResultAuthority, position: int) -> Provenance:
                   train_identity=TRAIN_IDENTITY, validation_identity=VALIDATION_IDENTITY,
                   gate1_manifest=GATE1_MANIFEST_IDENTITY, gate2_manifest=GATE2_MANIFEST_IDENTITY,
                   gate3_manifest=CORRECTED_GATE3_MANIFEST, execution_methodology=deps.execution,
-                  engine_implementation_sha256=deps.engine_sha256, source_revision=authority.source_revision,
+                  engine_implementation_sha256=deps.engine_sha256,
+                  scored_market_panel_sha256=deps.scored_panel.panel_sha256,
+                  source_revision=authority.source_revision,
                   initial_cash=100000.0, primary_friction_bps=3,
                   execution_convention='COMPLETED_BAR_SIGNAL_NEXT_BAR_OPEN', execution_series='QFQ_NORMALIZED', decision_grade=False)
     values['evaluation_context_sha256'] = _context({k:(v.model_dump(mode='json') if hasattr(v,'model_dump') else v) for k,v in values.items()})

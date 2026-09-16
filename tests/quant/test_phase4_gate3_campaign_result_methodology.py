@@ -1,6 +1,8 @@
 from importlib import import_module
+from hashlib import sha256
 from pathlib import Path
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 
@@ -31,6 +33,8 @@ def test_spec_contract_and_dependency_bindings_are_exact():
     assert contract['authoritative_generic_result_dict'] is False
     assert contract['campaign_execution_entrypoint'] is False
     assert contract['decision_grade'] is False
+    assert contract['replay_valuation_authority'] == 'FROZEN_SCORED_MARKET_PANEL'
+    assert len(contract['scored_market_panel_sha256']) == 64
     assert contract['dq030'] == {'max_drawdown':'UNKNOWN','calmar':'UNKNOWN','dsr':'UNKNOWN/NOT_IMPLEMENTED','pbo':'UNKNOWN/NOT_IMPLEMENTED'}
 
 
@@ -64,3 +68,20 @@ def test_old_execution_methodology_source_bundle_still_preflights():
     from investment_tracker.quant.phase4.gate3_execution.methodology import preflight_execution_methodology
     state = preflight_execution_methodology(ROOT, '9c37e20ccc54132716c3e347b8005d097500a14aeba41d9eedeaf28de3ebe877')
     assert state.gate3 == 'GATE3_CAMPAIGN_READY_TO_EXECUTE'
+
+
+def test_source_validation_rejects_cross_worktree_import_even_with_identical_bytes(
+    monkeypatch, tmp_path
+):
+    module = api()
+    bundle = SimpleNamespace(entries=tuple(
+        SimpleNamespace(path=relative, content_sha256=sha256((ROOT / relative).read_bytes()).hexdigest())
+        for relative in module.SOURCE_FILES
+    ))
+    imported = import_module('investment_tracker.quant.phase4.gate3_campaign.validation')
+    foreign = tmp_path / 'validation.py'
+    foreign.write_bytes(Path(imported.__file__).read_bytes())
+    monkeypatch.setattr(imported, '__file__', str(foreign))
+
+    with pytest.raises(ValueError, match='RESULT_SCHEMA_SOURCE_MISMATCH'):
+        module._verify_imported_sources(ROOT, bundle)

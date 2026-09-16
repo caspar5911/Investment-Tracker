@@ -35,6 +35,7 @@ class Provenance(FrozenResultModel):
     gate3_manifest: ArtifactIdentity
     execution_methodology: ArtifactIdentity
     engine_implementation_sha256: str
+    scored_market_panel_sha256: str
     source_revision: str = Field(pattern=r'^[0-9a-f]{40}$')
     initial_cash: Literal[100000.0] = 100000.0
     primary_friction_bps: Literal[3] = 3

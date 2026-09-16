@@ -35,7 +35,6 @@ def case():
     from investment_tracker.quant.phase4.engine.models import TargetInstruction
     deps = load_dependencies(ROOT)
     revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    authority = ResultAuthority(deps, revision)
     binding = deps.bindings[0]
     sessions = deps.sessions
     # Artificial arithmetic path, explicitly unrelated to real ETF prices.
@@ -43,6 +42,9 @@ def case():
     frame = pd.DataFrame({symbol: [100.0 * math.exp(0.0005 * i + 0.01 * math.sin(i + offset)) for i in range(1008)]
                           for offset, symbol in enumerate(symbols)}, index=pd.DatetimeIndex(sessions))
     panel = MarketPanel.from_frames(frame, frame, role='SCORED')
+    deps = replace(deps, scored_panel=panel)
+    authority = ResultAuthority(deps, revision)
+    binding = deps.bindings[0]
 
     def replay(b, bps=3):
         target = TargetInstruction(signal_timestamp=sessions[0], due_session=sessions[1], weights=(('SPY', 0.8),), binding=b)
@@ -78,6 +80,7 @@ def test_complete_typed_result_roundtrip_and_projection(case):
     ('family_definition_sha256', '0'*64), ('rule_set_sha256', '0'*64),
     ('parameter_tuple_sha256', '0'*64), ('candidate_population_sha256', '0'*64),
     ('source_revision', '0'*40), ('engine_implementation_sha256', '0'*64),
+    ('scored_market_panel_sha256', '0'*64),
     ('evaluation_context_sha256', '0'*64),
 ])
 def test_identity_substitution_rejected(case, field, value):
@@ -211,6 +214,26 @@ def test_arbitrary_anonymous_benchmark_cannot_define_excess(case):
                               result.evidence.neighbors, authority.dependencies)
 
 
+def test_benchmark_equity_cannot_be_forged_independently_of_market_prices(case):
+    authority, result = case
+    benchmark = result.evidence.benchmark
+    final = benchmark.states[-1]
+    forged_equity = final.close_equity + 1000.0
+    forged_final = final.model_copy(update={
+        'close_equity': forged_equity,
+        'realized_gross_exposure': (forged_equity - final.cash) / forged_equity,
+    })
+    forged = benchmark.model_copy(update={'states': benchmark.states[:-1] + (forged_final,)})
+    with pytest.raises(ValueError, match='MARKET_VALUATION_INVALID'):
+        api().derive_evidence(
+            result.evidence.replays,
+            forged,
+            result.evidence.cash,
+            result.evidence.neighbors,
+            authority.dependencies,
+        )
+
+
 def test_negative_derived_cash_is_not_clamped_to_zero(case):
     authority, result = case
     replay = result.evidence.replays[0]
@@ -226,7 +249,8 @@ def test_negative_derived_cash_is_not_clamped_to_zero(case):
     forged = replay.model_copy(update={'fills':(fill,), 'states':tuple(states), 'total_turnover':200000.0})
     binding = authority.dependencies.bindings[0]
     with pytest.raises(ValueError, match='NEGATIVE_DERIVED_CASH'):
-        api()._validate_replay(forged,binding=binding,sessions=authority.dependencies.sessions,friction_bps=0)
+        api()._validate_replay(forged,binding=binding,sessions=authority.dependencies.sessions,
+                               market=authority.dependencies.scored_panel,friction_bps=0)
 
 
 def test_fill_must_use_immediately_next_scored_session(case):
@@ -235,7 +259,8 @@ def test_fill_must_use_immediately_next_scored_session(case):
     fill = replay.fills[0].model_copy(update={'signal_timestamp':replay.sessions[0]-pd.Timedelta(days=10)})
     forged = replay.model_copy(update={'fills':(fill,)})
     with pytest.raises(ValueError, match='FILL_NEXT_SESSION_INVALID'):
-        api()._validate_replay(forged,binding=authority.dependencies.bindings[0],sessions=authority.dependencies.sessions,friction_bps=0)
+        api()._validate_replay(forged,binding=authority.dependencies.bindings[0],sessions=authority.dependencies.sessions,
+                               market=authority.dependencies.scored_panel,friction_bps=0)
 
 
 def test_replay_cannot_use_symbol_outside_frozen_universe(case):
@@ -250,7 +275,8 @@ def test_replay_cannot_use_symbol_outside_frozen_universe(case):
         else: states.append(state)
     forged=replay.model_copy(update={'fills':(fill,), 'states':tuple(states)})
     with pytest.raises(ValueError, match='REPLAY_SYMBOL_INVALID'):
-        api()._validate_replay(forged,binding=authority.dependencies.bindings[0],sessions=authority.dependencies.sessions,friction_bps=0)
+        api()._validate_replay(forged,binding=authority.dependencies.bindings[0],sessions=authority.dependencies.sessions,
+                               market=authority.dependencies.scored_panel,friction_bps=0)
 
 
 def test_correct_stored_survivor_projection_roundtrips_and_tamper_rejects(case):

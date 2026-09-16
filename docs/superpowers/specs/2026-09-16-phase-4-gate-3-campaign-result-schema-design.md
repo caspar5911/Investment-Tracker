@@ -112,12 +112,16 @@ sealed binding. Symbols are restricted to the frozen eight. Fills must be at
 the next scored session after their signal, with the sealed friction rate.
 Before metric calculation require total turnover to equal the sum of absolute
 fill notionals, fill notional to agree with units delta times reference open,
-and friction to agree with absolute notional times bps/10000. Reconcile units
-and cash forward from reset using the fills and derive realized exposure from
-close equity and cash. Use the engine's existing numeric-accounting tolerance
-only for binary64 rounding; no tolerance changes a research threshold.
-This validates representation and internal linkage; checking all raw fill
-prices against dataset bars remains the engine/campaign replay responsibility.
+and friction to agree with absolute notional times bps/10000. The authority
+constructs one scored `MarketPanel` from the exact eight immutable Phase 3 bar
+artifacts and the frozen 1008-session VALIDATION partition and binds its digest
+in both result provenance and the result-schema authority manifest. Recompute
+every fill reference open, pre-fill open equity, post-fill cash/units, close
+equity and realized exposure from that panel; caller-supplied candidate or
+benchmark valuations are never authoritative. Use the engine's existing
+numeric-accounting tolerance only for binary64 rounding; no tolerance changes
+a research threshold. Loading and hashing this frozen input panel is not
+candidate execution and calculates no candidate or benchmark performance.
 
 Every component is linked through its canonical content digest and primary
 replay digest. Its candidate and binding identities, when exposed by its

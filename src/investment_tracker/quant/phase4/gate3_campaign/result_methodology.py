@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from hashlib import sha256
+from importlib import import_module
 import json
 import os
 from pathlib import Path
@@ -24,7 +25,7 @@ from investment_tracker.quant.phase4.preregistration.policy import SURVIVOR_POLI
 from .dependencies import EXECUTION_CONTENT, ResultAuthority, load_dependencies
 
 SPEC_PATH = 'docs/superpowers/specs/2026-09-16-phase-4-gate-3-campaign-result-schema-design.md'
-SPEC_CONTENT_SHA256 = 'cd62102571fa348ff734c6b992c92c0eaea8732f6e8dc43223e975f972ba8396'
+SPEC_CONTENT_SHA256 = '4221495a301bb138ec0a1a92de0490ee9ae2e99326c349547113771d5ddb758b'
 SOURCE_FILES = tuple(sorted('src/investment_tracker/quant/phase4/gate3_campaign/' + name for name in (
     '__init__.py','codec.py','dependencies.py','result_artifacts.py','result_methodology.py','result_schema.py','validation.py','cli.py')))
 
@@ -46,6 +47,7 @@ class ResultSchemaManifest(FrozenGate2Model):
     train_identity: DataPartitionIdentity
     validation_identity: DataPartitionIdentity
     engine_implementation_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
+    scored_market_panel_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
     source_revision: str = Field(pattern=r'^[0-9a-f]{40}$')
     source_bundle: SourceBundleIdentity | None
     result_identity_algorithm: Literal['SHA256_CANONICAL_JSON_FULL_TYPED_RESULT'] = 'SHA256_CANONICAL_JSON_FULL_TYPED_RESULT'
@@ -88,6 +90,8 @@ def schema_contract(root: Path) -> dict[str, object]:
         'survivor_ranking_keys':list(SURVIVOR_POLICY.ranking_keys),
         'authoritative_generic_result_dict':False,'campaign_execution_entrypoint':False,
         'decision_grade':False,'execution_series':'QFQ_NORMALIZED','primary_friction_bps':3,
+        'scored_market_panel_sha256':deps.scored_panel.panel_sha256,
+        'replay_valuation_authority':'FROZEN_SCORED_MARKET_PANEL',
         'statuses':['EXECUTED','UNKNOWN','ABSTAIN','SKIPPED_FAMILY_STOP','CAMPAIGN_EXECUTION_FAILED'],
         'friction_cases_bps':[0,3,10,25,50],'fold_ids':['FOLD_2019','FOLD_2020','FOLD_2021','FOLD_2022'],
         'regime_ids':['broad_negative_trend','broad_positive_trend','mixed_cross_asset'],
@@ -145,7 +149,25 @@ def declared_manifest(root: Path, source_revision: str, source_bundle: SourceBun
         gate2_manifest=GATE2_MANIFEST_IDENTITY,gate3_authority_manifest=CORRECTED_GATE3_MANIFEST,execution_methodology=deps.execution,
         survivor_policy=survivor,durability_policy=durability,family_stop_policy_container=budget,candidate_population_sha256=POPULATION_SHA256,
         train_identity=TRAIN_IDENTITY,validation_identity=VALIDATION_IDENTITY,
-        engine_implementation_sha256=deps.engine_sha256,source_revision=source_revision,source_bundle=source_bundle)
+        engine_implementation_sha256=deps.engine_sha256,
+        scored_market_panel_sha256=deps.scored_panel.panel_sha256,
+        source_revision=source_revision,source_bundle=source_bundle)
+
+
+def _verify_imported_sources(root: Path, bundle: SourceBundleIdentity) -> None:
+    entries = {entry.path: entry for entry in bundle.entries}
+    for relative in SOURCE_FILES:
+        dotted = relative.removeprefix('src/').removesuffix('.py').replace('/', '.')
+        if dotted.endswith('.__init__'):
+            dotted = dotted.removesuffix('.__init__')
+        module = import_module(dotted)
+        imported_file = getattr(module, '__file__', None)
+        expected = (root / relative).resolve()
+        if imported_file is None or Path(imported_file).resolve() != expected:
+            raise ValueError('RESULT_SCHEMA_SOURCE_MISMATCH')
+        entry = entries.get(relative)
+        if entry is None or sha256(expected.read_bytes()).hexdigest() != entry.content_sha256:
+            raise ValueError('RESULT_SCHEMA_SOURCE_MISMATCH')
 
 
 def validate_declared_manifest(root: Path, manifest: ResultSchemaManifest, *, require_source: bool=True) -> None:
@@ -156,6 +178,7 @@ def validate_declared_manifest(root: Path, manifest: ResultSchemaManifest, *, re
         if manifest.source_bundle is None or manifest.source_bundle.producing_revision!=manifest.source_revision: raise ValueError('RESULT_SCHEMA_SOURCE_MISMATCH')
         _validate_source_revision(resolve_repository_root(root,code='RESULT_SCHEMA_SOURCE_MISMATCH'),manifest.source_revision)
         if source_bundle_identity(root,manifest.source_revision,SOURCE_FILES)!=manifest.source_bundle: raise ValueError('RESULT_SCHEMA_SOURCE_MISMATCH')
+        _verify_imported_sources(resolve_repository_root(root,code='RESULT_SCHEMA_SOURCE_MISMATCH'), manifest.source_bundle)
     if preflight_gate3(root,CORRECTED_GATE3_MANIFEST.content_sha256).gate3!='READY': raise ValueError('RESULT_SCHEMA_DEPENDENCY_MISMATCH')
     if preflight_execution_methodology(root,EXECUTION_CONTENT).gate3!='GATE3_CAMPAIGN_READY_TO_EXECUTE': raise ValueError('RESULT_SCHEMA_DEPENDENCY_MISMATCH')
 
