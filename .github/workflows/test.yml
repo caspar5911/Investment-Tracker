@@ -29,6 +29,8 @@ jobs:
           tests/quant/test_phase4_gate3_runner_orchestrator.py::test_direct_runner_api_requires_sealed_explicit_manifest
           tests/quant/test_phase4_gate3_runner_orchestrator.py::test_candidate_evaluator_is_not_a_public_ungated_api
           tests/quant/test_phase4_gate3_runner_orchestrator.py::test_public_run_campaign_has_only_repository_and_explicit_manifest_inputs
+          tests/quant/test_phase4_gate3_runner_orchestrator.py::test_generate_targets_calls_sealed_generator_once_per_scored_session
+          tests/quant/test_phase4_gate3_runner_orchestrator.py::test_evaluate_binding_uses_exact_friction_and_neighbor_contract
   test:
     runs-on: ubuntu-latest
     steps:
