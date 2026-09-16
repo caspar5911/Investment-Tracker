@@ -5,7 +5,6 @@ import json
 import sys
 from pathlib import Path
 
-from .dependencies import load_runner_dependencies
 from .methodology import preflight_runner, seal_runner
 from .orchestrator import CampaignExecutionError, run_campaign
 
@@ -42,14 +41,9 @@ def main(argv=None) -> int:
                 args.manifest_content_sha256,
             ).model_dump(mode="json")
         else:
-            ready = preflight_runner(
+            summary = run_campaign(
                 root,
                 args.manifest_content_sha256,
-            )
-            context = load_runner_dependencies(root)
-            summary = run_campaign(
-                context,
-                runner_manifest=ready.manifest,
             )
             output = {
                 "status": summary.status,
