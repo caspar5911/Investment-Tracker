@@ -31,6 +31,7 @@ from investment_tracker.quant.phase4.preregistration.policy import (
 )
 
 from .dependencies import RunnerDependencies
+from .methodology import preflight_runner
 from .models import AttemptRecord, CampaignResultSet, PositionReceipt
 from .state import RunnerStateStore
 
@@ -291,6 +292,12 @@ def run_campaign(
     state_store: RunnerStateStore | None = None,
     result_store: ResultArtifactStore | None = None,
 ) -> CampaignRunSummary:
+    ready = preflight_runner(
+        context.root,
+        runner_manifest.content_sha256,
+    )
+    if ready.manifest != runner_manifest:
+        raise ValueError("RUNNER_MANIFEST_MISMATCH")
     _validate_population(context)
     state = state_store or RunnerStateStore(context.root)
     results = result_store or ResultArtifactStore(context.root)
