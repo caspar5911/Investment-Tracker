@@ -141,3 +141,30 @@ def test_result_set_path_is_content_addressed(tmp_path: Path):
         "results/phase4/gate3/campaign/result_set/sha256/"
         f"{digest}/manifest.json"
     )
+
+
+def test_campaign_result_set_rejects_duplicate_result_artifacts():
+    manifest = identity(
+        "gate3_campaign_runner_manifest",
+        "results/phase4/gate3/campaign_runner/manifest.json",
+        "a" * 64,
+    )
+    repeated = identity(
+        "phase4_gate3_candidate_result",
+        "results/phase4/gate3/campaign/candidate_result/repeated.json",
+        "b" * 64,
+    )
+    artifacts = (repeated,) * 180
+    aggregate = canonical_sha256(
+        {
+            "schema_version": "PHASE4-GATE3-CAMPAIGN-RESULT-SET-IDENTITY-v1",
+            "runner_manifest": manifest.model_dump(mode="json"),
+            "results": [item.model_dump(mode="json") for item in artifacts],
+        }
+    )
+    with pytest.raises(ValueError, match="CAMPAIGN_RESULT_SET_DUPLICATE"):
+        CampaignResultSet(
+            runner_manifest=manifest,
+            result_artifacts=artifacts,
+            aggregate_sha256=aggregate,
+        )
