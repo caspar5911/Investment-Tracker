@@ -285,10 +285,6 @@ def run_campaign(
     context: RunnerDependencies,
     *,
     runner_manifest: ArtifactIdentity,
-    evaluator: Callable[
-        [RunnerDependencies, int],
-        CandidateResult,
-    ] | None = None,
     state_store: RunnerStateStore | None = None,
     result_store: ResultArtifactStore | None = None,
 ) -> CampaignRunSummary:
@@ -299,7 +295,6 @@ def run_campaign(
     if ready.manifest != runner_manifest:
         raise ValueError("RUNNER_MANIFEST_MISMATCH")
     _validate_population(context)
-    effective_evaluator = evaluator or _evaluate_binding
     state = state_store or RunnerStateStore(context.root)
     results = result_store or ResultArtifactStore(context.root)
     windows: dict[str, list[ArtifactIdentity]] = defaultdict(list)
@@ -397,7 +392,7 @@ def run_campaign(
             raise ValueError("RUNNER_ATTEMPT_MISMATCH")
 
         try:
-            result = effective_evaluator(context, position)
+            result = _evaluate_binding(context, position)
             if (
                 result.provenance.population_position
                 != position
