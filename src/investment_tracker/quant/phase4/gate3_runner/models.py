@@ -46,6 +46,7 @@ class PositionReceipt(FrozenRunnerModel):
     population_position: int = Field(ge=1, le=180)
     candidate_id: str = Field(pattern=r"^phase4-[0-9a-f]{64}$")
     trial_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    runner_manifest: ArtifactIdentity
     result_artifact: ArtifactIdentity
     result_status: ResultStatus
 
