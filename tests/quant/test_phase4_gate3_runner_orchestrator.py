@@ -77,10 +77,10 @@ def test_unavailable_oos_streak_stops_only_54_member_families_and_accounts_all_p
         calls.append(position)
         return unavailable(ctx, position)
 
+    monkeypatch.setattr(orchestrator_module, "_evaluate_binding", evaluator)
     summary = run_campaign(
         context,
         runner_manifest=manifest,
-        evaluator=evaluator,
         state_store=RunnerStateStore(tmp_path),
         result_store=ResultArtifactStore(tmp_path),
     )
@@ -95,10 +95,10 @@ def test_unavailable_oos_streak_stops_only_54_member_families_and_accounts_all_p
     def must_not_run(_ctx, _position):
         raise AssertionError("completed receipts must prevent duplicate evaluation")
 
+    monkeypatch.setattr(orchestrator_module, "_evaluate_binding", must_not_run)
     second = run_campaign(
         context,
         runner_manifest=manifest,
-        evaluator=must_not_run,
         state_store=RunnerStateStore(tmp_path),
         result_store=ResultArtifactStore(tmp_path),
     )
@@ -113,11 +113,11 @@ def test_system_evaluation_failure_is_published_and_fails_closed(
     def broken(_ctx, _position):
         raise RuntimeError("synthetic failure")
 
+    monkeypatch.setattr(orchestrator_module, "_evaluate_binding", broken)
     with pytest.raises(CampaignExecutionError, match="CAMPAIGN_EXECUTION_FAILED"):
         run_campaign(
             context,
             runner_manifest=manifest,
-            evaluator=broken,
             state_store=RunnerStateStore(tmp_path),
             result_store=ResultArtifactStore(tmp_path),
         )
@@ -147,18 +147,20 @@ def test_runner_source_has_no_selection_provider_holdout_or_trading_surface():
         assert token not in source
 
 
-def test_direct_runner_api_requires_sealed_explicit_manifest(context, tmp_path):
+def test_direct_runner_api_requires_sealed_explicit_manifest(
+    context, tmp_path, monkeypatch
+):
     calls: list[int] = []
 
     def evaluator(ctx, position):
         calls.append(position)
         return unavailable(ctx, position)
 
+    monkeypatch.setattr(orchestrator_module, "_evaluate_binding", evaluator)
     with pytest.raises(ValueError, match="RUNNER_MANIFEST_MISSING"):
         run_campaign(
             context,
             runner_manifest=manifest_identity(),
-            evaluator=evaluator,
             state_store=RunnerStateStore(tmp_path),
             result_store=ResultArtifactStore(tmp_path),
         )
