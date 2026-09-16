@@ -75,7 +75,7 @@ def _validate_population(context: RunnerDependencies) -> None:
             current = binding.family_id
 
 
-def generate_targets(
+def _generate_targets(
     context: RunnerDependencies,
     binding,
 ) -> tuple[object | None, ...]:
@@ -91,7 +91,7 @@ def generate_targets(
 
 
 def _primary_neighbor_replay(context: RunnerDependencies, binding):
-    targets = generate_targets(context, binding)
+    targets = _generate_targets(context, binding)
     return replay_targets(
         context.campaign.scored_panel,
         targets,
@@ -99,7 +99,7 @@ def _primary_neighbor_replay(context: RunnerDependencies, binding):
     )
 
 
-def evaluate_binding(
+def _evaluate_binding(
     context: RunnerDependencies,
     position: int,
 ) -> CandidateResult:
@@ -288,7 +288,7 @@ def run_campaign(
     evaluator: Callable[
         [RunnerDependencies, int],
         CandidateResult,
-    ] = evaluate_binding,
+    ] | None = None,
     state_store: RunnerStateStore | None = None,
     result_store: ResultArtifactStore | None = None,
 ) -> CampaignRunSummary:
@@ -299,6 +299,7 @@ def run_campaign(
     if ready.manifest != runner_manifest:
         raise ValueError("RUNNER_MANIFEST_MISMATCH")
     _validate_population(context)
+    effective_evaluator = evaluator or _evaluate_binding
     state = state_store or RunnerStateStore(context.root)
     results = result_store or ResultArtifactStore(context.root)
     windows: dict[str, list[ArtifactIdentity]] = defaultdict(list)
@@ -396,7 +397,7 @@ def run_campaign(
             raise ValueError("RUNNER_ATTEMPT_MISMATCH")
 
         try:
-            result = evaluator(context, position)
+            result = effective_evaluator(context, position)
             if (
                 result.provenance.population_position
                 != position
@@ -510,7 +511,5 @@ __all__ = (
     "CampaignExecutionError",
     "CampaignRunSummary",
     "FRICTION_CASES",
-    "evaluate_binding",
-    "generate_targets",
     "run_campaign",
 )
