@@ -168,3 +168,36 @@ def test_campaign_result_set_rejects_duplicate_result_artifacts():
             result_artifacts=artifacts,
             aggregate_sha256=aggregate,
         )
+
+
+def test_campaign_result_set_rejects_non_candidate_artifact_kind():
+    manifest = identity(
+        "gate3_campaign_runner_manifest",
+        "results/phase4/gate3/campaign_runner/manifest.json",
+        "a" * 64,
+    )
+    artifacts = tuple(
+        identity(
+            (
+                "wrong_kind"
+                if position == 1
+                else "phase4_gate3_candidate_result"
+            ),
+            f"results/result-{position:04d}.json",
+            f"{position:064x}"[-64:],
+        )
+        for position in range(1, 181)
+    )
+    aggregate = canonical_sha256(
+        {
+            "schema_version": "PHASE4-GATE3-CAMPAIGN-RESULT-SET-IDENTITY-v1",
+            "runner_manifest": manifest.model_dump(mode="json"),
+            "results": [item.model_dump(mode="json") for item in artifacts],
+        }
+    )
+    with pytest.raises(ValueError, match="CAMPAIGN_RESULT_SET_KIND_INVALID"):
+        CampaignResultSet(
+            runner_manifest=manifest,
+            result_artifacts=artifacts,
+            aggregate_sha256=aggregate,
+        )
