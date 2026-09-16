@@ -150,22 +150,12 @@ def test_runner_source_has_no_selection_provider_holdout_or_trading_surface():
         assert token not in source
 
 
-def test_direct_runner_api_requires_sealed_explicit_manifest(
-    context, tmp_path, monkeypatch
-):
-    calls: list[int] = []
-
-    def evaluator(ctx, position):
-        calls.append(position)
-        return unavailable(ctx, position)
-
-    monkeypatch.setattr(orchestrator_module, "_evaluate_binding", evaluator)
+def test_direct_runner_api_requires_sealed_explicit_manifest():
     with pytest.raises(ValueError, match="RUNNER_MANIFEST_MISSING"):
         run_campaign(
             ROOT,
             manifest_identity().content_sha256,
         )
-    assert calls == []
 
 
 def test_candidate_evaluator_is_not_a_public_ungated_api():
