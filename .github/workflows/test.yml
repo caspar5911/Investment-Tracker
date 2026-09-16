@@ -8,6 +8,24 @@ on:
   pull_request:
 
 jobs:
+  runner-static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e '.[dev,quant]'
+      - run: python -m compileall -q src/investment_tracker/quant/phase4/gate3_runner
+      - run: >-
+          python -m pytest -q
+          tests/quant/test_phase4_gate3_runner_state.py
+          tests/quant/test_phase4_gate3_runner_methodology.py::test_runner_spec_identity_is_exact_repository_relative_content
+          tests/quant/test_phase4_gate3_runner_methodology.py::test_explicit_hash_preflight_rejects_missing_runner_manifest
+          tests/quant/test_phase4_gate3_runner_orchestrator.py::test_runner_source_has_no_selection_provider_holdout_or_trading_surface
   test:
     runs-on: ubuntu-latest
     steps:
