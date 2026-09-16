@@ -249,3 +249,125 @@ def test_interrupted_attempt_resumes_same_position_without_double_consumption(
     assert summary.accounted_positions == 180
     assert calls[0] == 1
     assert calls.count(1) == 1
+
+
+def test_generate_targets_calls_sealed_generator_once_per_scored_session(monkeypatch):
+    calls: list[tuple[object, object, object, int]] = []
+    binding = SimpleNamespace(candidate_id="candidate")
+    scored = SimpleNamespace(sessions=("s1", "s2", "s3", "s4"))
+    market_input = SimpleNamespace(scored=scored)
+    context = SimpleNamespace(
+        campaign=SimpleNamespace(gate2="gate2"),
+        market_input=market_input,
+    )
+
+    def fake_generate(authority, observed_binding, observed_market, offset):
+        calls.append((authority, observed_binding, observed_market, offset))
+        return f"target-{offset}"
+
+    monkeypatch.setattr(orchestrator_module, "generate_target", fake_generate)
+    targets = orchestrator_module._generate_targets(context, binding)
+
+    assert targets == ("target-0", "target-1", "target-2", "target-3")
+    assert calls == [
+        ("gate2", binding, market_input, offset)
+        for offset in range(4)
+    ]
+
+
+def test_evaluate_binding_uses_exact_friction_and_neighbor_contract(monkeypatch):
+    binding = SimpleNamespace(budget_position=1, candidate_id="candidate")
+    neighbor = SimpleNamespace(budget_position=2, candidate_id="neighbor")
+    campaign = SimpleNamespace(
+        bindings=(binding,),
+        scored_panel="scored-panel",
+        neighbors=lambda observed: (neighbor,) if observed is binding else (),
+    )
+    context = SimpleNamespace(
+        campaign=campaign,
+        result_authority="result-authority",
+    )
+    targets = ("candidate-targets",)
+    replay_calls: list[tuple[object, object, int]] = []
+
+    monkeypatch.setattr(
+        orchestrator_module,
+        "_generate_targets",
+        lambda observed_context, observed_binding: (
+            targets if observed_binding is binding else ("neighbor-targets",)
+        ),
+    )
+
+    def fake_replay(panel, observed_targets, *, friction_bps):
+        replay_calls.append((panel, observed_targets, friction_bps))
+        return SimpleNamespace(
+            friction_bps=friction_bps,
+            candidate_id=(
+                "candidate"
+                if observed_targets is targets
+                else "neighbor"
+            ),
+        )
+
+    monkeypatch.setattr(orchestrator_module, "replay_targets", fake_replay)
+    monkeypatch.setattr(
+        orchestrator_module,
+        "equal_weight_buy_and_hold",
+        lambda panel, *, friction_bps: ("benchmark", panel, friction_bps),
+    )
+    monkeypatch.setattr(
+        orchestrator_module,
+        "cash_benchmark",
+        lambda panel: ("cash", panel),
+    )
+    monkeypatch.setattr(
+        orchestrator_module,
+        "NeighborObservation",
+        lambda **kwargs: SimpleNamespace(**kwargs),
+    )
+    derived: dict[str, object] = {}
+
+    def fake_derive(replays, benchmark, cash, neighbors, deps):
+        derived.update(
+            replays=tuple(replays),
+            benchmark=benchmark,
+            cash=cash,
+            neighbors=tuple(neighbors),
+            deps=deps,
+        )
+        return "derived-evidence"
+
+    monkeypatch.setattr(orchestrator_module, "derive_evidence", fake_derive)
+    monkeypatch.setattr(
+        orchestrator_module,
+        "make_provenance",
+        lambda authority, position: ("provenance", authority, position),
+    )
+    monkeypatch.setattr(
+        orchestrator_module,
+        "CandidateResult",
+        lambda **kwargs: SimpleNamespace(**kwargs),
+    )
+    monkeypatch.setattr(
+        orchestrator_module,
+        "validate_result",
+        lambda result, authority: ("validated", result, authority),
+    )
+
+    result = orchestrator_module._evaluate_binding(context, 1)
+
+    candidate_calls = [
+        call for call in replay_calls if call[1] is targets
+    ]
+    assert [call[2] for call in candidate_calls] == [0, 3, 10, 25, 50]
+    neighbor_calls = [
+        call for call in replay_calls if call[1] == ("neighbor-targets",)
+    ]
+    assert [call[2] for call in neighbor_calls] == [3]
+    assert derived["benchmark"] == ("benchmark", "scored-panel", 3)
+    assert derived["cash"] == ("cash", "scored-panel")
+    assert len(derived["neighbors"]) == 1
+    assert derived["neighbors"][0].binding is neighbor
+    assert derived["neighbors"][0].status == "AVAILABLE"
+    assert result[0] == "validated"
+    assert result[2] == "result-authority"
