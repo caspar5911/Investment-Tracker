@@ -77,12 +77,14 @@ def test_unavailable_oos_streak_stops_only_54_member_families_and_accounts_all_p
         calls.append(position)
         return unavailable(ctx, position)
 
+    state = RunnerStateStore(tmp_path)
+    results = ResultArtifactStore(tmp_path)
     monkeypatch.setattr(orchestrator_module, "_evaluate_binding", evaluator)
+    monkeypatch.setattr(orchestrator_module, "RunnerStateStore", lambda _root: state)
+    monkeypatch.setattr(orchestrator_module, "ResultArtifactStore", lambda _root: results)
     summary = run_campaign(
         context,
         runner_manifest=manifest,
-        state_store=RunnerStateStore(tmp_path),
-        result_store=ResultArtifactStore(tmp_path),
     )
     family_counts = Counter(binding.family_id for binding in context.campaign.bindings)
     expected_skips = sum(max(0, count - 50) for count in family_counts.values())
@@ -99,8 +101,6 @@ def test_unavailable_oos_streak_stops_only_54_member_families_and_accounts_all_p
     second = run_campaign(
         context,
         runner_manifest=manifest,
-        state_store=RunnerStateStore(tmp_path),
-        result_store=ResultArtifactStore(tmp_path),
     )
     assert second.result_set == summary.result_set
 
@@ -113,15 +113,17 @@ def test_system_evaluation_failure_is_published_and_fails_closed(
     def broken(_ctx, _position):
         raise RuntimeError("synthetic failure")
 
+    state = RunnerStateStore(tmp_path)
+    results = ResultArtifactStore(tmp_path)
     monkeypatch.setattr(orchestrator_module, "_evaluate_binding", broken)
+    monkeypatch.setattr(orchestrator_module, "RunnerStateStore", lambda _root: state)
+    monkeypatch.setattr(orchestrator_module, "ResultArtifactStore", lambda _root: results)
     with pytest.raises(CampaignExecutionError, match="CAMPAIGN_EXECUTION_FAILED"):
         run_campaign(
             context,
             runner_manifest=manifest,
-            state_store=RunnerStateStore(tmp_path),
-            result_store=ResultArtifactStore(tmp_path),
         )
-    receipt = RunnerStateStore(tmp_path).read_receipt(1)[0]
+    receipt = state.read_receipt(1)[0]
     assert receipt.result_status == "CAMPAIGN_EXECUTION_FAILED"
 
 
@@ -161,8 +163,6 @@ def test_direct_runner_api_requires_sealed_explicit_manifest(
         run_campaign(
             context,
             runner_manifest=manifest_identity(),
-            state_store=RunnerStateStore(tmp_path),
-            result_store=ResultArtifactStore(tmp_path),
         )
     assert calls == []
 
