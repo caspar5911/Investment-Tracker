@@ -25,7 +25,7 @@ from investment_tracker.quant.phase4.preregistration.policy import SURVIVOR_POLI
 from .dependencies import EXECUTION_CONTENT, ResultAuthority, load_dependencies
 
 SPEC_PATH = 'docs/superpowers/specs/2026-09-16-phase-4-gate-3-campaign-result-schema-design.md'
-SPEC_CONTENT_SHA256 = '4221495a301bb138ec0a1a92de0490ee9ae2e99326c349547113771d5ddb758b'
+SPEC_CONTENT_SHA256 = '4b93166ff0a5632da2463997c48357c8078c38ad03b734b0a918d896670e64f1'
 SOURCE_FILES = tuple(sorted('src/investment_tracker/quant/phase4/gate3_campaign/' + name for name in (
     '__init__.py','codec.py','dependencies.py','result_artifacts.py','result_methodology.py','result_schema.py','validation.py','cli.py')))
 

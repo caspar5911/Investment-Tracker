@@ -234,6 +234,21 @@ def test_benchmark_equity_cannot_be_forged_independently_of_market_prices(case):
         )
 
 
+def test_equal_weight_benchmark_must_invest_all_cash_net_of_friction(case):
+    authority, result = case
+    benchmark = result.evidence.benchmark
+    fills = tuple(fill.model_copy(update={
+        'units_delta': fill.units_delta / 2.0,
+        'fill_notional': fill.fill_notional / 2.0,
+        'friction': fill.friction / 2.0,
+    }) for fill in benchmark.fills)
+    partial = benchmark.model_copy(update={'fills': fills})
+    with pytest.raises(ValueError, match='BENCHMARK_METHOD_INVALID'):
+        api()._validate_equal_weight_benchmark(
+            partial, benchmark.sessions, authority.dependencies.scored_panel
+        )
+
+
 def test_negative_derived_cash_is_not_clamped_to_zero(case):
     authority, result = case
     replay = result.evidence.replays[0]

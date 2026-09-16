@@ -108,7 +108,10 @@ initial cash 100000, reset cash/zero positions at the first session, and exactly
 1007 actual close-to-close returns. PRIMARY and equal-weight benchmark use
 3 bps; cash uses the sealed cash benchmark's 0 bps with no fills. Benchmark
 replays carry no candidate binding; every candidate state/fill has the exact
-sealed binding. Symbols are restricted to the frozen eight. Fills must be at
+sealed binding. The equal-weight benchmark is byte-for-byte reproducible from
+the frozen scored panel: it invests all initial cash net of sealed friction at
+its one next-session-open allocation; equal but partial notionals are invalid.
+Symbols are restricted to the frozen eight. Fills must be at
 the next scored session after their signal, with the sealed friction rate.
 Before metric calculation require total turnover to equal the sum of absolute
 fill notionals, fill notional to agree with units delta times reference open,

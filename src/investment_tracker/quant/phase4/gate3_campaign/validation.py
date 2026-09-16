@@ -9,6 +9,7 @@ from statistics import median
 import pandas as pd
 
 from investment_tracker.quant.phase4.engine.durability import calculate_durability, expected_session_identity
+from investment_tracker.quant.phase4.engine.benchmarks import equal_weight_buy_and_hold
 from investment_tracker.quant.phase4.engine.metrics import calculate_metrics
 from investment_tracker.quant.phase4.engine.models import (
     ExpectedSessionAuthority, FoldAuthority, FrictionCaseEvidence, FrictionEvidence,
@@ -134,7 +135,7 @@ def _validate_replay(replay: PortfolioReplay, *, binding, sessions, market, fric
         raise ValueError('UNACCOUNTED_FILL')
 
 
-def _validate_equal_weight_benchmark(replay: PortfolioReplay, sessions: tuple[pd.Timestamp, ...]) -> None:
+def _validate_equal_weight_benchmark(replay: PortfolioReplay, sessions: tuple[pd.Timestamp, ...], market) -> None:
     expected_symbols = tuple(sorted(SYMBOLS))
     if len(replay.fills) != len(expected_symbols):
         raise ValueError('BENCHMARK_METHOD_INVALID')
@@ -149,6 +150,8 @@ def _validate_equal_weight_benchmark(replay: PortfolioReplay, sessions: tuple[pd
     if first.cash != 100000.0 or first.units or first.realized_gross_exposure != 0.0:
         raise ValueError('BENCHMARK_METHOD_INVALID')
     if any(not math.isclose(state.target_gross_exposure, 1.0, rel_tol=0.0, abs_tol=1e-12) for state in replay.states):
+        raise ValueError('BENCHMARK_METHOD_INVALID')
+    if not _same(replay, equal_weight_buy_and_hold(market, friction_bps=3)):
         raise ValueError('BENCHMARK_METHOD_INVALID')
 
 
@@ -202,7 +205,7 @@ def derive_evidence(replays, benchmark, cash, neighbors, deps: Dependencies) -> 
     for replay in replays:
         _validate_replay(replay, binding=binding, sessions=deps.sessions, market=deps.scored_panel, friction_bps=replay.friction_bps)
     _validate_replay(benchmark, binding=None, sessions=deps.sessions, market=deps.scored_panel, friction_bps=3, benchmark=True)
-    _validate_equal_weight_benchmark(benchmark, deps.sessions)
+    _validate_equal_weight_benchmark(benchmark, deps.sessions, deps.scored_panel)
     _validate_replay(cash, binding=None, sessions=deps.sessions, market=deps.scored_panel, friction_bps=0, benchmark=True)
     if cash.fills or cash.total_turnover != 0 or any(state.cash != 100000.0 or state.close_equity != 100000.0 for state in cash.states):
         raise ValueError('CASH_BENCHMARK_INVALID')
