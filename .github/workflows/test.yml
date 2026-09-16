@@ -26,6 +26,9 @@ jobs:
           tests/quant/test_phase4_gate3_runner_methodology.py::test_runner_spec_identity_is_exact_repository_relative_content
           tests/quant/test_phase4_gate3_runner_methodology.py::test_explicit_hash_preflight_rejects_missing_runner_manifest
           tests/quant/test_phase4_gate3_runner_orchestrator.py::test_runner_source_has_no_selection_provider_holdout_or_trading_surface
+          tests/quant/test_phase4_gate3_runner_orchestrator.py::test_direct_runner_api_requires_sealed_explicit_manifest
+          tests/quant/test_phase4_gate3_runner_orchestrator.py::test_candidate_evaluator_is_not_a_public_ungated_api
+          tests/quant/test_phase4_gate3_runner_orchestrator.py::test_public_run_campaign_has_only_repository_and_explicit_manifest_inputs
   test:
     runs-on: ubuntu-latest
     steps:
