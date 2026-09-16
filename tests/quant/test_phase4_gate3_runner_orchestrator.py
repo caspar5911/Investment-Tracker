@@ -12,6 +12,7 @@ from investment_tracker.quant.phase4.gate3_runner.dependencies import load_runne
 import investment_tracker.quant.phase4.gate3_runner.orchestrator as orchestrator_module
 from investment_tracker.quant.phase4.gate3_runner.orchestrator import (
     CampaignExecutionError,
+    _run_campaign_verified,
     run_campaign,
 )
 from investment_tracker.quant.phase4.gate3_runner.state import RunnerStateStore
@@ -82,7 +83,7 @@ def test_unavailable_oos_streak_stops_only_54_member_families_and_accounts_all_p
     monkeypatch.setattr(orchestrator_module, "_evaluate_binding", evaluator)
     monkeypatch.setattr(orchestrator_module, "RunnerStateStore", lambda _root: state)
     monkeypatch.setattr(orchestrator_module, "ResultArtifactStore", lambda _root: results)
-    summary = run_campaign(
+    summary = _run_campaign_verified(
         context,
         runner_manifest=manifest,
     )
@@ -98,7 +99,7 @@ def test_unavailable_oos_streak_stops_only_54_member_families_and_accounts_all_p
         raise AssertionError("completed receipts must prevent duplicate evaluation")
 
     monkeypatch.setattr(orchestrator_module, "_evaluate_binding", must_not_run)
-    second = run_campaign(
+    second = _run_campaign_verified(
         context,
         runner_manifest=manifest,
     )
@@ -119,7 +120,7 @@ def test_system_evaluation_failure_is_published_and_fails_closed(
     monkeypatch.setattr(orchestrator_module, "RunnerStateStore", lambda _root: state)
     monkeypatch.setattr(orchestrator_module, "ResultArtifactStore", lambda _root: results)
     with pytest.raises(CampaignExecutionError, match="CAMPAIGN_EXECUTION_FAILED"):
-        run_campaign(
+        _run_campaign_verified(
             context,
             runner_manifest=manifest,
         )
@@ -161,8 +162,8 @@ def test_direct_runner_api_requires_sealed_explicit_manifest(
     monkeypatch.setattr(orchestrator_module, "_evaluate_binding", evaluator)
     with pytest.raises(ValueError, match="RUNNER_MANIFEST_MISSING"):
         run_campaign(
-            context,
-            runner_manifest=manifest_identity(),
+            ROOT,
+            manifest_identity().content_sha256,
         )
     assert calls == []
 
