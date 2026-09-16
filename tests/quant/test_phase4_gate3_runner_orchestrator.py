@@ -131,10 +131,14 @@ def test_system_evaluation_failure_is_published_and_fails_closed(
 
 
 def test_runner_source_has_no_selection_provider_holdout_or_trading_surface():
-    import inspect
-    import investment_tracker.quant.phase4.gate3_runner.orchestrator as module
-
-    source = inspect.getsource(module)
+    package = (
+        ROOT
+        / "src"
+        / "investment_tracker"
+        / "quant"
+        / "phase4"
+        / "gate3_runner"
+    )
     forbidden = (
         "select_survivor",
         "moomoo",
@@ -147,9 +151,14 @@ def test_runner_source_has_no_selection_provider_holdout_or_trading_surface():
         "NLR",
         "URNM",
         "GEV",
+        "requests.",
+        "httpx",
+        "urllib.request",
     )
-    for token in forbidden:
-        assert token not in source
+    for path in package.glob("*.py"):
+        source = path.read_text(encoding="utf-8")
+        for token in forbidden:
+            assert token not in source, f"{token} leaked into {path.name}"
 
 
 def test_direct_runner_api_requires_sealed_explicit_manifest():
