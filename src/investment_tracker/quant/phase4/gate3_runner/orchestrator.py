@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+from pathlib import Path
 
 from investment_tracker.quant.phase4.engine.benchmarks import (
     cash_benchmark,
@@ -29,7 +30,7 @@ from investment_tracker.quant.phase4.preregistration.policy import (
     update_oos_failure_streak,
 )
 
-from .dependencies import RunnerDependencies
+from .dependencies import RunnerDependencies, load_runner_dependencies
 from .methodology import preflight_runner
 from .models import AttemptRecord, CampaignResultSet, PositionReceipt
 from .state import RunnerStateStore
@@ -280,17 +281,11 @@ def _observe(
     return should_stop
 
 
-def run_campaign(
+def _run_campaign_verified(
     context: RunnerDependencies,
     *,
     runner_manifest: ArtifactIdentity,
 ) -> CampaignRunSummary:
-    ready = preflight_runner(
-        context.root,
-        runner_manifest.content_sha256,
-    )
-    if ready.manifest != runner_manifest:
-        raise ValueError("RUNNER_MANIFEST_MISMATCH")
     _validate_population(context)
     state = RunnerStateStore(context.root)
     results = ResultArtifactStore(context.root)
@@ -496,6 +491,22 @@ def run_campaign(
             "SKIPPED_FAMILY_STOP"
         ],
         result_set=result_set_identity,
+    )
+
+
+def run_campaign(
+    repository_root: Path,
+    runner_manifest_content_sha256: str,
+) -> CampaignRunSummary:
+    root = Path(repository_root)
+    ready = preflight_runner(
+        root,
+        runner_manifest_content_sha256,
+    )
+    context = load_runner_dependencies(root)
+    return _run_campaign_verified(
+        context,
+        runner_manifest=ready.manifest,
     )
 
 
