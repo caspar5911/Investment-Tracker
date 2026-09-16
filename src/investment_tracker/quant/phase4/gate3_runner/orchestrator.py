@@ -198,6 +198,7 @@ def _attempt_record(
 
 def _receipt_record(
     binding,
+    runner_manifest: ArtifactIdentity,
     result_identity: ArtifactIdentity,
     result: CandidateResult,
 ) -> PositionReceipt:
@@ -205,6 +206,7 @@ def _receipt_record(
         population_position=binding.budget_position,
         candidate_id=binding.candidate_id,
         trial_id=binding.trial_id,
+        runner_manifest=runner_manifest,
         result_artifact=result_identity,
         result_status=result.status,
     )
@@ -225,6 +227,7 @@ def _load_existing(
         receipt.candidate_id != binding.candidate_id
         or receipt.trial_id != binding.trial_id
         or receipt.population_position != binding.budget_position
+        or receipt.runner_manifest != runner_manifest
     ):
         raise ValueError("RUNNER_RECEIPT_BINDING_MISMATCH")
     result = results.read_result(
@@ -366,6 +369,7 @@ def run_campaign(
             state.write_receipt(
                 _receipt_record(
                     binding,
+                    runner_manifest,
                     result_identity,
                     skipped,
                 )
@@ -415,6 +419,7 @@ def run_campaign(
                 state.write_receipt(
                     _receipt_record(
                         binding,
+                        runner_manifest,
                         failure_identity,
                         failure,
                     )
@@ -432,6 +437,7 @@ def run_campaign(
         state.write_receipt(
             _receipt_record(
                 binding,
+                runner_manifest,
                 result_identity,
                 result,
             )
