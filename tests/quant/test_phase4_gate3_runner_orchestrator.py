@@ -174,8 +174,10 @@ def test_candidate_evaluator_is_not_a_public_ungated_api():
     assert not hasattr(module, "generate_targets")
 
 
-def test_public_run_campaign_has_no_dependency_injection_surface():
+def test_public_run_campaign_has_only_repository_and_explicit_manifest_inputs():
     import inspect
 
-    parameters = inspect.signature(run_campaign).parameters
-    assert not {"evaluator", "state_store", "result_store"} & set(parameters)
+    assert set(inspect.signature(run_campaign).parameters) == {
+        "repository_root",
+        "runner_manifest_content_sha256",
+    }
