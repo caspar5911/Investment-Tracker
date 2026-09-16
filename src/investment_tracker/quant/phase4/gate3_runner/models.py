@@ -70,6 +70,11 @@ class CampaignResultSet(FrozenRunnerModel):
     def validate_aggregate(self) -> "CampaignResultSet":
         if len({item.content_sha256 for item in self.result_artifacts}) != 180:
             raise ValueError("CAMPAIGN_RESULT_SET_DUPLICATE")
+        if any(
+            item.kind != "phase4_gate3_candidate_result"
+            for item in self.result_artifacts
+        ):
+            raise ValueError("CAMPAIGN_RESULT_SET_KIND_INVALID")
         expected = canonical_sha256(
             {
                 "schema_version": "PHASE4-GATE3-CAMPAIGN-RESULT-SET-IDENTITY-v1",
