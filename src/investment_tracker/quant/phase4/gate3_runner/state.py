@@ -209,6 +209,7 @@ class RunnerStateStore:
                 attempted.population_position != record.population_position
                 or attempted.candidate_id != record.candidate_id
                 or attempted.trial_id != record.trial_id
+                or attempted.runner_manifest != record.runner_manifest
             ):
                 raise ValueError("RUNNER_RECEIPT_ATTEMPT_MISMATCH")
         path = self._position_path("receipt", record.population_position)
@@ -243,6 +244,8 @@ class RunnerStateStore:
                 raise ValueError("RUNNER_RECEIPT_POSITION_MISMATCH")
             if receipt.result_status == "CAMPAIGN_EXECUTION_FAILED":
                 raise ValueError("RUNNER_CAMPAIGN_FAILED")
+            if receipt.runner_manifest != result_set.runner_manifest:
+                raise ValueError("RUNNER_RESULT_SET_RECEIPT_MISMATCH")
             if receipt.result_status == "SKIPPED_FAMILY_STOP":
                 if self.read_attempt(position) is not None:
                     raise ValueError("RUNNER_SKIPPED_ATTEMPT_INVALID")
@@ -253,6 +256,7 @@ class RunnerStateStore:
                 attempted, _ = attempt
                 if (
                     attempted.runner_manifest != result_set.runner_manifest
+                    or receipt.runner_manifest != result_set.runner_manifest
                     or attempted.candidate_id != receipt.candidate_id
                     or attempted.trial_id != receipt.trial_id
                 ):
