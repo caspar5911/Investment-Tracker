@@ -112,7 +112,7 @@ def _evaluate_binding(
     binding = context.campaign.bindings[position - 1]
     if binding.budget_position != position:
         raise ValueError("RUNNER_POSITION_BINDING_MISMATCH")
-    targets = generate_targets(context, binding)
+    targets = _generate_targets(context, binding)
     replays = tuple(
         replay_targets(
             context.campaign.scored_panel,
