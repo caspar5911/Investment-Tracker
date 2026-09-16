@@ -170,3 +170,9 @@ def test_candidate_evaluator_is_not_a_public_ungated_api():
 
     assert not hasattr(module, "evaluate_binding")
     assert not hasattr(module, "generate_targets")
+
+
+def test_public_run_campaign_does_not_accept_evaluator_injection():
+    import inspect
+
+    assert "evaluator" not in inspect.signature(run_campaign).parameters
