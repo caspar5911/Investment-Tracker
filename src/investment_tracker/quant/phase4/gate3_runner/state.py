@@ -73,11 +73,25 @@ class RunnerStateStore:
         except Gate3AuthorityError as exc:
             raise ValueError("ARTIFACT_PATH_INVALID") from exc
 
-    def _result_set_path(self) -> Path:
+    def _result_set_path(self, content: str) -> Path:
+        if (
+            len(content) != 64
+            or any(char not in "0123456789abcdef" for char in content)
+        ):
+            raise ValueError("ARTIFACT_IDENTITY_INVALID")
         try:
             return contained_path(
                 self.root,
-                ("results", "phase4", "gate3", "campaign", "result_set.json"),
+                (
+                    "results",
+                    "phase4",
+                    "gate3",
+                    "campaign",
+                    "result_set",
+                    "sha256",
+                    content,
+                    "manifest.json",
+                ),
                 code="ARTIFACT_PATH_INVALID",
             )
         except Gate3AuthorityError as exc:
@@ -112,8 +126,12 @@ class RunnerStateStore:
                 raise ValueError("IMMUTABLE_ARTIFACT_COLLISION")
             return
         path.parent.mkdir(parents=True, exist_ok=True)
-        if path.name == "result_set.json":
-            checked = self._result_set_path()
+        if (
+            path.name == "manifest.json"
+            and path.parent.parent.name == "sha256"
+            and path.parent.parent.parent.name == "result_set"
+        ):
+            checked = self._result_set_path(path.parent.name)
         else:
             parent_kind = path.parent.name
             if parent_kind not in {"attempt", "receipt"}:
@@ -264,8 +282,8 @@ class RunnerStateStore:
             observed.append(receipt.result_artifact)
         if tuple(observed) != result_set.result_artifacts:
             raise ValueError("RUNNER_RESULT_SET_RECEIPT_MISMATCH")
-        path = self._result_set_path()
         payload = self._payload(result_set)
+        path = self._result_set_path(sha256(payload).hexdigest())
         self._publish(path, payload)
         return self._identity(
             "phase4_gate3_campaign_result_set",
@@ -275,13 +293,38 @@ class RunnerStateStore:
 
     def read_result_set(
         self,
-    ) -> tuple[CampaignResultSet, ArtifactIdentity] | None:
-        path = self._result_set_path()
-        return self._read_optional(
+        identity: ArtifactIdentity,
+    ) -> tuple[CampaignResultSet, ArtifactIdentity]:
+        if not isinstance(identity, ArtifactIdentity):
+            raise ValueError("ARTIFACT_IDENTITY_INVALID")
+        path = self._result_set_path(identity.content_sha256)
+        expected = self._identity(
+            "phase4_gate3_campaign_result_set",
+            path,
+            path.read_bytes() if path.is_file() and not path.is_symlink() else b"",
+        )
+        if (
+            identity.kind != "phase4_gate3_campaign_result_set"
+            or identity.path != normalize_repository_path(self.root, path)
+            or identity.sha256
+            != artifact_envelope_identity(
+                content_sha256=identity.content_sha256,
+                kind="phase4_gate3_campaign_result_set",
+                path=normalize_repository_path(self.root, path),
+            )
+        ):
+            raise ValueError("ARTIFACT_IDENTITY_INVALID")
+        found = self._read_optional(
             path,
             CampaignResultSet,
             "phase4_gate3_campaign_result_set",
         )
+        if found is None:
+            raise ValueError("ARTIFACT_BYTES_INVALID")
+        result_set, observed = found
+        if observed != identity:
+            raise ValueError("ARTIFACT_IDENTITY_INVALID")
+        return result_set, observed
 
 
 __all__ = ("RunnerStateStore",)
