@@ -124,3 +124,21 @@ def test_runner_source_has_no_selection_provider_holdout_or_trading_surface():
     )
     for token in forbidden:
         assert token not in source
+
+
+def test_direct_runner_api_requires_sealed_explicit_manifest(context, tmp_path):
+    calls: list[int] = []
+
+    def evaluator(ctx, position):
+        calls.append(position)
+        return unavailable(ctx, position)
+
+    with pytest.raises(ValueError, match="RUNNER_MANIFEST_MISSING"):
+        run_campaign(
+            context,
+            runner_manifest=manifest_identity(),
+            evaluator=evaluator,
+            state_store=RunnerStateStore(tmp_path),
+            result_store=ResultArtifactStore(tmp_path),
+        )
+    assert calls == []
