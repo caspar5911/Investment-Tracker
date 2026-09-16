@@ -102,3 +102,25 @@ def test_system_evaluation_failure_is_published_and_fails_closed(context, tmp_pa
         )
     receipt = RunnerStateStore(tmp_path).read_receipt(1)[0]
     assert receipt.result_status == "CAMPAIGN_EXECUTION_FAILED"
+
+
+def test_runner_source_has_no_selection_provider_holdout_or_trading_surface():
+    import inspect
+    import investment_tracker.quant.phase4.gate3_runner.orchestrator as module
+
+    source = inspect.getsource(module)
+    forbidden = (
+        "select_survivor",
+        "moomoo",
+        "OpenTradeContext",
+        "unlock_trade",
+        "place_order",
+        "FINAL_HOLDOUT",
+        "HACK",
+        "SOXX",
+        "NLR",
+        "URNM",
+        "GEV",
+    )
+    for token in forbidden:
+        assert token not in source
