@@ -105,7 +105,8 @@ EXECUTED embeds existing `PortfolioReplay` objects for the candidate's five
 friction cases, and the primary equal-weight buy-and-hold and cash benchmarks.
 They have the exact 1008 scored session labels from the frozen fold authority,
 initial cash 100000, reset cash/zero positions at the first session, and exactly
-1007 actual close-to-close returns. PRIMARY is the 3 bps replay. Benchmark
+1007 actual close-to-close returns. PRIMARY and equal-weight benchmark use
+3 bps; cash uses the sealed cash benchmark's 0 bps with no fills. Benchmark
 replays carry no candidate binding; every candidate state/fill has the exact
 sealed binding. Symbols are restricted to the frozen eight. Fills must be at
 the next scored session after their signal, with the sealed friction rate.
