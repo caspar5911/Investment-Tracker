@@ -39,8 +39,9 @@ def case():
     binding = deps.bindings[0]
     sessions = deps.sessions
     # Artificial arithmetic path, explicitly unrelated to real ETF prices.
-    prices = [100.0 * math.exp(0.0005 * i + 0.01 * math.sin(i)) for i in range(1008)]
-    frame = pd.DataFrame({'SPY': prices}, index=pd.DatetimeIndex(sessions))
+    symbols = tuple(sorted(('SPY','QQQ','IWM','TLT','IEF','GLD','VNQ','XLP')))
+    frame = pd.DataFrame({symbol: [100.0 * math.exp(0.0005 * i + 0.01 * math.sin(i + offset)) for i in range(1008)]
+                          for offset, symbol in enumerate(symbols)}, index=pd.DatetimeIndex(sessions))
     panel = MarketPanel.from_frames(frame, frame, role='SCORED')
 
     def replay(b, bps=3):
@@ -200,3 +201,81 @@ def test_baseline_identity_cannot_validate_as_candidate(case):
     baseline_id = authority.dependencies.gate2.baselines.baselines[0].baseline_id
     with pytest.raises(ValueError):
         api().validate_result(result.model_copy(update={'provenance': result.provenance.model_copy(update={'candidate_id': baseline_id})}), authority)
+
+
+def test_arbitrary_anonymous_benchmark_cannot_define_excess(case):
+    authority, result = case
+    arbitrary = result.evidence.cash.model_copy(update={'friction_bps': 3})
+    with pytest.raises(ValueError, match='BENCHMARK_METHOD_INVALID'):
+        api().derive_evidence(result.evidence.replays, arbitrary, result.evidence.cash,
+                              result.evidence.neighbors, authority.dependencies)
+
+
+def test_negative_derived_cash_is_not_clamped_to_zero(case):
+    authority, result = case
+    replay = result.evidence.replays[0]
+    original = replay.fills[0]
+    units = 200000.0 / original.reference_open
+    fill = original.model_copy(update={'units_delta':units,'fill_notional':200000.0,'friction':0.0})
+    states = []
+    for state in replay.states:
+        if state.session >= fill.fill_timestamp:
+            state = state.model_copy(update={'cash':0.0,'units':((fill.symbol,units),),
+                                             'realized_gross_exposure':1.0})
+        states.append(state)
+    forged = replay.model_copy(update={'fills':(fill,), 'states':tuple(states), 'total_turnover':200000.0})
+    binding = authority.dependencies.bindings[0]
+    with pytest.raises(ValueError, match='NEGATIVE_DERIVED_CASH'):
+        api()._validate_replay(forged,binding=binding,sessions=authority.dependencies.sessions,friction_bps=0)
+
+
+def test_fill_must_use_immediately_next_scored_session(case):
+    authority, result = case
+    replay = result.evidence.replays[0]
+    fill = replay.fills[0].model_copy(update={'signal_timestamp':replay.sessions[0]-pd.Timedelta(days=10)})
+    forged = replay.model_copy(update={'fills':(fill,)})
+    with pytest.raises(ValueError, match='FILL_NEXT_SESSION_INVALID'):
+        api()._validate_replay(forged,binding=authority.dependencies.bindings[0],sessions=authority.dependencies.sessions,friction_bps=0)
+
+
+def test_replay_cannot_use_symbol_outside_frozen_universe(case):
+    authority, result = case
+    replay = result.evidence.replays[0]
+    original = replay.fills[0]
+    fill = original.model_copy(update={'symbol':'FORBIDDEN'})
+    states=[]
+    for state in replay.states:
+        if state.session >= fill.fill_timestamp:
+            states.append(state.model_copy(update={'units':(('FORBIDDEN',state.units[0][1]),)}))
+        else: states.append(state)
+    forged=replay.model_copy(update={'fills':(fill,), 'states':tuple(states)})
+    with pytest.raises(ValueError, match='REPLAY_SYMBOL_INVALID'):
+        api()._validate_replay(forged,binding=authority.dependencies.bindings[0],sessions=authority.dependencies.sessions,friction_bps=0)
+
+
+def test_correct_stored_survivor_projection_roundtrips_and_tamper_rejects(case):
+    authority,result=case
+    projection=api().survivor_projection(result,authority)
+    stored=result.model_copy(update={'stored_projection':projection})
+    assert api().validate_result(stored,authority)==stored
+    tampered=projection.model_copy(update={'evidence':projection.evidence.model_copy(update={'cagr':99.0})})
+    with pytest.raises(ValueError,match='SURVIVOR_PROJECTION_MISMATCH'):
+        api().validate_result(result.model_copy(update={'stored_projection':tampered}),authority)
+
+
+def test_family_stop_requires_exact_governed_reason(case):
+    authority,result=case
+    from investment_tracker.quant.phase4.gate3.models import ArtifactIdentity
+    from investment_tracker.quant.phase4.gate3_campaign.result_schema import CandidateResult,StopWitness
+    from investment_tracker.quant.phase4.preregistration.canonical import artifact_envelope_identity
+    rows={};identities=[]
+    for position in range(1,51):
+        row=CandidateResult(provenance=api().make_provenance(authority,position),status='UNKNOWN',reason='MISSING_PRIMARY',evidence=None)
+        content=f'{position:064x}';path=f'results/phase4/gate3/campaign/candidate_result/sha256/{content}/record.json'
+        identity=ArtifactIdentity(kind='phase4_gate3_candidate_result',content_sha256=content,path=path,
+            sha256=artifact_envelope_identity(content_sha256=content,kind='phase4_gate3_candidate_result',path=path))
+        identities.append(identity);rows[identity.content_sha256]=row
+    skipped=CandidateResult(provenance=api().make_provenance(authority,51),status='SKIPPED_FAMILY_STOP',
+        reason='ARBITRARY_WRONG_REASON',evidence=None,stop_witness=StopWitness(trigger_position=50,prior_results=tuple(identities)))
+    with pytest.raises(ValueError,match='STOP_REASON_INVALID'):
+        api().validate_result(skipped,authority,resolver=lambda identity:rows[identity.content_sha256])

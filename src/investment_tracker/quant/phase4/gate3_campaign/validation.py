@@ -15,7 +15,7 @@ from investment_tracker.quant.phase4.engine.models import (
     MetricValue, PortfolioReplay, UnavailableStatistics,
 )
 from investment_tracker.quant.phase4.engine.robustness import bootstrap_median_daily_return, slice_continuous_folds
-from investment_tracker.quant.phase4.gate3.authorities import FOLD_IDS, REGIME_IDS
+from investment_tracker.quant.phase4.gate3.authorities import FOLD_IDS, REGIME_IDS, SYMBOLS
 from investment_tracker.quant.phase4.gate3.seal import GATE1_MANIFEST_IDENTITY, GATE2_MANIFEST_IDENTITY, TRAIN_IDENTITY, VALIDATION_IDENTITY
 from investment_tracker.quant.phase4.gate3_execution.campaign import POPULATION_SHA256
 from investment_tracker.quant.phase4.gate3_execution.methodology import CORRECTED_GATE3_MANIFEST
@@ -59,6 +59,12 @@ def _validate_replay(replay: PortfolioReplay, *, binding, sessions, friction_bps
             raise ValueError('BENCHMARK_IDENTITY_LEAK')
     elif replay.candidate_id != binding.candidate_id or replay.binding_sha256 != binding.binding_sha256:
         raise ValueError('REPLAY_BINDING_MISMATCH')
+    allowed_symbols = frozenset(SYMBOLS)
+    if any(fill.symbol not in allowed_symbols for fill in replay.fills) or any(
+        symbol not in allowed_symbols for state in replay.states for symbol, _ in state.units
+    ):
+        raise ValueError('REPLAY_SYMBOL_INVALID')
+    session_index = {session: index for index, session in enumerate(sessions)}
     turnover = math.fsum(abs(fill.fill_notional) for fill in replay.fills)
     if not math.isclose(replay.total_turnover, turnover, rel_tol=1e-12, abs_tol=_TOL):
         raise ValueError('TURNOVER_LINKAGE_INVALID')
@@ -69,8 +75,12 @@ def _validate_replay(replay: PortfolioReplay, *, binding, sessions, friction_bps
     previous_session = None
     for state in replay.states:
         while current is not None and current.fill_timestamp == state.session:
-            if current.signal_timestamp >= current.fill_timestamp:
-                raise ValueError('FILL_CAUSALITY_INVALID')
+            if (
+                current.signal_timestamp not in session_index
+                or current.fill_timestamp not in session_index
+                or session_index[current.fill_timestamp] != session_index[current.signal_timestamp] + 1
+            ):
+                raise ValueError('FILL_NEXT_SESSION_INVALID')
             expected_notional = current.units_delta * current.reference_open
             if not math.isclose(current.fill_notional, expected_notional, rel_tol=1e-12, abs_tol=_TOL):
                 raise ValueError('FILL_NOTIONAL_INVALID')
@@ -79,15 +89,20 @@ def _validate_replay(replay: PortfolioReplay, *, binding, sessions, friction_bps
                 raise ValueError('FILL_FRICTION_INVALID')
             cash -= current.fill_notional + current.friction
             units[current.symbol] = units.get(current.symbol, 0.0) + current.units_delta
+            if cash < -_TOL:
+                raise ValueError('NEGATIVE_DERIVED_CASH')
+            if units[current.symbol] < -_TOL:
+                raise ValueError('NEGATIVE_DERIVED_UNITS')
             if abs(units[current.symbol]) <= 1e-12:
                 del units[current.symbol]
             current = next(fills, None)
         if current is not None and current.fill_timestamp < state.session:
             raise ValueError('FILL_ORDER_INVALID')
-        expected_units = tuple(sorted((symbol, value) for symbol, value in units.items() if value > 0.0))
+        expected_units = tuple(sorted(units.items()))
         if len(expected_units) != len(state.units) or any(a != b or not math.isclose(x, y, rel_tol=1e-12, abs_tol=_TOL) for (a, x), (b, y) in zip(expected_units, state.units, strict=True)):
             raise ValueError('UNIT_LINKAGE_INVALID')
-        if not math.isclose(state.cash, max(0.0, cash), rel_tol=1e-12, abs_tol=_TOL):
+        expected_cash = 0.0 if -_TOL <= cash < 0.0 else cash
+        if not math.isclose(state.cash, expected_cash, rel_tol=1e-12, abs_tol=_TOL):
             raise ValueError('CASH_LINKAGE_INVALID')
         realized = (state.close_equity - state.cash) / state.close_equity
         if not math.isclose(state.realized_gross_exposure, realized, rel_tol=1e-12, abs_tol=_TOL):
@@ -97,6 +112,24 @@ def _validate_replay(replay: PortfolioReplay, *, binding, sessions, friction_bps
         previous_session = state.session
     if current is not None:
         raise ValueError('UNACCOUNTED_FILL')
+
+
+def _validate_equal_weight_benchmark(replay: PortfolioReplay, sessions: tuple[pd.Timestamp, ...]) -> None:
+    expected_symbols = tuple(sorted(SYMBOLS))
+    if len(replay.fills) != len(expected_symbols):
+        raise ValueError('BENCHMARK_METHOD_INVALID')
+    if tuple(fill.symbol for fill in replay.fills) != expected_symbols:
+        raise ValueError('BENCHMARK_METHOD_INVALID')
+    if any(fill.signal_timestamp != sessions[0] or fill.fill_timestamp != sessions[1] or fill.units_delta <= 0 for fill in replay.fills):
+        raise ValueError('BENCHMARK_METHOD_INVALID')
+    notionals = tuple(fill.fill_notional for fill in replay.fills)
+    if any(value <= 0 or not math.isclose(value, notionals[0], rel_tol=1e-12, abs_tol=_TOL) for value in notionals):
+        raise ValueError('BENCHMARK_METHOD_INVALID')
+    first = replay.states[0]
+    if first.cash != 100000.0 or first.units or first.realized_gross_exposure != 0.0:
+        raise ValueError('BENCHMARK_METHOD_INVALID')
+    if any(not math.isclose(state.target_gross_exposure, 1.0, rel_tol=0.0, abs_tol=1e-12) for state in replay.states):
+        raise ValueError('BENCHMARK_METHOD_INVALID')
 
 
 def _friction(replays: tuple[PortfolioReplay, ...]) -> FrictionEvidence:
@@ -149,6 +182,7 @@ def derive_evidence(replays, benchmark, cash, neighbors, deps: Dependencies) -> 
     for replay in replays:
         _validate_replay(replay, binding=binding, sessions=deps.sessions, friction_bps=replay.friction_bps)
     _validate_replay(benchmark, binding=None, sessions=deps.sessions, friction_bps=3, benchmark=True)
+    _validate_equal_weight_benchmark(benchmark, deps.sessions)
     _validate_replay(cash, binding=None, sessions=deps.sessions, friction_bps=0, benchmark=True)
     if cash.fills or cash.total_turnover != 0 or any(state.cash != 100000.0 or state.close_equity != 100000.0 for state in cash.states):
         raise ValueError('CASH_BENCHMARK_INVALID')
@@ -266,6 +300,8 @@ def validate_result(result: CandidateResult, authority: ResultAuthority, resolve
         if result.stored_projection is not None and not _same(result.stored_projection, projection):
             raise ValueError('SURVIVOR_PROJECTION_MISMATCH')
     elif result.status == 'SKIPPED_FAMILY_STOP':
+        if result.reason != 'PERSISTENT_OOS_FAILURE':
+            raise ValueError('STOP_REASON_INVALID')
         if resolver is None: raise ValueError('STOP_WITNESS_UNRESOLVED')
         resolved = tuple(resolver(identity) for identity in result.stop_witness.prior_results)
         trigger = result.stop_witness.trigger_position

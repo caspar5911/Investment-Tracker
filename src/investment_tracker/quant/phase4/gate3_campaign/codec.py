@@ -24,7 +24,16 @@ def wire(value):
             raise ValueError('NONCANONICAL_TIMESTAMP')
         return value.isoformat()
     if isinstance(value, dict):
-        return {key: wire(item) for key, item in value.items()}
+        converted = {}
+        for key, item in value.items():
+            if isinstance(key, str):
+                encoded = key
+            elif isinstance(key, int) and not isinstance(key, bool):
+                encoded = str(key)
+            else:
+                raise ValueError('NONCANONICAL_MAPPING_KEY')
+            converted[encoded] = wire(item)
+        return converted
     if isinstance(value, (tuple, list)):
         return [wire(item) for item in value]
     if isinstance(value, float) and not math.isfinite(value):
@@ -66,7 +75,19 @@ def hydrate(annotation, value):
     if origin is dict:
         if not isinstance(value, dict):
             raise ValueError('STRICT_DICT_INVALID')
-        return {hydrate(args[0], key): hydrate(args[1], item) for key, item in value.items()}
+        result = {}
+        for key, item in value.items():
+            if args[0] is int and isinstance(key, str):
+                try:
+                    decoded_key = int(key)
+                except ValueError as exc:
+                    raise ValueError('STRICT_DICT_KEY_INVALID') from exc
+                if str(decoded_key) != key:
+                    raise ValueError('STRICT_DICT_KEY_INVALID')
+            else:
+                decoded_key = hydrate(args[0], key)
+            result[decoded_key] = hydrate(args[1], item)
+        return result
     if annotation is pd.Timestamp:
         if isinstance(value, pd.Timestamp):
             return value
