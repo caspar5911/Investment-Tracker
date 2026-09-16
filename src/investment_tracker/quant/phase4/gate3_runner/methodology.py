@@ -57,6 +57,9 @@ SPEC_PATH = (
     "docs/superpowers/specs/"
     "2026-09-16-phase-4-gate-3-campaign-orchestrator-design.md"
 )
+SPEC_CONTENT_SHA256 = (
+    "6d4c2ba976bf5d388ea5bf490bac1e441d0256fc6b786c94a0292e2feebae3c3"
+)
 SOURCE_FILES = tuple(
     sorted(
         "src/investment_tracker/quant/phase4/gate3_runner/" + name
@@ -141,6 +144,8 @@ def spec_identity(root: Path) -> ArtifactIdentity:
     except OSError as exc:
         raise ValueError("RUNNER_SPEC_MISMATCH") from exc
     content = sha256(payload).hexdigest()
+    if content != SPEC_CONTENT_SHA256:
+        raise ValueError("RUNNER_SPEC_MISMATCH")
     return ArtifactIdentity(
         kind="phase4_gate3_runner_spec",
         content_sha256=content,
@@ -411,6 +416,7 @@ __all__ = (
     "RunnerManifest",
     "RunnerPreflight",
     "SOURCE_FILES",
+    "SPEC_CONTENT_SHA256",
     "declared_manifest",
     "preflight_runner",
     "seal_runner",
