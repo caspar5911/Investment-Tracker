@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Callable
 
 from investment_tracker.quant.phase4.engine.benchmarks import (
     cash_benchmark,
@@ -285,8 +284,6 @@ def run_campaign(
     context: RunnerDependencies,
     *,
     runner_manifest: ArtifactIdentity,
-    state_store: RunnerStateStore | None = None,
-    result_store: ResultArtifactStore | None = None,
 ) -> CampaignRunSummary:
     ready = preflight_runner(
         context.root,
@@ -295,8 +292,8 @@ def run_campaign(
     if ready.manifest != runner_manifest:
         raise ValueError("RUNNER_MANIFEST_MISMATCH")
     _validate_population(context)
-    state = state_store or RunnerStateStore(context.root)
-    results = result_store or ResultArtifactStore(context.root)
+    state = RunnerStateStore(context.root)
+    results = ResultArtifactStore(context.root)
     windows: dict[str, list[ArtifactIdentity]] = defaultdict(list)
     stops: dict[
         str,
