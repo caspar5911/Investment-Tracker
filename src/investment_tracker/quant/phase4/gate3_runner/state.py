@@ -152,6 +152,20 @@ class RunnerStateStore:
     def write_receipt(self, record: PositionReceipt) -> ArtifactIdentity:
         if not isinstance(record, PositionReceipt):
             raise ValueError("RUNNER_RECEIPT_INVALID")
+        attempt = self.read_attempt(record.population_position)
+        if record.result_status == "SKIPPED_FAMILY_STOP":
+            if attempt is not None:
+                raise ValueError("RUNNER_SKIPPED_ATTEMPT_INVALID")
+        else:
+            if attempt is None:
+                raise ValueError("RUNNER_ATTEMPT_MISSING")
+            attempted, _ = attempt
+            if (
+                attempted.population_position != record.population_position
+                or attempted.candidate_id != record.candidate_id
+                or attempted.trial_id != record.trial_id
+            ):
+                raise ValueError("RUNNER_RECEIPT_ATTEMPT_MISMATCH")
         path = self._position_path("receipt", record.population_position)
         payload = self._payload(record)
         self._publish(path, payload)
@@ -164,6 +178,33 @@ class RunnerStateStore:
     def write_result_set(self, result_set: CampaignResultSet) -> ArtifactIdentity:
         if not isinstance(result_set, CampaignResultSet):
             raise ValueError("RUNNER_RESULT_SET_INVALID")
+        observed: list[ArtifactIdentity] = []
+        for position in range(1, 181):
+            found = self.read_receipt(position)
+            if found is None:
+                raise ValueError("RUNNER_ACCOUNTABILITY_INCOMPLETE")
+            receipt, _ = found
+            if receipt.population_position != position:
+                raise ValueError("RUNNER_RECEIPT_POSITION_MISMATCH")
+            if receipt.result_status == "CAMPAIGN_EXECUTION_FAILED":
+                raise ValueError("RUNNER_CAMPAIGN_FAILED")
+            if receipt.result_status == "SKIPPED_FAMILY_STOP":
+                if self.read_attempt(position) is not None:
+                    raise ValueError("RUNNER_SKIPPED_ATTEMPT_INVALID")
+            else:
+                attempt = self.read_attempt(position)
+                if attempt is None:
+                    raise ValueError("RUNNER_ATTEMPT_MISSING")
+                attempted, _ = attempt
+                if (
+                    attempted.runner_manifest != result_set.runner_manifest
+                    or attempted.candidate_id != receipt.candidate_id
+                    or attempted.trial_id != receipt.trial_id
+                ):
+                    raise ValueError("RUNNER_RESULT_SET_ATTEMPT_MISMATCH")
+            observed.append(receipt.result_artifact)
+        if tuple(observed) != result_set.result_artifacts:
+            raise ValueError("RUNNER_RESULT_SET_RECEIPT_MISMATCH")
         path = self._result_set_path()
         payload = self._payload(result_set)
         self._publish(path, payload)
