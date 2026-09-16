@@ -132,3 +132,12 @@ def test_receipt_binds_exact_runner_manifest(tmp_path: Path):
     with pytest.raises(ValueError, match="RUNNER_RECEIPT_ATTEMPT_MISMATCH"):
         store.write_receipt(receipt)
     assert store.read_receipt(1) is None
+
+
+def test_result_set_path_is_content_addressed(tmp_path: Path):
+    digest = "a" * 64
+    path = RunnerStateStore(tmp_path)._result_set_path(digest)
+    assert path.relative_to(tmp_path).as_posix() == (
+        "results/phase4/gate3/campaign/result_set/sha256/"
+        f"{digest}/manifest.json"
+    )
