@@ -298,11 +298,6 @@ class RunnerStateStore:
         if not isinstance(identity, ArtifactIdentity):
             raise ValueError("ARTIFACT_IDENTITY_INVALID")
         path = self._result_set_path(identity.content_sha256)
-        expected = self._identity(
-            "phase4_gate3_campaign_result_set",
-            path,
-            path.read_bytes() if path.is_file() and not path.is_symlink() else b"",
-        )
         if (
             identity.kind != "phase4_gate3_campaign_result_set"
             or identity.path != normalize_repository_path(self.root, path)
