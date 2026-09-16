@@ -157,7 +157,7 @@ def test_direct_runner_api_requires_sealed_explicit_manifest(context, tmp_path):
     with pytest.raises(ValueError, match="RUNNER_MANIFEST_MISSING"):
         run_campaign(
             context,
-            runner_manifest=manifest,
+            runner_manifest=manifest_identity(),
             evaluator=evaluator,
             state_store=RunnerStateStore(tmp_path),
             result_store=ResultArtifactStore(tmp_path),
