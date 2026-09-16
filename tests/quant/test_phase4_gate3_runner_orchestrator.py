@@ -94,6 +94,8 @@ def test_unavailable_oos_streak_stops_only_54_member_families_and_accounts_all_p
     assert summary.unknown == 180 - expected_skips
     assert summary.skipped_family_stop == expected_skips
     assert len(calls) == 180 - expected_skips
+    assert 50 in calls and 51 not in calls and 54 not in calls
+    assert 140 in calls and 141 not in calls and 144 not in calls
 
     def must_not_run(_ctx, _position):
         raise AssertionError("completed receipts must prevent duplicate evaluation")
@@ -172,3 +174,69 @@ def test_public_run_campaign_has_only_repository_and_explicit_manifest_inputs():
         "repository_root",
         "runner_manifest_content_sha256",
     }
+
+
+def test_positive_benchmark_excess_resets_family_stop_streak(
+    context, tmp_path, monkeypatch
+):
+    manifest = allow_synthetic_runner(monkeypatch)
+    state = RunnerStateStore(tmp_path)
+    results = ResultArtifactStore(tmp_path)
+    calls: list[int] = []
+
+    def evaluator(ctx, position):
+        calls.append(position)
+        return unavailable(ctx, position)
+
+    def synthetic_oos(result):
+        position = result.provenance.population_position
+        return SimpleNamespace(
+            benchmark_excess_return=(
+                0.01 if position in {25, 115} else None
+            )
+        )
+
+    monkeypatch.setattr(orchestrator_module, "_evaluate_binding", evaluator)
+    monkeypatch.setattr(orchestrator_module, "oos_outcome", synthetic_oos)
+    monkeypatch.setattr(orchestrator_module, "RunnerStateStore", lambda _root: state)
+    monkeypatch.setattr(orchestrator_module, "ResultArtifactStore", lambda _root: results)
+
+    summary = _run_campaign_verified(
+        context,
+        runner_manifest=manifest,
+    )
+    assert summary.accounted_positions == 180
+    assert summary.skipped_family_stop == 0
+    assert calls == list(range(1, 181))
+
+
+def test_interrupted_attempt_resumes_same_position_without_double_consumption(
+    context, tmp_path, monkeypatch
+):
+    manifest = allow_synthetic_runner(monkeypatch)
+    state = RunnerStateStore(tmp_path)
+    results = ResultArtifactStore(tmp_path)
+    first_binding = context.campaign.bindings[0]
+    state.write_attempt(
+        orchestrator_module._attempt_record(
+            first_binding,
+            manifest,
+        )
+    )
+    calls: list[int] = []
+
+    def evaluator(ctx, position):
+        calls.append(position)
+        return unavailable(ctx, position)
+
+    monkeypatch.setattr(orchestrator_module, "_evaluate_binding", evaluator)
+    monkeypatch.setattr(orchestrator_module, "RunnerStateStore", lambda _root: state)
+    monkeypatch.setattr(orchestrator_module, "ResultArtifactStore", lambda _root: results)
+
+    summary = _run_campaign_verified(
+        context,
+        runner_manifest=manifest,
+    )
+    assert summary.accounted_positions == 180
+    assert calls[0] == 1
+    assert calls.count(1) == 1
