@@ -7,6 +7,7 @@ from investment_tracker.quant.phase4.gate3_runner.dependencies import (
     SCORED_PANEL_SHA256,
 )
 from investment_tracker.quant.phase4.gate3_runner.methodology import (
+    SPEC_CONTENT_SHA256,
     declared_manifest,
     preflight_runner,
     spec_identity,
@@ -33,7 +34,7 @@ def test_runner_spec_identity_is_exact_repository_relative_content():
         "docs/superpowers/specs/"
         "2026-09-16-phase-4-gate-3-campaign-orchestrator-design.md"
     )
-    assert len(identity.content_sha256) == 64
+    assert identity.content_sha256 == SPEC_CONTENT_SHA256
 
 
 def test_explicit_hash_preflight_rejects_missing_runner_manifest():
