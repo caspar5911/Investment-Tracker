@@ -94,8 +94,10 @@ def test_unavailable_oos_streak_stops_only_54_member_families_and_accounts_all_p
     assert summary.unknown == 180 - expected_skips
     assert summary.skipped_family_stop == expected_skips
     assert len(calls) == 180 - expected_skips
+    # The two 54-member families in the sealed population are 1-54 (stop @50)
+    # and 127-180 (stop @176); their tails are the only skipped positions.
     assert 50 in calls and 51 not in calls and 54 not in calls
-    assert 140 in calls and 141 not in calls and 144 not in calls
+    assert 176 in calls and 177 not in calls and 180 not in calls
 
     def must_not_run(_ctx, _position):
         raise AssertionError("completed receipts must prevent duplicate evaluation")
@@ -197,11 +199,13 @@ def test_positive_benchmark_excess_resets_family_stop_streak(
         calls.append(position)
         return unavailable(ctx, position)
 
+    # Resets must land inside each 54-member family (1-54 and 127-180) to
+    # break every 50-consecutive-OOS run; 25 and 152 do.
     def synthetic_oos(result):
         position = result.provenance.population_position
         return SimpleNamespace(
             benchmark_excess_return=(
-                0.01 if position in {25, 115} else None
+                0.01 if position in {25, 152} else None
             )
         )
 
