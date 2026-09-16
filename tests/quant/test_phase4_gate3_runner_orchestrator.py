@@ -163,3 +163,10 @@ def test_direct_runner_api_requires_sealed_explicit_manifest(context, tmp_path):
             result_store=ResultArtifactStore(tmp_path),
         )
     assert calls == []
+
+
+def test_candidate_evaluator_is_not_a_public_ungated_api():
+    import investment_tracker.quant.phase4.gate3_runner.orchestrator as module
+
+    assert not hasattr(module, "evaluate_binding")
+    assert not hasattr(module, "generate_targets")
