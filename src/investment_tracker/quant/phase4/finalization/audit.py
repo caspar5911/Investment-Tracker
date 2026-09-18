@@ -3,6 +3,7 @@ from __future__ import annotations
 from hashlib import sha256
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from investment_tracker.quant.phase4.gate3.filesystem import contained_path, resolve_repository_root
 from investment_tracker.quant.phase4.gate3.models import ArtifactIdentity, Gate3AuthorityError
@@ -10,6 +11,7 @@ from investment_tracker.quant.phase4.gate3.seal import GATE1_MANIFEST_IDENTITY, 
 from investment_tracker.quant.phase4.gate3_campaign.codec import canonical_bytes, decode
 from investment_tracker.quant.phase4.gate3_campaign.result_methodology import ResultSchemaManifest
 from investment_tracker.quant.phase4.gate3_campaign.result_schema import CandidateResult, SurvivorProjection
+from investment_tracker.quant.phase4.gate3_campaign import validation as gate3_validation
 from investment_tracker.quant.phase4.gate3_campaign.validation import oos_outcome
 from investment_tracker.quant.phase4.gate3_runner.methodology import RunnerManifest
 from investment_tracker.quant.phase4.gate3_runner.state import RunnerStateStore
@@ -17,7 +19,7 @@ from investment_tracker.quant.phase4.preregistration.canonical import (
     artifact_envelope_identity,
     canonical_json_bytes,
 )
-from investment_tracker.quant.phase4.preregistration.policy import CandidateSurvivorEvidence, _eligible
+from investment_tracker.quant.phase4.preregistration.policy import _eligible
 
 from .models import AuditRow, Phase4Audit
 from .selection import rejection_reasons
@@ -128,111 +130,27 @@ def _read_candidate(root: Path, identity: ArtifactIdentity) -> CandidateResult:
     return result
 
 
-def _metric(metric, reason: str, reasons: list[str]):
-    if metric.status != "AVAILABLE" or metric.value is None:
-        reasons.append(reason)
-        return None
-    return metric.value
-
-
-def _project_result(
-    result: CandidateResult,
-    *,
-    component_count: int,
-) -> SurvivorProjection:
-    if result.status != "EXECUTED" or result.evidence is None:
-        return SurvivorProjection(
-            status="UNKNOWN",
-            reasons=("PRIMARY_EVIDENCE_UNAVAILABLE",),
-            evidence=None,
+def _projection_authority(bindings: list[dict], families: list[dict]):
+    return SimpleNamespace(
+        dependencies=SimpleNamespace(
+            bindings=tuple(
+                SimpleNamespace(
+                    candidate_id=item["candidate_id"],
+                    family_id=item["family_id"],
+                )
+                for item in bindings
+            ),
+            gate2=SimpleNamespace(
+                family_definitions=tuple(
+                    SimpleNamespace(
+                        family_id=item["family_id"],
+                        component_count=item["component_count"],
+                    )
+                    for item in families
+                )
+            ),
         )
-    ev = result.evidence
-    reasons: list[str] = []
-    total = _metric(ev.metrics.total_return, "TOTAL_RETURN_UNKNOWN", reasons)
-    cagr = _metric(ev.metrics.cagr, "CAGR_UNKNOWN", reasons)
-    sharpe = _metric(ev.metrics.sharpe, "SHARPE_UNKNOWN", reasons)
-    sortino = _metric(ev.metrics.sortino, "SORTINO_UNKNOWN", reasons)
-    excess = _metric(ev.metrics.benchmark_excess_return, "BENCHMARK_EXCESS_UNKNOWN", reasons)
-    turnover = _metric(ev.metrics.annualized_one_way_turnover, "TURNOVER_UNKNOWN", reasons)
-    exposure = _metric(ev.metrics.average_realized_gross_exposure, "EXPOSURE_UNKNOWN", reasons)
-    years = _metric(ev.durability.positive_year_fraction, "POSITIVE_YEARS_UNKNOWN", reasons)
-    r36 = _metric(ev.durability.rolling_36.minimum, "ROLLING_36_UNKNOWN", reasons)
-    r12 = _metric(ev.durability.rolling_12.minimum, "ROLLING_12_UNKNOWN", reasons)
-    streak = _metric(ev.durability.longest_negative_month_streak, "LOSING_STREAK_UNKNOWN", reasons)
-    worst_year = _metric(ev.durability.worst_year, "WORST_YEAR_UNKNOWN", reasons)
-    worst_month = _metric(ev.durability.worst_month, "WORST_MONTH_UNKNOWN", reasons)
-    year_conc = _metric(ev.durability.positive_year_concentration, "YEAR_CONCENTRATION_UNKNOWN", reasons)
-    month3 = _metric(ev.durability.top_three_positive_month_concentration, "MONTH_CONCENTRATION_UNKNOWN", reasons)
-    months = _metric(ev.durability.positive_month_fraction, "POSITIVE_MONTHS_UNKNOWN", reasons)
-    lower = _metric(ev.bootstrap.percentile_05, "BOOTSTRAP_UNKNOWN", reasons)
-    retention = _metric(ev.friction.friction_retention_ratio, "FRICTION_RETENTION_UNKNOWN", reasons)
-    fold_values = [item.value for item in ev.candidate_folds.fold_returns]
-    benchmark_values = [item.value for item in ev.benchmark_folds.fold_returns]
-    if any(value is None for value in (*fold_values, *benchmark_values)):
-        reasons.append("FOLD_EVIDENCE_UNKNOWN")
-    if ev.neighborhood.status != "AVAILABLE":
-        reasons.append("INSUFFICIENT_VALID_NEIGHBORS")
-    if reasons:
-        return SurvivorProjection(
-            status="UNKNOWN",
-            reasons=tuple(sorted(set(reasons))),
-            evidence=None,
-        )
-    folds = tuple(float(value) for value in fold_values)
-    fold_excess = tuple(
-        float(left - right)
-        for left, right in zip(fold_values, benchmark_values, strict=True)
     )
-    evidence = CandidateSurvivorEvidence(
-        candidate_id=result.provenance.candidate_id,
-        is_baseline=False,
-        validation_total_return=total,
-        cash_return=ev.cash.close_equity[-1] / ev.cash.close_equity[0] - 1,
-        benchmark_excess_return=excess,
-        sharpe=sharpe,
-        sortino=sortino,
-        walk_forward_returns=folds,
-        walk_forward_benchmark_excess=fold_excess,
-        neighborhood_valid_count=ev.neighborhood.valid_count,
-        neighborhood_positive_fraction=ev.neighborhood.positive_fraction,
-        neighborhood_median_benchmark_excess=ev.neighborhood.median_benchmark_excess,
-        friction_returns_bps={
-            case.friction_bps: case.total_return.value for case in ev.friction.cases
-        },
-        annualized_one_way_turnover=turnover,
-        average_gross_exposure=exposure,
-        all_session_exposures_valid=all(
-            0 <= value <= 1
-            for value in (
-                *ev.metrics.target_gross_exposure_series,
-                *ev.metrics.realized_gross_exposure_series,
-            )
-        ),
-        bootstrap_lower_endpoint=lower,
-        fixed_identity_invariant=True,
-        durability_evidence_complete=True,
-        walk_forward_joint_consistency=sum(
-            left > 0 and right > 0
-            for left, right in zip(folds, fold_excess, strict=True)
-        ),
-        positive_year_percentage=years,
-        minimum_rolling_36_month_return=r36,
-        minimum_rolling_12_month_return=r12,
-        longest_losing_month_sequence=int(streak),
-        worst_year=worst_year,
-        worst_month=worst_month,
-        positive_year_return_concentration=year_conc,
-        top_three_positive_month_return_concentration=month3,
-        positive_month_percentage=months,
-        friction_25bps_retention_ratio=retention,
-        signal_component_count=component_count,
-        cagr=cagr,
-        max_drawdown=None,
-        calmar=None,
-        dsr=None,
-        pbo=None,
-    )
-    return SurvivorProjection(status="AVAILABLE", reasons=(), evidence=evidence)
 
 
 def _validate_provenance(
@@ -345,10 +263,7 @@ def audit_campaign(
         or len(families) != 4
     ):
         raise ValueError("PHASE4_FINALIZATION_ACCOUNTING_INVALID")
-    components = {
-        family["family_id"]: family["component_count"]
-        for family in families
-    }
+    projection_authority = _projection_authority(bindings, families)
 
     decoded: list[CandidateResult] = []
     seen_candidates: set[str] = set()
@@ -420,10 +335,13 @@ def audit_campaign(
             reasons = ("PRIMARY_EVIDENCE_UNAVAILABLE", result.reason)
             evidence = None
         else:
-            component_count = components.get(result.provenance.family_id)
-            if component_count is None:
-                raise ValueError("PHASE4_FINALIZATION_AUTHORITY_MISMATCH")
-            projection = _project_result(result, component_count=component_count)
+            try:
+                projection = gate3_validation.survivor_projection(
+                    result,
+                    projection_authority,
+                )
+            except (KeyError, StopIteration) as exc:
+                raise ValueError("PHASE4_FINALIZATION_AUTHORITY_MISMATCH") from exc
             if result.stored_projection is not None and canonical_bytes(result.stored_projection) != canonical_bytes(projection):
                 raise ValueError("PHASE4_FINALIZATION_AUTHORITY_MISMATCH")
             if projection.status != "AVAILABLE" or projection.evidence is None:
