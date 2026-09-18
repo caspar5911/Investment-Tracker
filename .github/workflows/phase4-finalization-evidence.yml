@@ -1,0 +1,177 @@
+name: phase4-finalization-evidence
+
+on:
+  push:
+    branches:
+      - codex/phase4-finalization
+    paths:
+      - '.github/workflows/phase4-finalization-evidence.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      SOURCE_REVISION: c2486e4f1fe901f5a68c2017ef00f2d6f16c10bc
+      CAMPAIGN_RESULT_SET_CONTENT_SHA256: bbefc542547ddc5e541a2390a978cf45a4a25c65603e0d114a6cb7f1fb9f32a8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e '.[dev,quant]'
+      - name: Verify frozen implementation source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git cat-file -e "$SOURCE_REVISION^{commit}"
+          git diff --exit-code "$SOURCE_REVISION" HEAD -- src/investment_tracker/quant/phase4/finalization
+      - name: Run data-independent finalization and policy checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m compileall -q src/investment_tracker/quant/phase4/finalization
+          python -m pytest -q \
+            tests/quant/test_phase4_finalization_models.py \
+            tests/quant/test_phase4_finalization_selection.py \
+            tests/quant/test_phase4_finalization_artifacts.py \
+            tests/quant/test_phase4_finalization_methodology.py \
+            tests/quant/test_phase4_finalization_audit.py::test_audit_uses_sealed_gate3_survivor_projection \
+            tests/quant/test_phase4_gate1_policies.py
+      - name: Generate audit decision and finalization seal
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY' | tee /tmp/phase4-finalization-summary.json
+          import json
+          import os
+          from pathlib import Path
+
+          from investment_tracker.quant.phase4.finalization.artifacts import FinalizationArtifactStore
+          from investment_tracker.quant.phase4.finalization.audit import CAMPAIGN_RESULT_SET_IDENTITY, audit_campaign
+          from investment_tracker.quant.phase4.finalization.methodology import preflight_finalization, seal_finalization
+          from investment_tracker.quant.phase4.finalization.selection import select_phase4_decision
+
+          root = Path.cwd().resolve()
+          expected_campaign = os.environ["CAMPAIGN_RESULT_SET_CONTENT_SHA256"]
+          if CAMPAIGN_RESULT_SET_IDENTITY.content_sha256 != expected_campaign:
+              raise SystemExit("campaign result-set content identity mismatch")
+
+          audit = audit_campaign(root, CAMPAIGN_RESULT_SET_IDENTITY)
+          if audit.expected_positions != 180 or audit.accounted_positions != 180:
+              raise SystemExit("campaign accounting mismatch")
+          if audit.status_counts.get("CAMPAIGN_EXECUTION_FAILED", 0) != 0:
+              raise SystemExit("campaign execution failure present")
+
+          store = FinalizationArtifactStore(root)
+          audit_identity = store.write_audit(audit)
+          if store.read_audit(audit_identity) != audit:
+              raise SystemExit("audit exact readback mismatch")
+
+          decision = select_phase4_decision(audit, audit_artifact=audit_identity)
+          decision_identity = store.write_decision(decision)
+          if store.read_decision(decision_identity) != decision:
+              raise SystemExit("decision exact readback mismatch")
+
+          manifest_identity = seal_finalization(
+              root,
+              source_revision=os.environ["SOURCE_REVISION"],
+              audit_identity=audit_identity,
+              decision_identity=decision_identity,
+          )
+          first = preflight_finalization(root, manifest_identity.content_sha256)
+          second = preflight_finalization(root, manifest_identity.content_sha256)
+          if first != second or first.status != "PHASE4_FINALIZATION_SEALED":
+              raise SystemExit("explicit-hash preflight mismatch")
+
+          for safety in (audit.safety, decision.safety, first.safety, second.safety):
+              if (
+                  safety.candidate_executed
+                  or safety.candidate_rerun
+                  or safety.strategy_search_executed
+                  or safety.candidate_parameters_changed
+                  or safety.survivor_policy_changed
+                  or safety.final_holdout_accessed
+                  or safety.protected_symbols_accessed
+                  or safety.provider_calls != 0
+                  or safety.downloads != 0
+                  or safety.live_trading_capability
+                  or safety.phase5_started
+              ):
+                  raise SystemExit("finalization safety invariant violated")
+
+          summary = {
+              "finalization_implementation_head": os.environ["SOURCE_REVISION"],
+              "audit_content_sha256": audit_identity.content_sha256,
+              "audit_envelope_sha256": audit_identity.sha256,
+              "decision_content_sha256": decision_identity.content_sha256,
+              "decision_envelope_sha256": decision_identity.sha256,
+              "manifest_content_sha256": manifest_identity.content_sha256,
+              "manifest_envelope_sha256": manifest_identity.sha256,
+              "accounted_positions": audit.accounted_positions,
+              "eligible_candidate_count": len(audit.eligible_candidate_ids),
+              "eligible_candidate_ids": list(audit.eligible_candidate_ids),
+              "phase4_final_status": decision.status,
+              "selected_candidate_id": decision.selected_candidate_id,
+              "selected_position": decision.selected_population_position,
+              "selected_family": decision.selected_family_id,
+              "status_counts": audit.status_counts,
+              "preflight_status": first.status,
+              "final_holdout_accessed": False,
+              "protected_symbols_accessed": [],
+              "provider_calls": 0,
+              "candidate_rerun": False,
+              "phase5_started": False,
+          }
+          print(json.dumps(summary, sort_keys=True))
+          PY
+      - name: Commit only immutable finalization evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUDIT="$(python -c 'import json; print(json.load(open("/tmp/phase4-finalization-summary.json"))["audit_content_sha256"])')"
+          DECISION="$(python -c 'import json; print(json.load(open("/tmp/phase4-finalization-summary.json"))["decision_content_sha256"])')"
+          MANIFEST="$(python -c 'import json; print(json.load(open("/tmp/phase4-finalization-summary.json"))["manifest_content_sha256"])')"
+
+          AUDIT_PATH="results/phase4/finalization/audit/sha256/$AUDIT/audit.json"
+          DECISION_PATH="results/phase4/finalization/decision/sha256/$DECISION/decision.json"
+          MANIFEST_PATH="results/phase4/finalization/manifest/sha256/$MANIFEST/manifest.json"
+
+          test -f "$AUDIT_PATH"
+          test -f "$DECISION_PATH"
+          test -f "$MANIFEST_PATH"
+
+          git add -- "$AUDIT_PATH" "$DECISION_PATH" "$MANIFEST_PATH"
+          printf '%s\n' "$AUDIT_PATH" "$DECISION_PATH" "$MANIFEST_PATH" | sort > /tmp/expected-evidence-files.txt
+          git diff --cached --name-only | sort > /tmp/staged-evidence-files.txt
+          diff -u /tmp/expected-evidence-files.txt /tmp/staged-evidence-files.txt
+          test -z "$(git diff --name-only)"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "evidence: seal Phase 4 final decision"
+
+          git diff-tree --no-commit-id --name-only -r HEAD | sort > /tmp/committed-evidence-files.txt
+          diff -u /tmp/expected-evidence-files.txt /tmp/committed-evidence-files.txt
+          git diff --exit-code "$SOURCE_REVISION" HEAD -- src/investment_tracker/quant/phase4/finalization
+          test -z "$(git status --porcelain)"
+
+          python -m investment_tracker.quant.phase4.finalization.cli preflight \
+            --repository-root . \
+            --manifest-content-sha256 "$MANIFEST" > /tmp/preflight-1.json
+          python -m investment_tracker.quant.phase4.finalization.cli preflight \
+            --repository-root . \
+            --manifest-content-sha256 "$MANIFEST" > /tmp/preflight-2.json
+          cmp /tmp/preflight-1.json /tmp/preflight-2.json
+
+          echo "FINALIZATION_EVIDENCE_COMMIT=$(git rev-parse HEAD)"
+          echo "FINALIZATION_SUMMARY=$(cat /tmp/phase4-finalization-summary.json)"
+          echo "PREFLIGHT=$(cat /tmp/preflight-1.json)"
+
+          git push origin HEAD:codex/phase4-finalization
