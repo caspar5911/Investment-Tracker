@@ -315,14 +315,14 @@ def audit_campaign(
     ):
         raise ValueError("PHASE4_FINALIZATION_AUTHORITY_MISMATCH")
 
-    runner_manifest = RunnerManifest.model_validate(
-        _read_json(root, RUNNER_MANIFEST_IDENTITY),
-        strict=True,
-    )
-    result_manifest = ResultSchemaManifest.model_validate(
-        _read_json(root, RESULT_SCHEMA_MANIFEST_IDENTITY),
-        strict=True,
-    )
+    runner_payload = _read_bytes(root, RUNNER_MANIFEST_IDENTITY)
+    result_schema_payload = _read_bytes(root, RESULT_SCHEMA_MANIFEST_IDENTITY)
+    if canonical_json_bytes(json.loads(runner_payload)) != runner_payload:
+        raise ValueError("PHASE4_FINALIZATION_EVIDENCE_INVALID")
+    if canonical_json_bytes(json.loads(result_schema_payload)) != result_schema_payload:
+        raise ValueError("PHASE4_FINALIZATION_EVIDENCE_INVALID")
+    runner_manifest = RunnerManifest.model_validate_json(runner_payload)
+    result_manifest = ResultSchemaManifest.model_validate_json(result_schema_payload)
     if (
         runner_manifest.status != "GATE3_CAMPAIGN_RUNNER_READY_TO_EXECUTE"
         or runner_manifest.result_schema_manifest != RESULT_SCHEMA_MANIFEST_IDENTITY
