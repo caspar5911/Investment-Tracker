@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 from pathlib import Path
+import inspect
 
+import investment_tracker.quant.phase4.finalization.audit as audit_module
 from investment_tracker.quant.phase4.finalization.audit import (
     CAMPAIGN_RESULT_SET_IDENTITY,
     audit_campaign,
 )
+
+
+def test_audit_uses_sealed_gate3_survivor_projection() -> None:
+    source = inspect.getsource(audit_module)
+    assert "def _project_result(" not in source
+    assert "gate3_validation.survivor_projection(" in source
 
 
 def test_real_committed_campaign_audits_all_180_positions() -> None:
