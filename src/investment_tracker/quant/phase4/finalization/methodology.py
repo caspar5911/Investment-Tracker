@@ -168,7 +168,7 @@ class FinalizationAuthorityStore:
             parsed = json.loads(payload)
             if canonical_json_bytes(parsed) != payload:
                 raise ValueError("noncanonical")
-            manifest = FinalizationManifest.model_validate(parsed, strict=True)
+            manifest = FinalizationManifest.model_validate_json(payload)
         except (UnicodeDecodeError, json.JSONDecodeError, ValueError, TypeError) as exc:
             raise ValueError("ARTIFACT_BYTES_INVALID") from exc
         return manifest
