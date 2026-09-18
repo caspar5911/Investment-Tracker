@@ -51,7 +51,7 @@ CAMPAIGN_RESULT_SET_IDENTITY = _identity(
     f"results/phase4/gate3/campaign/result_set/sha256/{CAMPAIGN_RESULT_SET_CONTENT}/manifest.json",
 )
 RUNNER_MANIFEST_IDENTITY = _identity(
-    "phase4_gate3_campaign_runner_manifest",
+    "gate3_campaign_runner_manifest",
     RUNNER_MANIFEST_CONTENT,
     f"results/phase4/gate3/campaign_runner/runner_manifest/sha256/{RUNNER_MANIFEST_CONTENT}/manifest.json",
 )
