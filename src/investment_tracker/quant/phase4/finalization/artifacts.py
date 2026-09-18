@@ -143,7 +143,7 @@ class FinalizationArtifactStore:
             parsed = json.loads(payload)
             if canonical_json_bytes(parsed) != payload:
                 raise ValueError("noncanonical")
-            value = model.model_validate(parsed, strict=True)
+            value = model.model_validate_json(payload)
         except (UnicodeDecodeError, json.JSONDecodeError, ValueError, TypeError) as exc:
             raise ValueError("ARTIFACT_BYTES_INVALID") from exc
         if self._payload(value) != payload:
