@@ -31,6 +31,20 @@ jobs:
           tests/quant/test_phase4_gate3_runner_orchestrator.py::test_public_run_campaign_has_only_repository_and_explicit_manifest_inputs
           tests/quant/test_phase4_gate3_runner_orchestrator.py::test_generate_targets_calls_sealed_generator_once_per_scored_session
           tests/quant/test_phase4_gate3_runner_orchestrator.py::test_evaluate_binding_uses_exact_friction_and_neighbor_contract
+  finalization-static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e '.[dev,quant]'
+      - run: python -m compileall -q src/investment_tracker/quant/phase4/finalization
+      - run: python -m pytest -q tests/quant/test_phase4_finalization_*.py
+
   test:
     runs-on: ubuntu-latest
     steps:
