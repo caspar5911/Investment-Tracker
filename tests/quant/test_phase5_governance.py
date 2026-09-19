@@ -1,8 +1,9 @@
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
-from investment_tracker.quant.phase5 import opend
+from investment_tracker.quant.phase5 import dataset, opend
 from investment_tracker.quant.phase5.methodology import (
     PROTECTED_SYMBOLS,
     SYMBOLS,
@@ -46,3 +47,85 @@ def test_opend_module_has_no_trading_surface_and_no_qfq():
     assert "place_order" not in source
     assert "get_corporate_actions_dividends" in source
     assert "get_corporate_actions_stock_splits" in source
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    (
+        ("2026-09-01", "2026-09-01"),
+        ("2026/09/01", "2026-09-01"),
+        ("Sep 1, 2026", "2026-09-01"),
+        ("September 1, 2026", "2026-09-01"),
+    ),
+)
+def test_opend_date_normalization_uses_the_full_provider_date(raw, expected):
+    parsed = dataset._timestamp(raw, field="test_date")
+    assert parsed == pd.Timestamp(expected, tz="UTC")
+
+
+def test_zero_match_dividend_detail_becomes_a_dq_coverage_gap():
+    missing_ex_date = pd.Timestamp("2019-12-23", tz="UTC")
+    supported_ex_date = pd.Timestamp("2020-03-23", tz="UTC")
+    rehab = (
+        dataset.RehabEvent("QQQ", missing_ex_date, 1.0, 0.0, 0.4577, None),
+        dataset.RehabEvent("QQQ", supported_ex_date, 1.0, 0.0, 0.3632, None),
+    )
+    response = {
+        "dividend_list": [
+            {
+                "ex_date": "2020-03-23",
+                "dividend_payable_date": "2020-04-30",
+                "statement": "USD 0.3632 per share",
+            }
+        ]
+    }
+
+    events, gaps = dataset._dividends("QQQ", rehab, response)
+
+    assert tuple(event.ex_date for event in events) == (supported_ex_date,)
+    assert gaps == (
+        dataset.DividendCoverageGap(
+            symbol="QQQ",
+            ex_date=missing_ex_date,
+            reason="DIVIDEND_DETAIL_MISSING",
+        ),
+    )
+
+
+def test_accounting_boundary_is_first_common_session_strictly_after_latest_gap():
+    gaps = (
+        dataset.DividendCoverageGap(
+            symbol="IEF",
+            ex_date=pd.Timestamp("2019-12-19", tz="UTC"),
+            reason="DIVIDEND_DETAIL_MISSING",
+        ),
+        dataset.DividendCoverageGap(
+            symbol="QQQ",
+            ex_date=pd.Timestamp("2019-12-23", tz="UTC"),
+            reason="DIVIDEND_DETAIL_MISSING",
+        ),
+    )
+    common = pd.DatetimeIndex(
+        [
+            pd.Timestamp("2019-12-23", tz="UTC"),
+            pd.Timestamp("2019-12-24", tz="UTC"),
+            pd.Timestamp("2019-12-26", tz="UTC"),
+        ]
+    )
+
+    assert dataset._first_defensible_accounting_session(common, gaps) == common[1]
+
+
+def test_duplicate_dividend_detail_remains_ambiguous():
+    ex_date = pd.Timestamp("2020-03-23", tz="UTC")
+    rehab = (
+        dataset.RehabEvent("QQQ", ex_date, 1.0, 0.0, 0.3632, None),
+    )
+    record = {
+        "ex_date": "2020-03-23",
+        "dividend_payable_date": "2020-04-30",
+        "statement": "USD 0.3632 per share",
+    }
+
+    with pytest.raises(ValueError, match="PHASE5_DIVIDEND_PAYDATE_AMBIGUOUS:QQQ:2020-03-23"):
+        dataset._dividends("QQQ", rehab, {"dividend_list": [record, dict(record)]})
