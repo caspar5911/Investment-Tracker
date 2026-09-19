@@ -23,14 +23,35 @@ def build_benchmark(
     strategy_targets: tuple[TargetDecision, ...],
     *,
     friction_bps: int,
+    start_session: pd.Timestamp | None = None,
     end_session: pd.Timestamp | None = None,
 ) -> BenchmarkResult:
-    first = strategy_targets[0]
-    if first.due_session is None:
-        raise ValueError("PHASE5_BENCHMARK_NO_ENTRY_SESSION")
+    if not strategy_targets:
+        raise ValueError("PHASE5_BENCHMARK_TARGET_SEQUENCE_EMPTY")
+    if start_session is None:
+        entry = next(
+            (item for item in strategy_targets if item.due_session is not None),
+            None,
+        )
+        if entry is None:
+            raise ValueError("PHASE5_BENCHMARK_NO_ENTRY_SESSION")
+        replay_start = entry.signal_session
+    else:
+        entry = next(
+            (
+                item
+                for item in strategy_targets
+                if item.due_session is not None and item.due_session >= start_session
+            ),
+            None,
+        )
+        if entry is None:
+            raise ValueError("PHASE5_BENCHMARK_NO_ENTRY_AFTER_START")
+        replay_start = start_session
+
     sleeve_results: list[ReplayResult] = []
     for symbol in SYMBOLS:
-        target = TargetDecision(first.signal_session, first.due_session, ((symbol, 1.0),))
+        target = TargetDecision(entry.signal_session, entry.due_session, ((symbol, 1.0),))
         sleeve_results.append(
             replay_targets(
                 dataset,
@@ -38,7 +59,7 @@ def build_benchmark(
                 friction_bps=friction_bps,
                 initial_cash=INITIAL_CASH / len(SYMBOLS),
                 symbols=(symbol,),
-                start_session=first.signal_session,
+                start_session=replay_start,
                 end_session=end_session,
             )
         )
