@@ -63,12 +63,23 @@ def evaluate_bundle(
             "safety": _safety(),
         }
 
+    accounting_start = dataset.common_sessions[0]
     replays = {
-        bps: replay_targets(dataset, targets, friction_bps=bps)
+        bps: replay_targets(
+            dataset,
+            targets,
+            friction_bps=bps,
+            start_session=accounting_start,
+        )
         for bps in FRICTION_CASE_BPS
     }
     benchmarks = {
-        bps: build_benchmark(dataset, targets, friction_bps=bps)
+        bps: build_benchmark(
+            dataset,
+            targets,
+            friction_bps=bps,
+            start_session=accounting_start,
+        )
         for bps in FRICTION_CASE_BPS
     }
     summaries = {
@@ -76,18 +87,21 @@ def evaluate_bundle(
         for bps in FRICTION_CASE_BPS
     }
 
+    comparison_requested_start = sealed_targets[0].signal_session
     comparison_end = pd.Timestamp("2022-12-30", tz="UTC")
+    comparison_start = max(accounting_start, comparison_requested_start)
     comparison_replay = replay_targets(
         dataset,
         sealed_targets,
         friction_bps=PRIMARY_FRICTION_BPS,
-        start_session=sealed_targets[0].signal_session,
+        start_session=comparison_start,
         end_session=comparison_end,
     )
     comparison_benchmark = build_benchmark(
         dataset,
         sealed_targets,
         friction_bps=PRIMARY_FRICTION_BPS,
+        start_session=comparison_start,
         end_session=comparison_end,
     )
     comparison_summary = calculate_durability(
@@ -114,12 +128,37 @@ def evaluate_bundle(
             "last_session": dataset.last_common_session,
             "years": dataset.common_history_years,
             "session_count": len(dataset.common_sessions),
+            "raw_signal_first_session": (
+                dataset.signal_sessions[0].strftime("%Y-%m-%d")
+                if dataset.signal_sessions
+                else dataset.first_common_session
+            ),
             "provider_manifest_sha256": dataset.provider_manifest_sha256,
+        },
+        "dividend_coverage": {
+            "rule": "FIRST_COMMON_SESSION_STRICTLY_AFTER_LATEST_UNSUPPORTED_DIVIDEND_EVENT",
+            "gap_count": len(dataset.dividend_coverage_gaps),
+            "latest_unsupported_ex_date": dataset.latest_unsupported_dividend_ex_date,
+            "first_defensible_accounting_session": dataset.first_common_session,
+            "gaps": [
+                {
+                    "symbol": item.symbol,
+                    "ex_date": item.ex_date.strftime("%Y-%m-%d"),
+                    "reason": item.reason,
+                }
+                for item in dataset.dividend_coverage_gaps
+            ],
         },
         "signal_equivalence": equivalence,
         "reconciliation": reconciliation,
         "durability_by_friction_bps": {str(key): value for key, value in summaries.items()},
-        "phase4_comparison_slice": comparison_summary,
+        "phase4_comparison_slice": {
+            **comparison_summary,
+            "requested_first_session": comparison_requested_start.strftime("%Y-%m-%d"),
+            "actual_first_session": comparison_start.strftime("%Y-%m-%d"),
+            "last_session": comparison_end.strftime("%Y-%m-%d"),
+            "truncated_by_dividend_coverage": comparison_start > comparison_requested_start,
+        },
         "safety": _safety(),
     }
 
