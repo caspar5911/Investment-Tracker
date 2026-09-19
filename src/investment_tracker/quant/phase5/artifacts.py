@@ -34,6 +34,12 @@ def seal_evaluation(
     source_revision: str,
     spec_content_sha256: str,
 ) -> dict[str, object]:
+    if evaluation.get("status") not in {
+        "PHASE5_DURABILITY_SUPPORTED",
+        "PHASE5_DURABILITY_CONTRADICTED",
+    }:
+        raise ValueError("PHASE5_SEAL_REQUIRES_DECISION_GRADE_EVALUATION")
+
     root = Path(results_root).resolve()
     evaluation_ref = _write(root, "evaluation", evaluation)
     decision_payload = {
