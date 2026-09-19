@@ -259,7 +259,7 @@ def _currency(statement: object) -> str:
 def _statement_cash_amount(statement: object) -> float | None:
     text = " ".join(str(statement or "").strip().split()).upper()
     matches = re.findall(
-        r"(?:(?:USD|US\\$)\\s*([0-9]+(?:\\.[0-9]+)?)|([0-9]+(?:\\.[0-9]+)?)\\s*(?:USD|US\\$))",
+        r"(?:(?:USD|US\$)\s*([0-9]+(?:\.[0-9]+)?)|([0-9]+(?:\.[0-9]+)?)\s*(?:USD|US\$))",
         text,
     )
     values = [left or right for left, right in matches]
