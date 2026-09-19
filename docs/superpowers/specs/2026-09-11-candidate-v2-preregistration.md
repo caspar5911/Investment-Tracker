@@ -1,18 +1,97 @@
-# Candidate v2 Protocol Preregistration
+# Investment Tracker Candidate v2 — Preregistration
 
 ## Status
 
-Protocol hardening preregistered; signal candidate not yet frozen.
+**PREREGISTERED — awaiting genuinely unseen evidence.**
 
-This document was created after Candidate v1 Phase B was observed. It therefore does not convert any previously seen data into out-of-sample evidence and does not increase the governed readiness score by itself.
+This document defines Candidate v2 before any Candidate-v2 qualification
+evidence is collected. It does not relabel Candidate v1, repair Candidate-v1
+Phase B, or authorize replacement-holdout access.
 
-Candidate v1 remains preserved as-is. Its Phase-B result was adverse and ROBUST-v1.0 remains inconclusive because RB09 did not preregister same-session cross-proxy tie handling.
+## Why v2 exists
 
-## Governance boundary
+Candidate v1 produced useful engineering evidence but cannot progress on the
+same validation claim:
 
-For Candidate v2, all Candidate-v1 historical evidence through the frozen Phase-B end 2025-09-07 is now SEEN DEVELOPMENT EVIDENCE. It may be used to understand failure modes, but it may not be represented as new validation or holdout evidence for v2.
+- `ROBUST-v1.0` remains INCONCLUSIVE because RB09 did not preregister a
+  deterministic same-session cross-proxy tie treatment.
+- Candidate-v1 strict Phase B was adverse.
+- DQ-030 left max drawdown undefined for `CALC-v1.2`.
+- DQ-046 exposed a multi-writer canonical-persistence risk.
 
-The replacement holdout symbols remain inaccessible:
+All of those findings remain part of the permanent Candidate-v1 audit trail.
+
+## Anti-tuning boundary
+
+Candidate v2 **does not change REPLAY-v1.0 signal thresholds**.
+
+The entry/state-machine definitions C01-C24 remain inherited unless this
+document explicitly says otherwise. In particular, trend, pullback,
+stabilization, relative strength, chase, signal precedence, episode dedupe,
+t+1 execution, horizons, SPY comparison, cash hurdle, friction, baselines,
+split normalization, listing-aware warm-up, and partition isolation are not
+altered to improve historical returns.
+
+Candidate-v1 Phase A and Phase B have already been seen. They may be cited as
+legacy development/diagnostic evidence, but they are permanently ineligible to
+be called genuinely unseen Candidate-v2 OOS evidence.
+
+## Version set
+
+- Candidate: `CANDIDATE-v2.0`
+- Control plane: `TPC-v1.2`
+- Signal rules: `REPLAY-v1.0` inherited unchanged
+- Calculation rules: `CALC-v2.0`
+- Robustness protocol: `ROBUST-v2.0`
+
+## CALC-v2.0: C25 max drawdown
+
+C25 is the only new calculation convention in this preregistration.
+
+For an executable episode/horizon:
+
+1. Start the mark-to-market path at the t+1 entry open with high-water value
+   equal to the entry open.
+2. For each trading session in the horizon, mark using the split-normalized
+   usable close.
+3. High-water is the maximum of entry open and every prior usable close.
+4. Session drawdown is `close / high_water - 1`.
+5. `max_drawdown` is the minimum session drawdown.
+6. Friction is not embedded in max drawdown; friction remains represented in
+   `return_net`.
+7. MAE/MFE remain separate intraday range metrics.
+8. Any missing/unusable close in the path makes max drawdown UNKNOWN.
+9. C24-censored horizons have max drawdown UNKNOWN.
+
+C25 resolves the *definition* gap represented by DQ-030 for CALC-v2.0 only.
+Candidate-v1/CALC-v1.2 historical max_drawdown fields remain UNKNOWN and must
+not be backfilled.
+
+## ROBUST-v2.0: RB09 same-session rule
+
+RB01-RB08 and RB10 criteria are inherited unchanged from ROBUST-v1.0.
+
+RB09 is replaced prospectively with a deterministic dependence rule:
+
+1. Use clean, matured 20-trading-day Candidate-v2 episode outcomes at 0 bps.
+2. Group all proxy episodes with the exact same executable entry session into
+   one same-session cluster.
+3. The cluster representative is the equal-weight median 20-day excess return
+   versus exact-timing SPY across the cluster's proxies.
+4. Sort clusters chronologically.
+5. Select the earliest eligible cluster, then exclude subsequent clusters until
+   an entry at least 20 benchmark trading sessions later. Repeat.
+6. Require at least 20 selected non-overlapping clusters; fewer is INCONCLUSIVE.
+7. PASS requires the median representative 20-day SPY excess across selected
+   clusters to be >= 0. A negative median is FAIL.
+
+This removes the arbitrary asset-order tie choice that made RB09-v1
+inconclusive. The threshold remains the original non-negative-median criterion;
+it is not selected from Candidate-v1 Phase-B performance.
+
+## Replacement holdout remains locked
+
+The following historical symbols remain inaccessible:
 
 - HACK
 - SOXX
@@ -20,98 +99,116 @@ The replacement holdout symbols remain inaccessible:
 - URNM
 - GEV
 
-No v2 work may fetch, inspect, cache, summarize, infer, or use their historical data unless a future Independent Audit explicitly authorizes release under a valid preregistered candidate.
+Candidate v2 does not authorize provider requests, cache inspection,
+summaries, inference, or derived statistics for those histories. They remain
+locked unless future Independent Audit authorization occurs after the required
+gates pass.
 
-No Phase-A or Phase-B v1 row may be deleted, rewritten, or re-labelled to improve Candidate v1.
+## Candidate-v2 eligible evidence
 
-## Development screen completed before this preregistration
+Candidate-v2 qualification evidence must be generated **after the canonical
+preregistration timestamp** and must have been unavailable to the candidate
+design at freeze time.
 
-A small structural screen was run only on already-seen Phase-B evidence to test whether an obvious repair justified further work. These results are development-only.
+No Candidate-v1 Phase-A or Phase-B result may be reused as unseen Candidate-v2
+OOS evidence.
 
-| Development variant | Unique episodes | 20d median excess vs SPY | 60d median excess vs SPY | Decision |
-| --- | ---: | ---: | ---: | --- |
-| Candidate v1 | 119 | -0.802% | -3.227% | Reference; adverse |
-| Relative strength tightened to SPY | 57 | -1.424% | -4.798% | Reject |
-| SPY > SMA200 market gate | 112 | -1.424% | -3.693% | Reject |
-| Tight RS + market gate | 52 | -2.315% | -5.678% | Reject |
-| v1 AND frozen 10% Simple-Dip condition | 34 | -0.226% | +0.672% | Reject: weak 20d and poor breadth |
-| Frozen Simple-Dip baseline | 82 starts / 72 matured 20d | +0.902% | -1.001% | Retain as benchmark only |
+Prospective paper decisions must be recorded before outcomes and must never be
+backfilled.
 
-A follow-up confirmation experiment was also rejected after correcting repeated firing within one underlying dip episode. The initially attractive result depended on multiple confirmations inside the same dip and therefore inflated effective sample count.
+## Promotion logic
 
-The screen did not identify a defensible signal-rule repair. Further threshold search on the same data is prohibited for this iteration because it would increase overfitting risk.
+Candidate v2 does not inherit Candidate-v1 PASS claims automatically.
 
-## V2-PROTOCOL-v0.1
+To remove the current 74-point robustness cap, Candidate v2 must first produce
+genuinely eligible evidence satisfying the frozen ROBUST-v2.0 criteria.
 
-This preregistration fixes two protocol ambiguities independently of signal-return optimization.
+To remove the 79-point Phase-B cap, it must then pass a separately declared,
+genuinely unseen OOS validation partition under the already-frozen candidate.
 
-### C25 - deterministic maximum drawdown
+Operational blockers such as RECON-009 and DQ-046 must also be resolved through
+runtime evidence. Code or documentation alone does not close those controls.
 
-For future v2 episodes:
+## Governance principle
 
-1. execution remains t+1 open;
-2. initialize episode equity to 1.0 at the entry open;
-3. for each eligible in-partition trading session, set equity to session_close / entry_open;
-4. maintain the running maximum of that equity path;
-5. per-session drawdown is equity / running_peak - 1;
-6. max_drawdown is the minimum per-session drawdown over the horizon;
-7. the value is therefore zero or negative;
-8. intraday highs/lows are not used;
-9. transaction friction is not embedded in this drawdown metric; friction remains reported separately in return_net;
-10. if the horizon is censored or required closes are unusable, max drawdown is UNKNOWN.
+Negative results remain evidence. Candidate versions may improve methodology,
+but no version may rewrite or hide a prior adverse result to manufacture a
+higher readiness score.
 
-This convention is chosen for determinism and separation from range-quarantine issues. It is not selected because it improves historical results.
 
-Candidate-v1 max_drawdown fields remain UNKNOWN under DQ-030; no retrospective backfill is permitted.
+## Frozen unseen cross-sectional validation panel
 
-### RB09-v2 - deterministic same-session dependence handling
+Before any historical price request for these symbols, Candidate v2 fixes the
+following validation panel:
 
-For the future robustness protocol:
+| Symbol | Role |
+| --- | --- |
+| XLI | broad U.S. industrials |
+| XLU | utilities |
+| XLB | materials |
+| XME | metals and mining |
+| XOP | oil and gas exploration/production |
+| IGV | software |
+| XSD | semiconductors |
+| IYT | transportation |
 
-1. map every eligible episode entry to its exact benchmark trading-session index;
-2. when multiple proxies enter on the same benchmark session, combine ALL of them into one equal-weight cross-proxy basket observation;
-3. do not pick a proxy by alphabetic order, historical return, score, or any other tie-break;
-4. sort basket observations only by benchmark session index;
-5. select the earliest basket, then the next basket whose entry-session index is at least 20 sessions after the prior selected basket;
-6. continue until exhausted;
-7. calculate the frozen RB09 statistic on these non-overlapping session baskets.
+The benchmark is SPY.
 
-This removes the ambiguity discovered in ROBUST-v1.0 without choosing a favorable asset from a tie.
+Only current asset-identity metadata was checked before this panel was frozen.
+No historical bars for these eight panel symbols were inspected before
+preregistration.
 
-## Candidate-v2 signal rule
+The panel cannot be substituted after historical access begins. Provider
+failure, insufficient history, or a new data-quality problem becomes
+UNKNOWN/ABSTAIN for the affected evidence; it does not permit replacing a weak
+symbol with a more favorable one.
 
-NOT FROZEN YET.
+### Fixed validation windows
 
-The development screen did not justify a threshold tweak or a simple extension of Candidate v1. Candidate v2 should not be created merely to make the already-seen Phase B look better.
+- Warm-up only: 2017-01-01 through 2017-12-31.
+- Candidate-v2 Phase A: 2018-01-01 through 2023-12-31.
+- Candidate-v2 strict Phase B: 2024-01-01 through 2025-09-07.
+- Benchmark: exact-session SPY.
+- C24 partition isolation remains mandatory.
 
-Before a signal rule can be frozen, the design must have:
+Candidate-v2 Phase-B history must not be fetched until Candidate-v2 Phase A and
+ROBUST-v2.0 have been computed and the candidate remains frozen without rule
+changes. A failed Phase-A or robustness result is recorded as failure; it does
+not authorize tuning and retrying under the same candidate identifier.
 
-- a concise economic/market rationale independent of the observed Phase-B winners;
-- no asset whitelist selected from historical performance;
-- no use of the locked replacement holdout;
-- a bounded number of parameters;
-- explicit state precedence and abstention behavior;
-- a frozen benchmark and friction treatment;
-- minimum episode-breadth requirements;
-- a preregistered acceptance test on genuinely new evidence.
+## PHASEB-v2.0 acceptance criteria
 
-## Future validation
+The following criteria are frozen before any panel history is inspected.
 
-A future v2 freeze must happen BEFORE its validation evidence is observed.
+A Candidate-v2 Phase-B PASS requires all of the following:
 
-Eligible validation sources are:
+1. At least 20 clean matured 20-trading-day REPLAY episodes overall.
+2. Median 20-day excess return versus exact-timing SPY is strictly greater than
+   zero.
+3. Median 20-day excess return versus the matched 3.25% cash hurdle is strictly
+   greater than zero.
+4. Median 60-day excess return versus SPY is non-negative.
+5. At least four panel proxies have at least three matured 20-day episodes.
+6. A strict majority of adequately sampled proxies have non-negative median
+   20-day SPY excess.
+7. At 25 bps total round-trip friction, median 20-day net return is strictly
+   greater than the median matched cash hurdle.
+8. REPLAY median 20-day SPY excess is at least the frozen Simple-Dip median
+   20-day SPY excess.
 
-1. genuine prospective paper episodes recorded after the v2 freeze; or
-2. another clean panel explicitly selected and authorized by Independent Audit before its history is inspected.
-
-Candidate-v1 Phase A/B cannot serve as v2 OOS evidence because it is already seen.
-
-The locked replacement holdout cannot be used as a shortcut around a failed Candidate v1 and remains locked.
+Insufficient sample produces INCONCLUSIVE. Once the minimum sample exists,
+failure of any performance criterion produces FAIL. No failed criterion may be
+redefined after seeing results under the same candidate.
 
 ## Score consequence
 
-This protocol work improves specification quality but earns no automatic readiness points. The non-official governed score remains capped by the failed/inconclusive Candidate-v1 validation state until a future candidate earns fresh supportive evidence.
+The present 74-point cap is not removed by this preregistration itself.
 
-## Acceptance principle
+- ROBUST-v2.0 must first PASS on genuinely eligible Candidate-v2 evidence before
+  the robustness cap can be removed.
+- PHASEB-v2.0 must then PASS on still-unseen Phase-B panel history before the
+  Phase-B cap can be removed.
+- DQ-046 and RECON-009 require runtime operational proof independently of model
+  efficacy.
 
-A v2 candidate is worth freezing only if its rationale can be stated before looking at its validation result. If a proposed rule exists mainly because it makes the known Phase-B sample look better, it is not a defensible candidate.
+The scoring weights and caps are not changed to target 80.
