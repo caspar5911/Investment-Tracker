@@ -19,11 +19,23 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e '.[dev,quant]'
       - run: python -m compileall -q src/investment_tracker/quant/phase5
-      - run: >-
+      - name: Phase 5 focused authority and accounting tests
+        run: >-
           python -m pytest -q
-          tests/quant/test_phase5_methodology.py
-          tests/quant/test_phase5_opend.py
-          tests/quant/test_phase5_reconstruction.py
-      - name: Verify Phase 4 finalization bytes are untouched
+          tests/quant/test_phase5_authority.py
+          tests/quant/test_phase5_governance.py
+          tests/quant/test_phase5_signals.py
+          tests/quant/test_phase5_accounting.py
+          tests/quant/test_phase5_conclusion.py
+      - name: Phase 4 regression contracts used by Phase 5
+        run: >-
+          python -m pytest -q
+          tests/quant/test_phase4_gate2_strategy.py
+          tests/quant/test_phase4_gate2_durability.py
+          tests/quant/test_phase4_gate2_robustness.py
+      - name: Verify Phase 4 implementation and final evidence are untouched
         run: |
           git diff --exit-code 69bb4347cbe577c4a1277335eef778ddf5b177d0 HEAD --             src/investment_tracker/quant/phase4             results/phase4/finalization
+      - name: Ensure Phase 5 has no order-routing implementation
+        run: |
+          ! grep -R -n -E 'OpenSecTradeContext|place_order|unlock_trade|modify_order'             src/investment_tracker/quant/phase5

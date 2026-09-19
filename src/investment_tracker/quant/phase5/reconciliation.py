@@ -8,48 +8,163 @@ from .dataset import Phase5Dataset
 
 
 def _tolerance(reference: float) -> float:
+    # "Stricter of USD 0.01 or 1 bp" means the smaller permitted difference.
     return min(0.01, abs(reference) * 0.0001)
 
 
-def reconcile_massive_snapshot(dataset: Phase5Dataset, snapshot_path: Path | None, *, fill_sessions: set[str]) -> dict[str, object]:
+def _normalize_date(value: object) -> str:
+    return str(value).replace("/", "-")[:10]
+
+
+def reconcile_massive_snapshot(
+    dataset: Phase5Dataset,
+    snapshot_path: Path | None,
+    *,
+    fill_sessions: set[str],
+) -> dict[str, object]:
     if snapshot_path is None:
-        return {"status": "UNKNOWN", "reason": "INDEPENDENT_SOURCE_SNAPSHOT_MISSING", "discrepancies": []}
-    value = json.loads(Path(snapshot_path).read_text(encoding="utf-8"))
-    if not isinstance(value, dict) or value.get("schema_version") != "PHASE5-MASSIVE-CROSSCHECK-v1":
-        return {"status": "UNKNOWN", "reason": "INDEPENDENT_SOURCE_SNAPSHOT_INVALID", "discrepancies": []}
+        return {
+            "status": "UNKNOWN",
+            "reason": "INDEPENDENT_SOURCE_SNAPSHOT_MISSING",
+            "discrepancies": [],
+        }
+    try:
+        value = json.loads(Path(snapshot_path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {
+            "status": "UNKNOWN",
+            "reason": "INDEPENDENT_SOURCE_SNAPSHOT_INVALID",
+            "discrepancies": [],
+        }
+    if (
+        not isinstance(value, dict)
+        or value.get("schema_version") != "PHASE5-MASSIVE-CROSSCHECK-v1"
+        or value.get("provider") != "MASSIVE"
+    ):
+        return {
+            "status": "UNKNOWN",
+            "reason": "INDEPENDENT_SOURCE_SNAPSHOT_INVALID",
+            "discrepancies": [],
+        }
     bars = value.get("bars")
-    if not isinstance(bars, dict):
-        return {"status": "UNKNOWN", "reason": "INDEPENDENT_SOURCE_SNAPSHOT_INVALID", "discrepancies": []}
+    dividends = value.get("dividends")
+    splits = value.get("splits")
+    if not isinstance(bars, dict) or not isinstance(dividends, dict) or not isinstance(splits, dict):
+        return {
+            "status": "UNKNOWN",
+            "reason": "INDEPENDENT_SOURCE_SNAPSHOT_INVALID",
+            "discrepancies": [],
+        }
+
     discrepancies: list[dict[str, object]] = []
     missing: list[str] = []
     for symbol, frame in dataset.bars.items():
         source = bars.get(symbol)
         if not isinstance(source, dict):
-            missing.append(symbol)
+            missing.append(f"bars:{symbol}")
             continue
         by_date = {ts.strftime("%Y-%m-%d"): ts for ts in frame.index}
-        for session in fill_sessions:
+        for session in sorted(fill_sessions):
             if session not in by_date:
                 continue
-            if session not in source:
-                missing.append(f"{symbol}:{session}")
+            other = source.get(session)
+            if not isinstance(other, dict):
+                missing.append(f"bars:{symbol}:{session}")
                 continue
             row = frame.loc[by_date[session]]
-            other = source[session]
-            if not isinstance(other, dict):
-                missing.append(f"{symbol}:{session}")
-                continue
             for field in ("open", "close"):
                 left = float(row[field])
                 try:
                     right = float(other[field])
                 except (KeyError, TypeError, ValueError):
-                    missing.append(f"{symbol}:{session}:{field}")
+                    missing.append(f"bars:{symbol}:{session}:{field}")
                     continue
                 if not math.isfinite(right) or abs(left - right) > _tolerance(left):
-                    discrepancies.append({"symbol": symbol, "session": session, "field": field, "opend": left, "independent": right, "tolerance": _tolerance(left)})
+                    discrepancies.append(
+                        {
+                            "kind": "PRICE",
+                            "symbol": symbol,
+                            "session": session,
+                            "field": field,
+                            "opend": left,
+                            "independent": right,
+                            "tolerance": _tolerance(left),
+                        }
+                    )
+
+        independent_divs = dividends.get(symbol)
+        if not isinstance(independent_divs, list):
+            missing.append(f"dividends:{symbol}")
+        else:
+            by_ex = {
+                _normalize_date(item.get("ex_dividend_date")): item
+                for item in independent_divs
+                if isinstance(item, dict) and item.get("ex_dividend_date")
+            }
+            for event in dataset.actions.dividends[symbol]:
+                key = event.ex_date.strftime("%Y-%m-%d")
+                item = by_ex.get(key)
+                if item is None:
+                    missing.append(f"dividends:{symbol}:{key}")
+                    continue
+                try:
+                    amount = float(item["cash_amount"])
+                except (KeyError, TypeError, ValueError):
+                    missing.append(f"dividends:{symbol}:{key}:amount")
+                    continue
+                if not math.isfinite(amount) or abs(amount - event.amount_per_unit) > 1e-8:
+                    discrepancies.append(
+                        {
+                            "kind": "DIVIDEND",
+                            "symbol": symbol,
+                            "ex_date": key,
+                            "opend_amount": event.amount_per_unit,
+                            "independent_amount": amount,
+                        }
+                    )
+
+        independent_splits = splits.get(symbol)
+        if not isinstance(independent_splits, list):
+            missing.append(f"splits:{symbol}")
+        else:
+            by_date_split = {
+                _normalize_date(item.get("execution_date")): item
+                for item in independent_splits
+                if isinstance(item, dict) and item.get("execution_date")
+            }
+            for event in dataset.actions.splits[symbol]:
+                key = event.effective_date.strftime("%Y-%m-%d")
+                item = by_date_split.get(key)
+                if item is None:
+                    missing.append(f"splits:{symbol}:{key}")
+                    continue
+                try:
+                    multiplier = float(item["split_to"]) / float(item["split_from"])
+                except (KeyError, TypeError, ValueError, ZeroDivisionError):
+                    missing.append(f"splits:{symbol}:{key}:ratio")
+                    continue
+                if not math.isfinite(multiplier) or abs(multiplier - event.unit_multiplier) > 1e-12:
+                    discrepancies.append(
+                        {
+                            "kind": "SPLIT",
+                            "symbol": symbol,
+                            "effective_date": key,
+                            "opend_multiplier": event.unit_multiplier,
+                            "independent_multiplier": multiplier,
+                        }
+                    )
+
     if missing:
-        return {"status": "UNKNOWN", "reason": "INDEPENDENT_SOURCE_EVIDENCE_INCOMPLETE", "missing": sorted(set(missing)), "discrepancies": discrepancies}
+        return {
+            "status": "UNKNOWN",
+            "reason": "INDEPENDENT_SOURCE_EVIDENCE_INCOMPLETE",
+            "missing": sorted(set(missing)),
+            "discrepancies": discrepancies,
+        }
     if discrepancies:
-        return {"status": "MISMATCH", "reason": "MATERIAL_PRICE_DISCREPANCY", "discrepancies": discrepancies}
+        return {
+            "status": "MISMATCH",
+            "reason": "MATERIAL_PROVIDER_DISCREPANCY",
+            "discrepancies": discrepancies,
+        }
     return {"status": "MATCH", "reason": "OK", "discrepancies": []}
