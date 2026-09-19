@@ -256,6 +256,19 @@ def _currency(statement: object) -> str:
     raise ValueError("PHASE5_DIVIDEND_CURRENCY_UNKNOWN")
 
 
+def _statement_cash_amount(statement: object) -> float | None:
+    text = " ".join(str(statement or "").strip().split()).upper()
+    matches = re.findall(
+        r"(?:(?:USD|US\\$)\\s*([0-9]+(?:\\.[0-9]+)?)|([0-9]+(?:\\.[0-9]+)?)\\s*(?:USD|US\\$))",
+        text,
+    )
+    values = [left or right for left, right in matches]
+    if len(values) != 1:
+        return None
+    value = float(values[0])
+    return value if math.isfinite(value) and value >= 0.0 else None
+
+
 def _dividends(
     symbol: str,
     rehab: tuple[RehabEvent, ...],
@@ -280,7 +293,62 @@ def _dividends(
             gaps.append(DividendCoverageGap(symbol, item.ex_date, "DIVIDEND_DETAIL_MISSING"))
             continue
         if len(matches) > 1:
-            raise ValueError(f"PHASE5_DIVIDEND_PAYDATE_AMBIGUOUS:{symbol}:{item.ex_date.date()}")
+            canonical = {
+                json.dumps(raw, sort_keys=True, separators=(",", ":"))
+                for raw in matches
+            }
+            if len(canonical) != len(matches):
+                raise ValueError(
+                    f"PHASE5_DIVIDEND_PAYDATE_AMBIGUOUS:{symbol}:{item.ex_date.date()}"
+                )
+
+            component_pay_dates: list[pd.Timestamp] = []
+            component_amounts: list[float] = []
+            for raw in matches:
+                pay_value = raw.get("dividend_payable_date")
+                if pay_value is None or str(pay_value).strip().lower() in {"", "nan", "none"}:
+                    raise ValueError(
+                        f"PHASE5_DIVIDEND_PAYDATE_AMBIGUOUS:{symbol}:{item.ex_date.date()}"
+                    )
+                pay_date = _timestamp(pay_value, field="dividend_payable_date")
+                if pay_date < item.ex_date:
+                    raise ValueError(f"PHASE5_DIVIDEND_PAYDATE_INVALID:{symbol}")
+                currency = _currency(raw.get("statement"))
+                if currency != "USD":
+                    raise ValueError(
+                        f"PHASE5_DIVIDEND_CURRENCY_NOT_USD:{symbol}:{currency}"
+                    )
+                amount = _statement_cash_amount(raw.get("statement"))
+                if amount is None:
+                    raise ValueError(
+                        f"PHASE5_DIVIDEND_PAYDATE_AMBIGUOUS:{symbol}:{item.ex_date.date()}"
+                    )
+                component_pay_dates.append(pay_date)
+                component_amounts.append(amount)
+
+            if (
+                len(set(component_pay_dates)) != 1
+                or not math.isclose(
+                    sum(component_amounts),
+                    item.cash_dividend,
+                    rel_tol=0.0,
+                    abs_tol=1e-8,
+                )
+            ):
+                raise ValueError(
+                    f"PHASE5_DIVIDEND_PAYDATE_AMBIGUOUS:{symbol}:{item.ex_date.date()}"
+                )
+
+            result.append(
+                DividendEvent(
+                    symbol,
+                    item.ex_date,
+                    component_pay_dates[0],
+                    item.cash_dividend,
+                    "USD",
+                )
+            )
+            continue
 
         raw = matches[0]
         pay_value = raw.get("dividend_payable_date")
