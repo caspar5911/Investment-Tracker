@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from hashlib import sha256
 import json
 import math
 from pathlib import Path
@@ -29,11 +30,21 @@ def reconcile_massive_snapshot(
             "discrepancies": [],
         }
     try:
-        value = json.loads(Path(snapshot_path).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        raw_snapshot = Path(snapshot_path).read_bytes()
+    except OSError:
         return {
             "status": "UNKNOWN",
             "reason": "INDEPENDENT_SOURCE_SNAPSHOT_INVALID",
+            "discrepancies": [],
+        }
+    snapshot_sha256 = sha256(raw_snapshot).hexdigest()
+    try:
+        value = json.loads(raw_snapshot.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return {
+            "status": "UNKNOWN",
+            "reason": "INDEPENDENT_SOURCE_SNAPSHOT_INVALID",
+            "snapshot_sha256": snapshot_sha256,
             "discrepancies": [],
         }
     if (
@@ -44,6 +55,7 @@ def reconcile_massive_snapshot(
         return {
             "status": "UNKNOWN",
             "reason": "INDEPENDENT_SOURCE_SNAPSHOT_INVALID",
+            "snapshot_sha256": snapshot_sha256,
             "discrepancies": [],
         }
     bars = value.get("bars")
@@ -53,6 +65,7 @@ def reconcile_massive_snapshot(
         return {
             "status": "UNKNOWN",
             "reason": "INDEPENDENT_SOURCE_SNAPSHOT_INVALID",
+            "snapshot_sha256": snapshot_sha256,
             "discrepancies": [],
         }
 
@@ -158,6 +171,7 @@ def reconcile_massive_snapshot(
         return {
             "status": "UNKNOWN",
             "reason": "INDEPENDENT_SOURCE_EVIDENCE_INCOMPLETE",
+            "snapshot_sha256": snapshot_sha256,
             "missing": sorted(set(missing)),
             "discrepancies": discrepancies,
         }
@@ -165,6 +179,12 @@ def reconcile_massive_snapshot(
         return {
             "status": "MISMATCH",
             "reason": "MATERIAL_PROVIDER_DISCREPANCY",
+            "snapshot_sha256": snapshot_sha256,
             "discrepancies": discrepancies,
         }
-    return {"status": "MATCH", "reason": "OK", "discrepancies": []}
+    return {
+        "status": "MATCH",
+        "reason": "OK",
+        "snapshot_sha256": snapshot_sha256,
+        "discrepancies": [],
+    }
