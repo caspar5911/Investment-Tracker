@@ -148,3 +148,11 @@ def test_holdout_release_cannot_be_consumed_twice(tmp_path: Path) -> None:
         )
 
     assert reads == 1
+
+
+@pytest.mark.parametrize("release_id", ["../escape", "nested/path", ".", ".."])
+def test_release_id_cannot_escape_consumption_marker_directory(
+    release_id: str,
+) -> None:
+    with pytest.raises(ValidationError):
+        _release(release_id=release_id)
