@@ -20,7 +20,10 @@ jobs:
       - run: python -m pip install -e '.[dev,quant]'
       - run: python -m compileall -q src/investment_tracker/quant/phase6
       - name: Phase 6 pre-unseal contracts
-        run: >-\n          python -m pytest -q\n          tests/quant/test_phase6_preseal.py\n          tests/quant/test_phase6_cli.py
+        run: >-
+          python -m pytest -q
+          tests/quant/test_phase6_preseal.py
+          tests/quant/test_phase6_cli.py
       - name: Generate Phase 6 pre-unseal readiness
         run: |
           python -m investment_tracker.quant.phase6.cli preflight \
@@ -42,10 +45,14 @@ jobs:
           tests/quant/test_phase4_finalization_audit.py
       - name: Verify sealed Phase 4 evidence remains untouched
         run: |
-          git diff --exit-code 69bb4347cbe577c4a1277335eef778ddf5b177d0 HEAD --             src/investment_tracker/quant/phase4             results/phase4/finalization
+          git diff --exit-code 69bb4347cbe577c4a1277335eef778ddf5b177d0 HEAD -- \
+            src/investment_tracker/quant/phase4 \
+            results/phase4/finalization
       - name: Ensure pre-unseal package has no provider or trading surface
         run: |
-          ! grep -R -n -E 'OpenQuoteContext|request_history_kline|OpenSecTradeContext|place_order|unlock_trade|modify_order'             src/investment_tracker/quant/phase6
+          ! grep -R -n -E 'OpenQuoteContext|request_history_kline|OpenSecTradeContext|place_order|unlock_trade|modify_order' \
+            src/investment_tracker/quant/phase6
       - name: Ensure locked replacement symbols are not embedded in Phase 6 code
         run: |
-          ! grep -R -n -E 'HACK|SOXX|NLR|URNM|GEV'             src/investment_tracker/quant/phase6
+          ! grep -R -n -E 'HACK|SOXX|NLR|URNM|GEV' \
+            src/investment_tracker/quant/phase6
