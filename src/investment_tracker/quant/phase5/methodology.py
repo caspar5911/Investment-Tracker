@@ -4,18 +4,25 @@ from investment_tracker.quant.phase4.engine.models import FixedStrategyBinding
 
 PHASE4_FINALIZATION_COMMIT = "69bb4347cbe577c4a1277335eef778ddf5b177d0"
 PHASE4_DECISION_CONTENT_SHA256 = "913d14c1061c2cbbb16e66b448b715952c4a360dbda299500eacd0fd61156958"
+PHASE4_AUDIT_CONTENT_SHA256 = "684c80fddf5557ff45fe03d8e6fab9ee65c8402f5c18af49f14b4c3188b00411"
+PHASE4_MANIFEST_CONTENT_SHA256 = "a4b18e3a97b662b8e2a9134647d759b95bafa41b3f1a53716b77505b2a275281"
+SELECTED_RESULT_CONTENT_SHA256 = "77d5d9c131ce57f81a4e40fe6657bcf41ae7dde39995795c337ddbc8ac5f193e"
 SELECTED_CANDIDATE_ID = "phase4-d2dbf6f8170a2268972793148db44d29cd42476b65660f136996460bb2d16075"
 SELECTED_BINDING_SHA256 = "9ff5b11e1b7f381ce574f4b0fc37a16d824e64afa5afeba16be54980c3ed5d3a"
 SELECTED_IMPLEMENTATION_SHA256 = "bebb913887573a293e6a8cf23ad3d28e5fa3bbd2f613995e37741ec4d80f7c6f"
-SYMBOLS = ("SPY", "QQQ", "IWM", "TLT", "IEF", "GLD", "VNQ", "XLP")
+
+SYMBOLS = ("GLD", "IEF", "IWM", "QQQ", "SPY", "TLT", "VNQ", "XLP")
 PROTECTED_SYMBOLS = frozenset(("HACK", "SOXX", "NLR", "URNM", "GEV"))
-ACQUISITION_START = "2004-01-01"
-ACQUISITION_END = "2022-12-30"
+ACQUISITION_REQUEST_START = "1990-01-01"
+ACQUISITION_CUTOFF = "2026-09-18"
 PRIMARY_FRICTION_BPS = 3
-STRESS_FRICTION_BPS = (10, 25, 50)
-MINIMUM_COMMON_YEARS = 15.0
+FRICTION_CASE_BPS = (0, 3, 10, 25, 50)
 INITIAL_CASH = 100000.0
-WARMUP_OBSERVATIONS = 147
+LOOKBACK_SESSIONS = 126
+SKIP_SESSIONS = 21
+TOP_K = 3
+REBALANCE_SESSIONS = 21
+FIRST_SIGNAL_POSITION = LOOKBACK_SESSIONS + SKIP_SESSIONS
 
 _BINDING_PAYLOAD = {
     "binding_sha256": SELECTED_BINDING_SHA256,
@@ -55,10 +62,12 @@ def frozen_binding() -> FixedStrategyBinding:
     return binding
 
 
-def assert_allowed_symbols(symbols: tuple[str, ...] | list[str] | set[str]) -> tuple[str, ...]:
-    values = tuple(sorted(str(item).upper() for item in symbols))
+def assert_requested_symbols(symbols: object) -> tuple[str, ...]:
+    if isinstance(symbols, (str, bytes)):
+        raise ValueError("PHASE5_SYMBOL_REQUEST_INVALID")
+    values = tuple(str(item).upper() for item in symbols)  # type: ignore[arg-type]
     if set(values) & PROTECTED_SYMBOLS:
         raise ValueError("PHASE5_PROTECTED_SYMBOL_ACCESS_FORBIDDEN")
-    if values != tuple(sorted(SYMBOLS)):
+    if len(values) != len(SYMBOLS) or set(values) != set(SYMBOLS):
         raise ValueError("PHASE5_UNIVERSE_MISMATCH")
-    return values
+    return SYMBOLS
