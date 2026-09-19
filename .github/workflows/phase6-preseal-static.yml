@@ -24,6 +24,7 @@ jobs:
           python -m pytest -q
           tests/quant/test_phase6_preseal.py
           tests/quant/test_phase6_cli.py
+          tests/quant/test_phase6_bundle_gate.py
       - name: Generate Phase 6 pre-unseal readiness
         run: |
           python -m investment_tracker.quant.phase6.cli preflight \
