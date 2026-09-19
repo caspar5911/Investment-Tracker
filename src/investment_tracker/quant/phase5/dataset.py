@@ -33,6 +33,13 @@ class DividendEvent:
 
 
 @dataclass(frozen=True)
+class DividendCoverageGap:
+    symbol: str
+    ex_date: pd.Timestamp
+    reason: str
+
+
+@dataclass(frozen=True)
 class SplitEvent:
     symbol: str
     effective_date: pd.Timestamp
@@ -55,18 +62,51 @@ class Phase5Dataset:
     first_common_session: str
     last_common_session: str
     common_history_years: float
+    signal_sessions: tuple[pd.Timestamp, ...] | None = None
+    dividend_coverage_gaps: tuple[DividendCoverageGap, ...] = ()
+    latest_unsupported_dividend_ex_date: str | None = None
 
 
 def _hash(path: Path) -> str:
     return sha256(path.read_bytes()).hexdigest()
 
 
+_MONTHS = {
+    "jan": 1, "january": 1,
+    "feb": 2, "february": 2,
+    "mar": 3, "march": 3,
+    "apr": 4, "april": 4,
+    "may": 5,
+    "jun": 6, "june": 6,
+    "jul": 7, "july": 7,
+    "aug": 8, "august": 8,
+    "sep": 9, "sept": 9, "september": 9,
+    "oct": 10, "october": 10,
+    "nov": 11, "november": 11,
+    "dec": 12, "december": 12,
+}
+
+
 def _timestamp(value: object, *, field: str) -> pd.Timestamp:
-    text = str(value).strip().replace("/", "-")
+    text = " ".join(str(value).strip().split())
     if not text or text.lower() in {"nan", "none"}:
         raise ValueError(f"PHASE5_DATE_MISSING:{field}")
+
+    iso = re.match(r"^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:$|[ T])", text)
+    if iso:
+        year, month, day = (int(part) for part in iso.groups())
+    else:
+        named = re.match(r"^([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})(?:$|\s)", text)
+        if not named:
+            raise ValueError(f"PHASE5_DATE_INVALID:{field}")
+        month_name, day_text, year_text = named.groups()
+        month = _MONTHS.get(month_name.lower())
+        if month is None:
+            raise ValueError(f"PHASE5_DATE_INVALID:{field}")
+        year, day = int(year_text), int(day_text)
+
     try:
-        return pd.Timestamp(text[:10], tz="UTC")
+        return pd.Timestamp(f"{year:04d}-{month:02d}-{day:02d}", tz="UTC")
     except ValueError as exc:
         raise ValueError(f"PHASE5_DATE_INVALID:{field}") from exc
 
@@ -216,7 +256,11 @@ def _currency(statement: object) -> str:
     raise ValueError("PHASE5_DIVIDEND_CURRENCY_UNKNOWN")
 
 
-def _dividends(symbol: str, rehab: tuple[RehabEvent, ...], response: dict[str, object]) -> tuple[DividendEvent, ...]:
+def _dividends(
+    symbol: str,
+    rehab: tuple[RehabEvent, ...],
+    response: dict[str, object],
+) -> tuple[tuple[DividendEvent, ...], tuple[DividendCoverageGap, ...]]:
     records = response.get("dividend_list", [])
     if not isinstance(records, list):
         raise ValueError(f"PHASE5_DIVIDEND_HISTORY_INVALID:{symbol}")
@@ -225,22 +269,47 @@ def _dividends(symbol: str, rehab: tuple[RehabEvent, ...], response: dict[str, o
         if not isinstance(raw, dict) or not raw.get("ex_date"):
             continue
         by_ex.setdefault(_timestamp(raw["ex_date"], field="dividend_ex_date"), []).append(raw)
+
     result: list[DividendEvent] = []
+    gaps: list[DividendCoverageGap] = []
     for item in rehab:
         if item.cash_dividend <= 0.0:
             continue
         matches = by_ex.get(item.ex_date, [])
-        if len(matches) != 1:
+        if not matches:
+            gaps.append(DividendCoverageGap(symbol, item.ex_date, "DIVIDEND_DETAIL_MISSING"))
+            continue
+        if len(matches) > 1:
             raise ValueError(f"PHASE5_DIVIDEND_PAYDATE_AMBIGUOUS:{symbol}:{item.ex_date.date()}")
+
         raw = matches[0]
-        pay_date = _timestamp(raw.get("dividend_payable_date"), field="dividend_payable_date")
+        pay_value = raw.get("dividend_payable_date")
+        if pay_value is None or str(pay_value).strip().lower() in {"", "nan", "none"}:
+            gaps.append(DividendCoverageGap(symbol, item.ex_date, "DIVIDEND_PAYDATE_MISSING"))
+            continue
+        pay_date = _timestamp(pay_value, field="dividend_payable_date")
         if pay_date < item.ex_date:
             raise ValueError(f"PHASE5_DIVIDEND_PAYDATE_INVALID:{symbol}")
         currency = _currency(raw.get("statement"))
         if currency != "USD":
             raise ValueError(f"PHASE5_DIVIDEND_CURRENCY_NOT_USD:{symbol}:{currency}")
         result.append(DividendEvent(symbol, item.ex_date, pay_date, item.cash_dividend, currency))
-    return tuple(result)
+    return tuple(result), tuple(gaps)
+
+
+def _first_defensible_accounting_session(
+    common_sessions: pd.DatetimeIndex,
+    gaps: tuple[DividendCoverageGap, ...],
+) -> pd.Timestamp:
+    if common_sessions.empty:
+        raise ValueError("PHASE5_COMMON_HISTORY_EMPTY")
+    if not gaps:
+        return pd.Timestamp(common_sessions[0])
+    latest_gap = max(item.ex_date for item in gaps)
+    eligible = common_sessions[common_sessions > latest_gap]
+    if eligible.empty:
+        raise ValueError("PHASE5_ACCOUNTING_BOUNDARY_EMPTY")
+    return pd.Timestamp(eligible[0])
 
 
 def load_opend_dataset(root: Path) -> Phase5Dataset:
@@ -249,37 +318,54 @@ def load_opend_dataset(root: Path) -> Phase5Dataset:
     bars = {symbol: _bars(repository / "bars" / f"{symbol}.csv") for symbol in SYMBOLS}
     rehab = {symbol: _rehab(repository / "rehab" / f"{symbol}.csv", symbol) for symbol in SYMBOLS}
     dividends: dict[str, tuple[DividendEvent, ...]] = {}
+    gaps: list[DividendCoverageGap] = []
     splits: dict[str, tuple[SplitEvent, ...]] = {}
     for symbol in SYMBOLS:
         div_response = _load_json_response(repository / "dividends" / f"{symbol}.json", symbol)
-        dividends[symbol] = _dividends(symbol, rehab[symbol], div_response)
+        normalized_dividends, symbol_gaps = _dividends(symbol, rehab[symbol], div_response)
+        dividends[symbol] = normalized_dividends
+        gaps.extend(symbol_gaps)
         _load_json_response(repository / "splits" / f"{symbol}.json", symbol)
         splits[symbol] = tuple(
             SplitEvent(symbol, event.ex_date, event.split_multiplier)
             for event in rehab[symbol] if event.split_multiplier is not None
         )
-    common = bars[SYMBOLS[0]].index
+
+    signal_common = bars[SYMBOLS[0]].index
     for symbol in SYMBOLS[1:]:
-        common = common.intersection(bars[symbol].index)
-    common = common.sort_values()
-    if len(common) < 2:
+        signal_common = signal_common.intersection(bars[symbol].index)
+    signal_common = signal_common.sort_values()
+    if len(signal_common) < 2:
         raise ValueError("PHASE5_COMMON_HISTORY_EMPTY")
     for symbol in SYMBOLS:
-        bars[symbol] = bars[symbol].loc[common].copy()
-    years = (common[-1] - common[0]).total_seconds() / 86400.0 / 365.25
+        bars[symbol] = bars[symbol].loc[signal_common].copy()
+
+    ordered_gaps = tuple(sorted(gaps, key=lambda item: (item.ex_date, item.symbol, item.reason)))
+    accounting_start = _first_defensible_accounting_session(signal_common, ordered_gaps)
+    accounting_common = signal_common[signal_common >= accounting_start]
+    if len(accounting_common) < 2:
+        raise ValueError("PHASE5_ACCOUNTING_HISTORY_EMPTY")
+    years = (accounting_common[-1] - accounting_common[0]).total_seconds() / 86400.0 / 365.25
+    latest_gap = max((item.ex_date for item in ordered_gaps), default=None)
     return Phase5Dataset(
         bars=bars,
-        common_sessions=tuple(common),
+        common_sessions=tuple(accounting_common),
         actions=CorporateActionBook(rehab=rehab, dividends=dividends, splits=splits),
         provider_manifest_sha256=_hash(repository / "manifest.json"),
-        first_common_session=common[0].strftime("%Y-%m-%d"),
-        last_common_session=common[-1].strftime("%Y-%m-%d"),
+        first_common_session=accounting_common[0].strftime("%Y-%m-%d"),
+        last_common_session=accounting_common[-1].strftime("%Y-%m-%d"),
         common_history_years=float(years),
+        signal_sessions=tuple(signal_common),
+        dividend_coverage_gaps=ordered_gaps,
+        latest_unsupported_dividend_ex_date=(
+            None if latest_gap is None else latest_gap.strftime("%Y-%m-%d")
+        ),
     )
 
 
 def raw_close_frame(dataset: Phase5Dataset) -> pd.DataFrame:
+    sessions = dataset.signal_sessions or dataset.common_sessions
     return pd.DataFrame(
         {symbol: dataset.bars[symbol]["close"] for symbol in SYMBOLS},
-        index=pd.DatetimeIndex(dataset.common_sessions),
+        index=pd.DatetimeIndex(sessions),
     )
