@@ -2,6 +2,7 @@ import pandas as pd
 import pytest
 
 from investment_tracker.quant.phase5.accounting import replay_targets
+from investment_tracker.quant.phase5.benchmark import build_benchmark
 from investment_tracker.quant.phase5.dataset import (
     CorporateActionBook,
     DividendEvent,
@@ -73,3 +74,27 @@ def test_next_open_fill_dividend_receivable_paydate_and_split_continuity():
     assert result.states[4].receivable == pytest.approx(0.0)
     assert result.states[4].cash == pytest.approx(1000.0)
     assert all(state.realized_gross_exposure <= 1.0 + 1e-12 for state in result.states)
+
+
+def test_benchmark_can_start_at_dq_boundary_without_resetting_frozen_clock():
+    dataset = _dataset()
+    sessions = dataset.common_sessions
+    targets = (
+        TargetDecision(
+            pd.Timestamp("2019-12-30", tz="UTC"),
+            pd.Timestamp("2019-12-31", tz="UTC"),
+            (("QQQ", 1.0),),
+        ),
+        TargetDecision(sessions[0], sessions[1], (("QQQ", 1.0),)),
+    )
+
+    result = build_benchmark(
+        dataset,
+        targets,
+        friction_bps=0,
+        start_session=sessions[0],
+    )
+
+    assert result.sessions[0] == sessions[0]
+    assert result.sessions[-1] == sessions[-1]
+    assert result.total_turnover == pytest.approx(100000.0)
