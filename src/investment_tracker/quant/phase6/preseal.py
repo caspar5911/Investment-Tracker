@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from hashlib import sha256
 from pathlib import Path
 from typing import Generic, Literal, TypeVar
 import json
@@ -137,3 +138,44 @@ def consume_released_holdout(
         ) from exc
 
     return payload_reader()
+
+
+def validate_evaluation_contract_identity(
+    release: HoldoutRelease,
+    path: Path,
+) -> None:
+    release = HoldoutRelease.model_validate(release.model_dump(mode="json"))
+    try:
+        payload = Path(path).read_bytes()
+    except OSError as exc:
+        raise ValueError("PHASE6_EVALUATION_CONTRACT_MISSING") from exc
+    if sha256(payload).hexdigest() != release.evaluation_contract_sha256:
+        raise ValueError("PHASE6_EVALUATION_CONTRACT_IDENTITY_MISMATCH")
+
+
+def consume_released_bundle(
+    release: HoldoutRelease,
+    *,
+    evaluation_contract_path: Path,
+    bundle_path: Path,
+    marker_directory: Path,
+) -> bytes:
+    # The evaluation contract is governance metadata and may be verified before
+    # the irreversible holdout boundary. The holdout bundle itself is not read
+    # until consume_released_holdout has exclusive-created the marker.
+    validate_evaluation_contract_identity(release, evaluation_contract_path)
+
+    def read_and_verify_bundle() -> bytes:
+        try:
+            payload = Path(bundle_path).read_bytes()
+        except OSError as exc:
+            raise ValueError("PHASE6_HOLDOUT_BUNDLE_MISSING") from exc
+        if sha256(payload).hexdigest() != release.holdout_bundle_sha256:
+            raise ValueError("PHASE6_HOLDOUT_BUNDLE_IDENTITY_MISMATCH")
+        return payload
+
+    return consume_released_holdout(
+        release,
+        marker_directory=marker_directory,
+        payload_reader=read_and_verify_bundle,
+    )
