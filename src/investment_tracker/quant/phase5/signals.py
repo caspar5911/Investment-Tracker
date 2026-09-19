@@ -55,6 +55,35 @@ def generate_targets(raw_close: pd.DataFrame, rehab: dict[str, tuple[RehabEvent,
     return tuple(targets)
 
 
+def generate_targets_for_reference_sessions(
+    raw_close: pd.DataFrame,
+    rehab: dict[str, tuple[RehabEvent, ...]],
+    reference: tuple[TargetDecision, ...],
+) -> tuple[TargetDecision, ...]:
+    """Regenerate the frozen signal only on sealed Phase 4 signal timestamps.
+
+    This equivalence path deliberately does not inherit the long-history rebalance
+    clock, whose first scored session is earlier than Phase 4 VALIDATION.
+    """
+    sessions = tuple(raw_close.index)
+    position_of = {session: index for index, session in enumerate(sessions)}
+    binding = frozen_binding()
+    generated: list[TargetDecision] = []
+    for item in reference:
+        if item.signal_session not in position_of:
+            raise ValueError("PHASE5_EQUIVALENCE_SIGNAL_SESSION_MISSING")
+        position = position_of[item.signal_session]
+        if position < FIRST_SIGNAL_POSITION:
+            raise ValueError("PHASE5_EQUIVALENCE_WARMUP_INSUFFICIENT")
+        expected_due = sessions[position + 1] if position + 1 < len(sessions) else None
+        if expected_due != item.due_session:
+            raise ValueError("PHASE5_EQUIVALENCE_DUE_SESSION_MISMATCH")
+        adjusted = causal_adjusted_history(raw_close, rehab, item.signal_session)
+        weights = _cross_sectional_absolute_momentum(binding, adjusted)
+        generated.append(TargetDecision(item.signal_session, item.due_session, tuple(weights)))
+    return tuple(generated)
+
+
 def target_equivalence(generated: tuple[TargetDecision, ...], sealed: tuple[TargetDecision, ...]) -> dict[str, object]:
     generated_by_signal = {item.signal_session: item for item in generated}
     mismatches: list[dict[str, object]] = []
