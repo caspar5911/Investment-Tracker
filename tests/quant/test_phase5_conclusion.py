@@ -1,3 +1,6 @@
+import pytest
+
+from investment_tracker.quant.phase5.artifacts import seal_evaluation
 from investment_tracker.quant.phase5.conclusion import classify_phase5
 
 
@@ -52,3 +55,19 @@ def test_complete_negative_hard_condition_contradicts():
         friction_25={**_metrics(), "total_return": 0.3},
     )
     assert result["status"] == "PHASE5_DURABILITY_CONTRADICTED"
+
+
+def test_unknown_evaluation_cannot_be_sealed(tmp_path):
+    with pytest.raises(ValueError, match="PHASE5_SEAL_REQUIRES_DECISION_GRADE_EVALUATION"):
+        seal_evaluation(
+            tmp_path,
+            {
+                "status": "PHASE5_UNKNOWN_ABSTAIN",
+                "reasons": ["INDEPENDENT_SOURCE_EVIDENCE_INCOMPLETE"],
+                "safety": {},
+            },
+            source_revision="a" * 40,
+            spec_content_sha256="b" * 64,
+        )
+
+    assert not list(tmp_path.rglob("record.json"))
