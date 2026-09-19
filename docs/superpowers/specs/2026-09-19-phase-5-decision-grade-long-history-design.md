@@ -103,14 +103,36 @@ symbols' first defensible daily-history session. No ETF may be substituted and
 no proxy may extend the history. The report records the actual common start,
 end, session count, and calendar duration.
 
+If OpenD rehabilitation evidence contains a positive cash-dividend event for
+which the separate OpenD dividend-detail response has zero matching ex-date
+records, or exactly one matching record but no usable pay date, that event is a
+provider-coverage gap rather than an invented dividend record. Duplicate
+matching detail rows remain a fail-closed ambiguity. Before any performance is
+computed, Phase 5 derives the accounting boundary from data quality alone:
+identify the latest provider-coverage-gap ex-date across the authorized eight
+symbols, then select the first eight-symbol common regular session strictly
+after that event. If no such gap exists, the first raw common session remains
+the accounting start. No observed return, target, benchmark result, or
+durability metric may influence this boundary.
+
+Raw pre-boundary bars and rehabilitation rows may be retained only for causal
+signal warm-up and the sealed Phase 4 target-equivalence check. They may not
+create pre-boundary holdings, dividend entitlements, portfolio P&L, or
+performance evidence. This provider-coverage rule is a narrow DQ amendment
+forced by the observed OpenD history contract; it does not change the frozen
+strategy, target ranking, rebalance clock, execution timing, or thresholds.
+
 The desired history remains approximately 15–20 years when defensible, but the
 contract requires the longest defensible common history rather than a forced
 length.
 
-For comparison with the sealed Phase 4 campaign, Phase 5 also emits an exact
-2019-01-02 through 2022-12-30 reconstruction slice when those sessions are
-present. Earlier observations may initialize indicators only; portfolio state
-for that comparison slice begins fresh at its first scored session.
+For comparison with the sealed Phase 4 campaign, the target-set equivalence
+check remains exact over the 2019-01-02 through 2022-12-30 comparable signal
+sessions whenever raw bars and rehabilitation rows are present. Decision-grade
+raw-price accounting for that comparison is restricted to the overlap beginning
+at the mechanically derived accounting boundary and is explicitly labelled if
+the requested 2019 start is truncated. Missing pre-boundary pay dates are never
+imputed merely to manufacture an exact accounting slice.
 
 ## Authoritative data source: Moomoo OpenD
 
