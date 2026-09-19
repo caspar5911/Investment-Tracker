@@ -21,6 +21,20 @@ jobs:
       - run: python -m compileall -q src/investment_tracker/quant/phase6
       - name: Phase 6 pre-unseal contracts
         run: >-\n          python -m pytest -q\n          tests/quant/test_phase6_preseal.py\n          tests/quant/test_phase6_cli.py
+      - name: Generate Phase 6 pre-unseal readiness
+        run: |
+          python -m investment_tracker.quant.phase6.cli preflight \
+            --repository-root . \
+            --output /tmp/phase6-preflight.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          value = json.loads(Path("/tmp/phase6-preflight.json").read_text())
+          assert value["status"] == "PHASE6_READY_FOR_INDEPENDENT_AUDIT_RELEASE"
+          assert value["safety"]["final_holdout_accessed"] is False
+          assert value["safety"]["protected_symbols_accessed"] == []
+          assert value["safety"]["phase7_started"] is False
+          PY
       - name: Phase 4 authority regressions
         run: >-
           python -m pytest -q
