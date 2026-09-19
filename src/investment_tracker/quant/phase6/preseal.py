@@ -32,7 +32,7 @@ class HoldoutRelease(BaseModel):
     schema_version: Literal["PHASE6-HOLDOUT-RELEASE-v1"]
     authority: Literal["INDEPENDENT_AUDIT"]
     status: Literal["FINAL_HOLDOUT_RELEASE_AUTHORIZED"]
-    release_id: str = Field(min_length=1)
+    release_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
     holdout_id: str = Field(min_length=1)
     candidate_id: str = Field(min_length=1)
     binding_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
