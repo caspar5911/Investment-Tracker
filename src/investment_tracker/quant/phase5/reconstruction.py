@@ -12,7 +12,7 @@ from .dataset import load_opend_dataset, raw_close_frame
 from .durability import calculate_durability
 from .methodology import FRICTION_CASE_BPS, PRIMARY_FRICTION_BPS
 from .reconciliation import reconcile_massive_snapshot
-from .signals import generate_targets, target_equivalence
+from .signals import generate_targets, generate_targets_for_reference_sessions, target_equivalence
 from .targets import extract_sealed_validation_targets
 
 
@@ -52,7 +52,10 @@ def evaluate_bundle(
     try:
         targets = generate_targets(raw_close, dataset.actions.rehab)
         sealed_targets = extract_sealed_validation_targets(repository_root)
-        equivalence = target_equivalence(targets, sealed_targets)
+        comparison_generated = generate_targets_for_reference_sessions(
+            raw_close, dataset.actions.rehab, sealed_targets
+        )
+        equivalence = target_equivalence(comparison_generated, sealed_targets)
     except (OSError, ValueError) as exc:
         return {
             "status": "PHASE5_UNKNOWN_ABSTAIN",
