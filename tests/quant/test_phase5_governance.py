@@ -181,3 +181,59 @@ def test_massive_reconciliation_records_exact_snapshot_identity(tmp_path):
 
     assert result["status"] == "MATCH"
     assert result["snapshot_sha256"] == sha256(snapshot_path.read_bytes()).hexdigest()
+
+
+def test_multicomponent_dividend_reconciles_to_rehab_total():
+    ex_date = pd.Timestamp("2020-03-10", tz="UTC")
+    pay_date = pd.Timestamp("2020-03-13", tz="UTC")
+    rehab = (
+        dataset.RehabEvent("VNQ", ex_date, 0.99225, 0.0, 0.6479, None),
+    )
+    response = {
+        "dividend_list": [
+            {
+                "ex_date": "Mar 10, 2020",
+                "dividend_payable_date": "Mar 13, 2020",
+                "statement": "Cash Dividend: 0.37837USD",
+            },
+            {
+                "ex_date": "Mar 10, 2020",
+                "dividend_payable_date": "Mar 13, 2020",
+                "statement": "Cash Gain: 0.26953USD",
+            },
+        ]
+    }
+
+    events, gaps = dataset._dividends("VNQ", rehab, response)
+
+    assert gaps == ()
+    assert events == (
+        dataset.DividendEvent("VNQ", ex_date, pay_date, 0.6479, "USD"),
+    )
+
+
+def test_multicomponent_dividend_must_reconcile_to_rehab_total():
+    ex_date = pd.Timestamp("2020-03-10", tz="UTC")
+    rehab = (
+        dataset.RehabEvent("VNQ", ex_date, 0.99225, 0.0, 0.6479, None),
+    )
+    response = {
+        "dividend_list": [
+            {
+                "ex_date": "Mar 10, 2020",
+                "dividend_payable_date": "Mar 13, 2020",
+                "statement": "Cash Dividend: 0.37837USD",
+            },
+            {
+                "ex_date": "Mar 10, 2020",
+                "dividend_payable_date": "Mar 13, 2020",
+                "statement": "Cash Gain: 0.20000USD",
+            },
+        ]
+    }
+
+    with pytest.raises(
+        ValueError,
+        match="PHASE5_DIVIDEND_PAYDATE_AMBIGUOUS:VNQ:2020-03-10",
+    ):
+        dataset._dividends("VNQ", rehab, response)
