@@ -34,3 +34,26 @@ def test_past_rehab_event_adjusts_only_pre_event_history():
     adjusted = causal_adjusted_history(frame, rehab, index[-1])
     assert adjusted.loc[index[9], "SPY"] == 99.0
     assert adjusted.loc[index[10], "SPY"] == 100.0
+
+
+def test_reference_session_equivalence_uses_sealed_dates_not_long_history_clock():
+    from investment_tracker.quant.phase5.signals import (
+        TargetDecision,
+        generate_targets_for_reference_sessions,
+    )
+
+    index = pd.bdate_range("2018-01-02", periods=420, tz="UTC")
+    frame = pd.DataFrame(
+        {
+            symbol: [100.0 + i * (1.0 + j / 100.0) for i in range(len(index))]
+            for j, symbol in enumerate(SYMBOLS)
+        },
+        index=index,
+    )
+    rehab = {symbol: () for symbol in SYMBOLS}
+    signal = index[300]
+    due = index[301]
+    reference = (TargetDecision(signal, due, ()),)
+    generated = generate_targets_for_reference_sessions(frame, rehab, reference)
+    assert generated[0].signal_session == signal
+    assert generated[0].due_session == due
