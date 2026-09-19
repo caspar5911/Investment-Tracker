@@ -1,9 +1,12 @@
+from hashlib import sha256
+import json
 from pathlib import Path
 
 import pandas as pd
 import pytest
 
 from investment_tracker.quant.phase5 import dataset, opend
+from investment_tracker.quant.phase5.reconciliation import reconcile_massive_snapshot
 from investment_tracker.quant.phase5.methodology import (
     PROTECTED_SYMBOLS,
     SYMBOLS,
@@ -129,3 +132,52 @@ def test_duplicate_dividend_detail_remains_ambiguous():
 
     with pytest.raises(ValueError, match="PHASE5_DIVIDEND_PAYDATE_AMBIGUOUS:QQQ:2020-03-23"):
         dataset._dividends("QQQ", rehab, {"dividend_list": [record, dict(record)]})
+
+
+def test_massive_reconciliation_records_exact_snapshot_identity(tmp_path):
+    session = pd.Timestamp("2020-01-02", tz="UTC")
+    frame = pd.DataFrame(
+        {
+            "open": [100.0],
+            "high": [101.0],
+            "low": [99.0],
+            "close": [101.0],
+            "volume": [1000.0],
+        },
+        index=pd.DatetimeIndex([session]),
+    )
+    actions = dataset.CorporateActionBook(
+        rehab={"GLD": ()},
+        dividends={"GLD": ()},
+        splits={"GLD": ()},
+    )
+    phase5_dataset = dataset.Phase5Dataset(
+        bars={"GLD": frame},
+        common_sessions=(session,),
+        actions=actions,
+        provider_manifest_sha256="0" * 64,
+        first_common_session="2020-01-02",
+        last_common_session="2020-01-02",
+        common_history_years=0.0,
+    )
+    snapshot = {
+        "schema_version": "PHASE5-MASSIVE-CROSSCHECK-v1",
+        "provider": "MASSIVE",
+        "bars": {"GLD": {"2020-01-02": {"open": 100.0, "close": 101.0}}},
+        "dividends": {"GLD": []},
+        "splits": {"GLD": []},
+    }
+    snapshot_path = tmp_path / "massive.json"
+    snapshot_path.write_text(
+        json.dumps(snapshot, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+
+    result = reconcile_massive_snapshot(
+        phase5_dataset,
+        snapshot_path,
+        fill_sessions={"2020-01-02"},
+    )
+
+    assert result["status"] == "MATCH"
+    assert result["snapshot_sha256"] == sha256(snapshot_path.read_bytes()).hexdigest()
