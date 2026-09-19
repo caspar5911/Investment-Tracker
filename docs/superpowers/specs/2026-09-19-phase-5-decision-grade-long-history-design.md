@@ -106,9 +106,18 @@ end, session count, and calendar duration.
 If OpenD rehabilitation evidence contains a positive cash-dividend event for
 which the separate OpenD dividend-detail response has zero matching ex-date
 records, or exactly one matching record but no usable pay date, that event is a
-provider-coverage gap rather than an invented dividend record. Duplicate
-matching detail rows remain a fail-closed ambiguity. Before any performance is
-computed, Phase 5 derives the accounting boundary from data quality alone:
+provider-coverage gap rather than an invented dividend record. Multiple
+matching detail rows may represent one provider-split cash distribution rather
+than duplicate evidence. They are accepted only when every row is distinct,
+all rows have one common usable pay date, every row is explicitly USD with one
+parseable nonnegative cash amount in its provider statement, and those
+component amounts sum to the rehabilitation `per_cash_div` within absolute
+tolerance `1e-8`. The normalized accounting event retains the rehabilitation
+cash total and common pay date. Exact duplicate rows, differing pay dates,
+unparseable components, non-USD components, or a non-reconciling component sum
+remain fail-closed ambiguity. This normalization rule is provider/DQ-driven and
+cannot use performance results. Before any performance is computed, Phase 5
+derives the accounting boundary from data quality alone:
 identify the latest provider-coverage-gap ex-date across the authorized eight
 symbols, then select the first eight-symbol common regular session strictly
 after that event. If no such gap exists, the first raw common session remains
