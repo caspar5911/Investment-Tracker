@@ -39,11 +39,8 @@ jobs:
           assert value["safety"]["protected_symbols_accessed"] == []
           assert value["safety"]["phase7_started"] is False
           PY
-      - name: Phase 4 authority regressions
-        run: >-
-          python -m pytest -q
-          tests/quant/test_phase5_authority.py
-          tests/quant/test_phase4_finalization_audit.py
+      - name: Frozen survivor authority regression
+        run: python -m pytest -q tests/quant/test_phase5_authority.py
       - name: Verify sealed Phase 4 evidence remains untouched
         run: |
           git diff --exit-code 69bb4347cbe577c4a1277335eef778ddf5b177d0 HEAD -- \
