@@ -30,7 +30,7 @@ jobs:
       - name: Phase 4 regression contracts used by Phase 5
         run: >-
           python -m pytest -q
-          tests/quant/test_phase4_gate2_strategy.py
+          tests/quant/test_phase4_gate2_strategies.py
           tests/quant/test_phase4_gate2_durability.py
           tests/quant/test_phase4_gate2_robustness.py
       - name: Verify Phase 4 implementation and final evidence are untouched
