@@ -1,0 +1,711 @@
+from __future__ import annotations
+
+import json
+import io
+import platform
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+import pytest
+from tests.quant.gate2_boundary_guard import (
+    Gate2FilesystemBoundaryGuard,
+    Gate2FilesystemViolation,
+)
+
+try:
+    import investment_tracker.quant.phase4.engine.seal as _seal_module
+    from investment_tracker.quant.phase4.engine.artifacts import Gate2ArtifactStore
+    from investment_tracker.quant.phase4.engine.authority import (
+        load_gate2_authority,
+    )
+    from investment_tracker.quant.phase4.engine.conformance import (
+        SyntheticConformanceRecord,
+    )
+    from investment_tracker.quant.phase4.engine.models import (
+        CandidateBindingSet,
+        DirectDependencyIdentity,
+        EngineContract,
+        FamilyBindingSet,
+        Gate2ArtifactIdentity,
+        Gate2SealError,
+        Gate2SealResult,
+        Phase4EngineManifest,
+    )
+    from investment_tracker.quant.phase4.engine.source_identity import (
+        GATE2_SOURCE_BUNDLES,
+        source_bundle_identity,
+    )
+
+    seal_gate2 = _seal_module.seal_gate2
+    _SEAL_IMPORT_ERROR: Exception | None = None
+except (ImportError, AttributeError) as _exc:  # pragma: no cover - RED marker
+    _seal_module = None
+    seal_gate2 = None
+    _SEAL_IMPORT_ERROR = _exc
+
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+BRANCH = "codex/phase4-gate2"
+STARTING_REVISION = "fb1c30a6c9789bddf2033301977fc8e2f3ebc1a0"
+GATE1_MANIFEST_CONTENT_SHA256 = (
+    "dd175f7c61a9ea01353f5923c7c407720768553f92c73301e46cbc02b0723a89"
+)
+NON_FINAL_KINDS = (
+    "engine_contract",
+    "family_implementation_bindings",
+    "candidate_implementation_bindings",
+    "synthetic_conformance",
+    "phase4_engine_report",
+)
+WRITE_ORDER = NON_FINAL_KINDS + ("phase4_engine_manifest",)
+FORBIDDEN_BOUNDARY_RELATIVE_PATHS = (
+    "data/HACK.csv",
+    "data/market_bars.csv",
+    "results/latest.json",
+    "results/phase4/validation_results.json",
+    "FINAL_HOLDOUT/GEV.parquet",
+    "providers/source.py",
+    "cache/provider-response.json",
+    "dynamic/discovery.json",
+    "results/phase4/gate2/latest.json",
+    "results/phase4/gate2/HACK.csv",
+    "results/phase4/gate2/market_bars.csv",
+    "results/phase4/gate2/validation_results.json",
+    "results/phase4/gate2/providers/source.py",
+    "results/phase4/gate2/cache/data.json",
+    "results/phase4/gate2/dynamic/discovery.json",
+)
+
+
+def _filesystem_guard(root: Path) -> Gate2FilesystemBoundaryGuard:
+    from investment_tracker.quant.phase4.engine.authority import (
+        PINNED_DIRECT_DEPENDENCIES,
+    )
+    from investment_tracker.quant.phase4.engine.source_identity import (
+        GATE2_SOURCE_BUNDLES,
+    )
+
+    return Gate2FilesystemBoundaryGuard(
+        root=root,
+        source_paths=(
+            *(root / path for path in GATE2_SOURCE_BUNDLES["engine"]),
+            *(REPOSITORY_ROOT / path for path in GATE2_SOURCE_BUNDLES["engine"]),
+        ),
+        authority_paths=(root / item.path for item in PINNED_DIRECT_DEPENDENCIES),
+        generated_root=root / "results" / "phase4" / "gate2",
+        source_discovery_roots=(
+            root
+            / "src"
+            / "investment_tracker"
+            / "quant"
+            / "phase4"
+            / "engine",
+            REPOSITORY_ROOT
+            / "src"
+            / "investment_tracker"
+            / "quant"
+            / "phase4"
+            / "engine",
+        ),
+    )
+
+
+def _require_direct_guard_rejection(operation: Any, *, kind: str) -> None:
+    try:
+        operation()
+    except Gate2FilesystemViolation as exc:
+        if str(exc).startswith(f"forbidden filesystem {kind}:"):
+            return
+        raise
+    except Exception as exc:
+        raise AssertionError(
+            f"boundary guard failed before {kind} rejection"
+        ) from exc
+    raise AssertionError(f"boundary guard failed to reject {kind}")
+
+
+def _run_git(args: list[str], cwd: Path | None = None) -> None:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=str(cwd) if cwd else None,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"git {' '.join(args)} failed rc={result.returncode}: {result.stderr}"
+        )
+
+
+def _clone_repository(dest: Path) -> Path:
+    """Create a hermetic clone of the repository checked out at the Gate 2 branch.
+
+    The seal reads Gate 1 authority and source bundles from the git history and
+    worktree, so it must run against a repository that preserves the Gate 1
+    ancestry. A local clone provides a clean, independent copy so the full suite
+    never writes to or mutates the canonical results/phase4/gate2/ evidence.
+    """
+    _run_git(["clone", "--quiet", str(REPOSITORY_ROOT), str(dest)])
+    _run_git(["checkout", "-q", BRANCH], cwd=dest)
+    return dest
+
+
+@pytest.fixture(autouse=True)
+def require_seal_types(request: pytest.FixtureRequest) -> None:
+    if _SEAL_IMPORT_ERROR is not None and (
+        "test_seal_types_are_available" not in request.node.name
+    ):
+        pytest.skip(f"Gate 2 seal unavailable: {_SEAL_IMPORT_ERROR}")
+
+
+@pytest.fixture(scope="module")
+def gate2_repo(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    dest = tmp_path_factory.mktemp("gate2-seal") / "repo"
+    return _clone_repository(dest)
+
+
+@pytest.fixture(scope="module")
+def sealed_engine(gate2_repo: Path) -> Any:
+    return seal_gate2(gate2_repo)
+
+
+def _head_revision(root: Path) -> str:
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=str(root),
+        check=True,
+        capture_output=True,
+        env={
+            "GIT_CONFIG_GLOBAL": "NUL",
+            "GIT_CONFIG_SYSTEM": "NUL",
+            "HOME": str(root),
+        },
+    ).stdout.decode("ascii").strip()
+
+
+def _store(root: Path) -> "Gate2ArtifactStore":
+    return Gate2ArtifactStore(root, root / "results")
+
+
+def _candidate_id_hash(candidate_id: str) -> str:
+    """The superseded candidate-id-only implementation identity.
+
+    The seal must NOT use this; it is asserted only to prove the binding is
+    no longer a hash of the candidate id.
+    """
+    from investment_tracker.quant.phase4.preregistration.canonical import (
+        canonical_sha256,
+    )
+
+    return canonical_sha256(
+        {"schema_version": "PHASE4-IMPL-BINDING-v1", "candidate_id": candidate_id}
+    )
+
+
+def _manifest_of(result: Any, root: Path) -> "Phase4EngineManifest":
+    payload = _store(root).verify(result.manifest)
+    return Phase4EngineManifest.model_validate(json.loads(payload))
+
+
+def test_seal_types_are_available() -> None:
+    assert _SEAL_IMPORT_ERROR is None, str(_SEAL_IMPORT_ERROR)
+    assert callable(seal_gate2)
+
+
+def test_seal_reads_no_market_validation_protected_or_dynamic_resources(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _clone_repository(tmp_path / "repo")
+    guard = _filesystem_guard(root)
+
+    def refuse(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("forbidden external seam reached during seal")
+
+    guard.install(monkeypatch)
+    import socket
+    import urllib.request
+
+    monkeypatch.setattr(socket.socket, "connect", refuse)
+    monkeypatch.setattr(urllib.request, "urlopen", refuse)
+    original_subprocess_run = subprocess.run
+
+    def allow_required_git_only(command: Any, *args: Any, **kwargs: Any) -> Any:
+        if not (
+            isinstance(command, list)
+            and len(command) >= 2
+            and command[0] == "git"
+            and command[1] in {"rev-parse", "merge-base", "cat-file"}
+        ):
+            raise AssertionError("forbidden subprocess reached during seal")
+        return original_subprocess_run(command, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", allow_required_git_only)
+
+    original_conformance = _seal_module.run_synthetic_conformance
+
+    def injected_forbidden_read(*args: Any, **kwargs: Any) -> Any:
+        for relative in FORBIDDEN_BOUNDARY_RELATIVE_PATHS:
+            def read_probe(relative: str = relative) -> None:
+                with io.open(root / relative, "rb"):
+                    pass
+
+            _require_direct_guard_rejection(read_probe, kind="read")
+        return original_conformance(*args, **kwargs)
+
+    monkeypatch.setattr(
+        _seal_module, "run_synthetic_conformance", injected_forbidden_read
+    )
+    sealed_after_read_probes = seal_gate2(root)
+    assert sealed_after_read_probes.status == "PHASE4_ENGINE_SEALED"
+    monkeypatch.setattr(
+        _seal_module, "run_synthetic_conformance", original_conformance
+    )
+
+    def injected_forbidden_discovery(*args: Any, **kwargs: Any) -> Any:
+        for relative in FORBIDDEN_BOUNDARY_RELATIVE_PATHS:
+            def discovery_probe(relative: str = relative) -> None:
+                tuple((root / relative).iterdir())
+
+            _require_direct_guard_rejection(discovery_probe, kind="discovery")
+        return original_conformance(*args, **kwargs)
+
+    monkeypatch.setattr(
+        _seal_module, "run_synthetic_conformance", injected_forbidden_discovery
+    )
+    sealed_after_discovery_probes = seal_gate2(root)
+    assert sealed_after_discovery_probes.status == "PHASE4_ENGINE_SEALED"
+    monkeypatch.setattr(
+        _seal_module, "run_synthetic_conformance", original_conformance)
+
+    result = seal_gate2(root)
+
+    assert result.status == "PHASE4_ENGINE_SEALED"
+    assert guard.read_paths
+    assert guard.discovery_paths
+
+
+def test_seal_manifest_schema_status_and_bound_identities(
+    sealed_engine,
+    gate2_repo: Path,
+) -> None:
+    result: Gate2SealResult = sealed_engine
+    assert result.status == "PHASE4_ENGINE_SEALED"
+    assert result.manifest.kind == "phase4_engine_manifest"
+    manifest = _manifest_of(result, gate2_repo)
+    assert manifest.schema_version == "PHASE4-ENGINE-MANIFEST-v1"
+    assert manifest.formula_version == "PHASE4-ENGINE-FORMULA-v1"
+    assert manifest.status == "PHASE4_ENGINE_SEALED"
+    assert manifest.starting_revision == STARTING_REVISION
+    assert manifest.head_revision == _head_revision(gate2_repo)
+    assert manifest.gate1_manifest.content_sha256 == (
+        GATE1_MANIFEST_CONTENT_SHA256
+    )
+    assert manifest.qfq_methodology_identity == (
+        "ffee9bac3fe329b14d5aebb0f6152f00fc0a86b28d9186c254b5c8f6f8a322fb"
+    )
+    assert manifest.candidate_population_sha256 == (
+        "15a33d6dceb52026661ddfba44a84a88fb306b7f64802c36dc60c6ca189a68b3"
+    )
+    authority = load_gate2_authority(gate2_repo)
+    assert manifest.family_identities == tuple(
+        family.family_id for family in authority.grids.families
+    )
+    assert len(set(manifest.family_identities)) == 4
+    assert manifest.readiness_manifest == authority.readiness_manifest
+    assert manifest.runtime.python_implementation == (
+        platform.python_implementation()
+    )
+    assert manifest.runtime.python_version == platform.python_version()
+    assert manifest.runtime.platform == sys.platform
+    assert manifest.execution_convention == "COMPLETED_BAR_SIGNAL_NEXT_BAR_OPEN"
+    assert manifest.execution_series == "QFQ_NORMALIZED"
+    assert manifest.primary_friction_bps == 3
+    assert manifest.decision_grade is False
+    assert manifest.family_count == 4
+    assert manifest.candidate_count == 180
+    assert manifest.historical_phase2_trials == 136
+    assert manifest.phase4_trials_consumed == 0
+    assert manifest.fold_status == "NOT_BOUND_GATE3_REQUIRED"
+    assert manifest.regime_status == "NOT_BOUND_GATE3_REQUIRED"
+    unavailable = manifest.unavailable_statistics
+    assert (
+        unavailable.max_drawdown is None
+        and unavailable.calmar is None
+        and unavailable.dsr is None
+        and unavailable.pbo is None
+    )
+    assert (
+        unavailable.max_drawdown_status == "UNKNOWN"
+        and unavailable.calmar_status == "UNKNOWN"
+        and unavailable.dsr_status == "UNKNOWN"
+        and unavailable.pbo_status == "UNKNOWN"
+    )
+    safety = manifest.safety
+    assert safety.real_phase4_campaign_executed is False
+    assert safety.validation_strategy_executed is False
+    assert safety.validation_metrics_accessed is False
+    assert safety.candidates_ranked is False
+    assert safety.survivor_selected is False
+    assert safety.strategy_search_executed is False
+    assert safety.external_strategy_research_performed is False
+    assert safety.final_holdout_accessed is False
+    assert safety.protected_symbols_accessed == ()
+    assert safety.provider_calls == 0
+    assert safety.downloads == 0
+    assert safety.live_trading_capability is False
+    assert safety.phase4_trials_consumed == 0
+
+
+def test_seal_source_bundles_match_independent_bundle_identity(
+    sealed_engine,
+    gate2_repo: Path,
+) -> None:
+    manifest = _manifest_of(sealed_engine, gate2_repo)
+    names = [item.bundle_name for item in manifest.source_bundles]
+    assert names == sorted(GATE2_SOURCE_BUNDLES)
+    assert len(names) == len(set(names)) == 15
+    for digest in manifest.source_bundles:
+        independent = source_bundle_identity(
+            gate2_repo,
+            manifest.head_revision,
+            GATE2_SOURCE_BUNDLES[digest.bundle_name],
+        )
+        assert digest.producing_revision == independent.producing_revision
+        assert digest.entry_count == len(independent.entries)
+        assert digest.bundle_sha256 == independent.bundle_sha256
+
+
+def _bundle_digest_by_name(manifest: Any) -> dict[str, str]:
+    return {item.bundle_name: item.bundle_sha256 for item in manifest.source_bundles}
+
+
+def test_seal_source_bundles_identify_seal_and_cli_surfaces(
+    sealed_engine,
+    gate2_repo: Path,
+) -> None:
+    manifest = _manifest_of(sealed_engine, gate2_repo)
+    names = [item.bundle_name for item in manifest.source_bundles]
+    assert "seal" in names
+    assert "cli" in names
+    assert names.count("seal") == 1 and names.count("cli") == 1
+    seal_entries = GATE2_SOURCE_BUNDLES["seal"]
+    cli_entries = GATE2_SOURCE_BUNDLES["cli"]
+    prefix = "src/investment_tracker/quant/phase4/engine/"
+    assert f"{prefix}seal.py" in seal_entries
+    assert f"{prefix}cli.py" in cli_entries
+    # The seal and cli surfaces are separately identified, not just the broad
+    # engine bundle: their digests must differ from the engine bundle.
+    digests = _bundle_digest_by_name(manifest)
+    assert digests["seal"] != digests["engine"]
+    assert digests["cli"] != digests["engine"]
+
+
+def test_candidate_bindings_bind_family_source_bundle(
+    sealed_engine,
+    gate2_repo: Path,
+) -> None:
+    manifest = _manifest_of(sealed_engine, gate2_repo)
+    digests = _bundle_digest_by_name(manifest)
+    candidate_payload = _store(gate2_repo).verify(manifest.write_ledger[2])
+    candidate_set = CandidateBindingSet.model_validate(
+        json.loads(candidate_payload)
+    )
+    assert len(candidate_set.bindings) == 180
+    for binding in candidate_set.bindings:
+        expected = digests[f"family:{binding.family_semantic_name}"]
+        # The implementation identity is the candidate's family source-bundle
+        # digest, not a hash of the candidate id.
+        assert binding.implementation_sha256 == expected
+        assert binding.implementation_sha256 != _candidate_id_hash(
+            binding.candidate_id
+        )
+
+
+def test_family_bindings_bind_gate1_family_identity_to_source_bundle(
+    sealed_engine,
+    gate2_repo: Path,
+) -> None:
+    manifest = _manifest_of(sealed_engine, gate2_repo)
+    digests = _bundle_digest_by_name(manifest)
+    authority = load_gate2_authority(gate2_repo)
+    family_payload = _store(gate2_repo).verify(manifest.write_ledger[1])
+    family_set = FamilyBindingSet.model_validate(json.loads(family_payload))
+    families_by_id = {family.family_id: family for family in authority.grids.families}
+    seen_family_ids: list[str] = []
+    for binding in family_set.bindings:
+        family = families_by_id[binding.family_id]
+        seen_family_ids.append(binding.family_id)
+        assert binding.family_semantic_name == family.family_semantic_name
+        assert binding.rule_set_sha256 == family.rule_set_sha256
+        assert binding.family_definition_sha256 == family.family_definition_sha256
+        assert binding.implementation_sha256 == digests[
+            f"family:{family.family_semantic_name}"
+        ]
+        # A family binding must not reuse an arbitrary first candidate row.
+        assert not hasattr(binding, "candidate_id")
+        assert not hasattr(binding, "parameter_tuple_sha256")
+    assert seen_family_ids == [family.family_id for family in authority.grids.families]
+
+
+def test_seal_exact_read_and_write_ledgers(
+    sealed_engine,
+    gate2_repo: Path,
+) -> None:
+    manifest = _manifest_of(sealed_engine, gate2_repo)
+    authority = load_gate2_authority(gate2_repo)
+    assert manifest.read_ledger == authority.direct_dependencies
+    assert len(manifest.read_ledger) == 15
+    assert manifest.read_ledger[0].kind == "phase4_preregistration_manifest"
+    assert tuple(item.kind for item in manifest.read_ledger[-3:]) == (
+        "phase4_readiness_manifest",
+        "phase4_split_manifest",
+        "trial_authority",
+    )
+    assert tuple(item.kind for item in manifest.write_ledger) == NON_FINAL_KINDS
+    for identity in manifest.write_ledger:
+        assert isinstance(identity, Gate2ArtifactIdentity)
+        assert identity.path.startswith(
+            f"results/phase4/gate2/{identity.kind}/sha256/"
+        )
+
+
+def _payload_keys(payload: bytes) -> set[str]:
+    def walk(value: object) -> None:
+        if isinstance(value, dict):
+            for key, item in value.items():
+                keys.add(str(key))
+                walk(item)
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                walk(item)
+
+    keys: set[str] = set()
+    walk(json.loads(payload))
+    return keys
+
+
+_FORBIDDEN_KEY_FRAGMENTS = (
+    "price",
+    "return",
+    "metric",
+    "rank",
+    "eligib",
+    "winner",
+    "survivor",
+    "score",
+    "selection",
+)
+
+
+def test_seal_bindings_are_ordered_and_free_of_performance_fields(
+    sealed_engine,
+    gate2_repo: Path,
+) -> None:
+    manifest = _manifest_of(sealed_engine, gate2_repo)
+    authority = load_gate2_authority(gate2_repo)
+    store = _store(gate2_repo)
+    family_payload = store.verify(manifest.write_ledger[1])
+    family_set = FamilyBindingSet.model_validate(json.loads(family_payload))
+    assert family_set.schema_version == "PHASE4-FAMILY-BINDINGS-v1"
+    assert len(family_set.bindings) == 4
+    assert [item.family_id for item in family_set.bindings] == [
+        family.family_id for family in authority.grids.families
+    ]
+    candidate_payload = store.verify(manifest.write_ledger[2])
+    candidate_set = CandidateBindingSet.model_validate(
+        json.loads(candidate_payload)
+    )
+    assert candidate_set.schema_version == "PHASE4-CANDIDATE-BINDINGS-v1"
+    assert len(candidate_set.bindings) == 180
+    assert [item.candidate_id for item in candidate_set.bindings] == [
+        candidate.candidate_id for candidate in authority.grids.candidates
+    ]
+    assert [item.budget_position for item in candidate_set.bindings] == list(
+        range(1, 181)
+    )
+    for payload in (family_payload, candidate_payload):
+        for key in _payload_keys(payload):
+            for fragment in _FORBIDDEN_KEY_FRAGMENTS:
+                assert fragment not in key.lower(), (key, fragment)
+
+
+def test_seal_conformance_artifact_round_trips(
+    sealed_engine,
+    gate2_repo: Path,
+) -> None:
+    manifest = _manifest_of(sealed_engine, gate2_repo)
+    payload = _store(gate2_repo).verify(manifest.write_ledger[3])
+    record = SyntheticConformanceRecord.model_validate(json.loads(payload))
+    assert record.label == "SYNTHETIC_CONFORMANCE_ONLY"
+    assert record.phase4_trials_consumed == 0
+    assert record.candidate_count == 180
+    assert record.family_count == 4
+    assert [item.name for item in record.invariants] == [
+        "ALL_BINDINGS_CONSTRUCT",
+        "TARGET_GENERATION_REBALANCE_CLOCK",
+        "REPLAY_ACCOUNTING",
+        "FRICTION_CASES",
+        "METRICS",
+        "DURABILITY",
+        "BOOTSTRAP",
+        "BUDGET_STATE_MACHINE",
+        "FOLD_AUTHORITY_UNBOUND",
+        "REGIME_AUTHORITY_UNBOUND",
+        "BASELINE_COMPARISON_ONLY",
+        "STATIC_SCAN",
+    ]
+
+
+def test_seal_contract_artifact_binds_the_engine_surface(
+    sealed_engine,
+    gate2_repo: Path,
+) -> None:
+    manifest = _manifest_of(sealed_engine, gate2_repo)
+    payload = _store(gate2_repo).verify(manifest.write_ledger[0])
+    contract = EngineContract.model_validate(json.loads(payload))
+    assert contract.schema_version == "PHASE4-ENGINE-CONTRACT-v1"
+    assert contract.formula_version == "PHASE4-ENGINE-FORMULA-v1"
+    assert contract.implementation_interface == (
+        "PHASE4-FIXED-LONG-ONLY-STRATEGY-v1"
+    )
+    assert contract.campaign_id == "PHASE4-FIXED-LONG-ONLY-2014-2022-v1"
+    assert contract.gate1_manifest.content_sha256 == (
+        GATE1_MANIFEST_CONTENT_SHA256
+    )
+    assert contract.qfq_methodology_identity == (
+        "ffee9bac3fe329b14d5aebb0f6152f00fc0a86b28d9186c254b5c8f6f8a322fb"
+    )
+    assert contract.execution_convention == "COMPLETED_BAR_SIGNAL_NEXT_BAR_OPEN"
+    assert contract.execution_series == "QFQ_NORMALIZED"
+    assert contract.friction_cases_bps == (0, 3, 10, 25, 50)
+    assert contract.primary_friction_bps == 3
+    assert contract.candidate_count == 180
+    assert contract.family_count == 4
+    assert contract.decision_grade is False
+    assert contract.fold_status == "NOT_BOUND_GATE3_REQUIRED"
+    assert contract.regime_status == "NOT_BOUND_GATE3_REQUIRED"
+
+
+def test_seal_report_artifact_is_utf8_markdown(
+    sealed_engine,
+    gate2_repo: Path,
+) -> None:
+    manifest = _manifest_of(sealed_engine, gate2_repo)
+    payload = _store(gate2_repo).verify(manifest.write_ledger[4])
+    text = payload.decode("utf-8")
+    assert text.startswith("# ")
+    assert "PHASE4-ENGINE-MANIFEST-v1" in text
+    assert "PHASE4-ENGINE-FORMULA-v1" in text
+    assert "Status: PHASE4_ENGINE_SEALED" in text
+    assert "NOT_BOUND_GATE3_REQUIRED" in text
+    # Max drawdown and Calmar are governed as UNKNOWN (null); only DSR and
+    # PBO carry the NOT_IMPLEMENTED reason.
+    assert "max drawdown and calmar remain UNKNOWN (null)" in text
+    assert "DSR and PBO remain UNKNOWN (NOT_IMPLEMENTED" in text
+    drawdown_clause = text.split("max drawdown")[1].split(";")[0]
+    assert "NOT_IMPLEMENTED" not in drawdown_clause
+
+
+def test_seal_write_observer_records_the_sealed_write_order(
+    gate2_repo: Path,
+) -> None:
+    observed: list[str] = []
+    result = seal_gate2(gate2_repo, write_observer=observed.append)
+    assert observed == list(WRITE_ORDER)
+    assert result.manifest.kind == "phase4_engine_manifest"
+
+
+def test_seal_repeat_run_is_byte_identical(sealed_engine, gate2_repo: Path) -> None:
+    again = seal_gate2(gate2_repo)
+    assert again.manifest == sealed_engine.manifest
+    assert again.written == sealed_engine.written
+
+
+def test_seal_failure_after_each_non_final_kind_writes_nothing_new(
+    gate2_repo: Path,
+) -> None:
+    results_root = gate2_repo / "results" / "phase4" / "gate2"
+
+    # Warm up the clone so the content-addressed Gate 2 artifacts match the
+    # current HEAD before the per-kind comparison. This keeps the test
+    # self-contained: seal output is head-revision-sensitive, so without a
+    # warm-up the first non-final kind would legitimately write new files and
+    # the assertion would depend on module-internal test ordering.
+    seal_gate2(gate2_repo)
+
+    def gate2_files() -> set[Path]:
+        if not results_root.exists():
+            return set()
+        return {
+            path
+            for path in results_root.rglob("*")
+            if path.is_file()
+        }
+
+    for kind in NON_FINAL_KINDS:
+        observed: list[str] = []
+        before = gate2_files()
+        with pytest.raises(Gate2SealError) as excinfo:
+            seal_gate2(
+                gate2_repo,
+                fail_after_kind=kind,
+                write_observer=observed.append,
+            )
+        assert excinfo.value.code == "SEAL_PUBLICATION_FAILED"
+        expected_observed = list(WRITE_ORDER[: NON_FINAL_KINDS.index(kind) + 1])
+        assert observed == expected_observed
+        assert gate2_files() == before
+
+
+def test_seal_rejects_invalid_fail_after_kind(gate2_repo: Path) -> None:
+    for invalid in ("phase4_engine_manifest", "bogus_kind", ""):
+        observed: list[str] = []
+        with pytest.raises(Gate2SealError) as excinfo:
+            seal_gate2(
+                gate2_repo,
+                fail_after_kind=invalid,
+                write_observer=observed.append,
+            )
+        assert excinfo.value.code == "INPUT_BOUNDARY_VIOLATION"
+        assert observed == []
+
+
+def test_seal_detects_dependency_mutation_between_load_and_commit(
+    gate2_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = _seal_module._reread_dependency
+
+    def corrupting_reread(root: Path, identity: DirectDependencyIdentity):
+        return original(root, identity) + b"tamper"
+
+    monkeypatch.setattr(_seal_module, "_reread_dependency", corrupting_reread)
+    observed: list[str] = []
+    with pytest.raises(Gate2SealError) as excinfo:
+        seal_gate2(
+            gate2_repo,
+            write_observer=observed.append,
+        )
+    assert excinfo.value.code == "HISTORICAL_ARTIFACT_MUTATION"
+    assert "phase4_engine_manifest" not in observed
+
+
+def test_seal_existing_collision_fails_closed(
+    sealed_engine,
+    gate2_repo: Path,
+) -> None:
+    manifest = _manifest_of(sealed_engine, gate2_repo)
+    store = _store(gate2_repo)
+    identity = manifest.write_ledger[0]
+    payload = store.verify(identity)
+    destination = gate2_repo.joinpath(*Path(identity.path).parts)
+    destination.write_bytes(payload + b"corruption")
+    try:
+        with pytest.raises(Gate2SealError) as excinfo:
+            seal_gate2(gate2_repo)
+        assert excinfo.value.code == "IMMUTABLE_ARTIFACT_COLLISION"
+    finally:
+        destination.write_bytes(payload)

@@ -1,0 +1,6 @@
+version: QUANT-BACKTEST-v1
+initial_capital: 100000.0
+allocation: 1.0
+commission_bps: 1.0
+slippage_bps: 2.0
+allow_fractional: true

@@ -1,0 +1,9 @@
+version: QUANT-VALIDATION-v1
+train_start: 2010-01-01
+train_end: 2018-12-31
+validation_start: 2019-01-01
+validation_end: 2022-12-31
+final_holdout_start: 2023-01-01
+final_holdout_end: 2025-12-31
+max_candidates_per_family: 500
+patience: 50
