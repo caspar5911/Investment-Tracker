@@ -13,7 +13,7 @@ import pandas as pd
 
 from investment_tracker.independent_audit.phase6.authority import canonical_json_bytes
 
-PROTOCOL_VERSION = "PHASE6-BLIND-REPLACEMENT-v1"
+PROTOCOL_VERSION = "PHASE6-BLIND-REPLACEMENT-v1"\nPREREGISTRATION_COMMIT_SHA = "0ddff58e36a2637ff5d12d044f1fee12e64e9a00"
 ORIGINAL_CONTRACT_SHA256 = "f64f31c20172491f6175a176592d463fed36f73ecf2b99542022afa55f50b77e"
 REJECTED_CLASSIFICATION_SHA256 = "7d450b567211e4590434af8aa93c28b943eecc053be2620647d446139c4ce2f0"
 SELECTION_SEED_MATERIAL = (
@@ -328,7 +328,7 @@ def acquire_and_select(
         "schema_version": "PHASE6-BLIND-REPLACEMENT-SELECTION-v1",
         "authority": "INDEPENDENT_AUDIT",
         "status": status,
-        "protocol_version": PROTOCOL_VERSION,
+        "protocol_version": PROTOCOL_VERSION,\n        "preregistration_commit_sha": PREREGISTRATION_COMMIT_SHA,
         "original_evaluation_contract_sha256": ORIGINAL_CONTRACT_SHA256,
         "rejected_holdout_classification_sha256": REJECTED_CLASSIFICATION_SHA256,
         "selection_seed_material": SELECTION_SEED_MATERIAL,
