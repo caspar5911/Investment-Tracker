@@ -13,6 +13,7 @@ from .release import (
     issue_holdout_release,
 )
 from .replacement import acquire_and_select
+from .virginity import capture_composite_virginity
 
 
 def _dt(value: str) -> datetime:
@@ -46,6 +47,13 @@ def main(argv: list[str] | None = None) -> int:
     replacement.add_argument("--static-snapshot-output", required=True)
     replacement.add_argument("--host", default="127.0.0.1")
     replacement.add_argument("--port", type=int, default=11111)
+
+    composite = sub.add_parser("capture-composite-virginity")
+    composite.add_argument("--log-path", action="append", required=True)
+    composite.add_argument("--evidence-output", required=True)
+    composite.add_argument("--attestation-output", required=True)
+    composite.add_argument("--host", default="127.0.0.1")
+    composite.add_argument("--port", type=int, default=11111)
 
     authorize = sub.add_parser("issue-acquisition-authorization")
     authorize.add_argument("--contract", required=True)
@@ -123,6 +131,37 @@ def main(argv: list[str] | None = None) -> int:
                         "history_context_manifest_sha256"
                     ],
                     "output": str(path),
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
+        return 0
+
+    if args.command == "capture-composite-virginity":
+        evidence_path, attestation_path = capture_composite_virginity(
+            log_paths=tuple(Path(item) for item in args.log_path),
+            evidence_output_path=Path(args.evidence_output),
+            attestation_output_path=Path(args.attestation_output),
+            host=args.host,
+            port=args.port,
+        )
+        attestation = json.loads(attestation_path.read_text(encoding="utf-8"))
+        print(
+            json.dumps(
+                {
+                    "status": attestation["status"],
+                    "locked_symbols": attestation["locked_symbols"],
+                    "provider_used_quota": attestation["provider_used_quota"],
+                    "provider_locked_symbol_matches": attestation[
+                        "provider_locked_symbol_matches"
+                    ],
+                    "retained_log_locked_symbol_history_matches": attestation[
+                        "retained_log_locked_symbol_history_matches"
+                    ],
+                    "evidence_bundle_sha256": attestation["evidence_bundle_sha256"],
+                    "evidence_output": str(evidence_path),
+                    "attestation_output": str(attestation_path),
                 },
                 sort_keys=True,
                 separators=(",", ":"),
