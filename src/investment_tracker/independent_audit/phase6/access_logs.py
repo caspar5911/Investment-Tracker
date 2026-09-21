@@ -14,7 +14,7 @@ from .authority import (
 )
 
 _PATTERN = re.compile(
-    r"(?<![A-Z0-9])(?:US[.])?(HACK|SOXX|NLR|URNM|GEV)(?![A-Z0-9])",
+    r"(?<![A-Z0-9])(?:US[.])?(" + "|".join(re.escape(symbol) for symbol in LOCKED_SYMBOLS) + r")(?![A-Z0-9])",
     re.IGNORECASE,
 )
 
