@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from investment_tracker.independent_audit.phase6 import opend_qfq
-from investment_tracker.independent_audit.phase6.access_logs import scan_access_logs
+from investment_tracker.independent_audit.phase6.access_logs import classify_access_logs, scan_access_logs
 from investment_tracker.independent_audit.phase6.authority import (
     CONTRACT_SHA256,
     LOCKED_SYMBOLS,
@@ -127,3 +127,38 @@ def test_invalid_authorization_stops_before_moomoo_sdk_load(monkeypatch, tmp_pat
             private_output_dir=tmp_path / "private",
         )
     assert called is False
+
+
+def test_history_protocol_context_is_classified_without_emitting_raw_log_text(tmp_path: Path):
+    log = tmp_path / "OpenD.log"
+    log.write_text(
+        "protoID=3103 Qot_RequestHistoryKL\n"
+        "security=US.HACK\n"
+        "response complete\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "classified.json"
+    classify_access_logs((log,), output_path=output)
+    result = json.loads(output.read_text(encoding="utf-8"))
+    assert result["status"] == "HISTORICAL_KLINE_CONTEXT_FOUND"
+    assert result["counts_by_symbol"]["HACK"]["historical_kline_context"] == 1
+    match = result["historical_kline_matches"][0]
+    assert match["symbol"] == "HACK"
+    assert match["classification"] == "HISTORICAL_KLINE_CONTEXT"
+    assert "raw_line" not in match
+    assert result["classifier"]["raw_line_content_emitted"] is False
+
+
+def test_non_history_symbol_context_remains_unclassified(tmp_path: Path):
+    log = tmp_path / "OpenD.log"
+    log.write_text(
+        "quote metadata refresh\n"
+        "security=US.GEV\n"
+        "market state updated\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "classified.json"
+    classify_access_logs((log,), output_path=output)
+    result = json.loads(output.read_text(encoding="utf-8"))
+    assert result["status"] == "NO_HISTORICAL_KLINE_CONTEXT_FOUND"
+    assert result["counts_by_symbol"]["GEV"]["other_or_unclassified"] == 1
