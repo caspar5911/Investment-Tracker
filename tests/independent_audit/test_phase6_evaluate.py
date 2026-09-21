@@ -147,6 +147,15 @@ def test_synthetic_bundle_runs_exact_frozen_engine_once(tmp_path: Path):
     assert result["candidate_search_executed"] is False
     assert result["candidate_parameters_changed"] is False
     assert result["phase7_started"] is False
+    contract_metrics = result["contract_metrics"]
+    assert contract_metrics["benchmark_total_return"]["status"] == "AVAILABLE"
+    assert contract_metrics["maximum_gross_exposure"]["status"] == "AVAILABLE"
+    assert contract_metrics["all_session_exposures_valid"] is True
+    assert contract_metrics["max_drawdown"]["status"] == "UNKNOWN"
+    assert contract_metrics["max_drawdown"]["reason"] == "DQ-030_UNRESOLVED"
+    assert contract_metrics["calmar"]["status"] == "UNKNOWN"
+    assert len(contract_metrics["calendar_month_returns"]) == 36
+    assert len(contract_metrics["calendar_year_returns"]) == 3
     assert (tmp_path / "markers" / "synthetic-release.consumed.json").is_file()
 
     with pytest.raises(Exception):
