@@ -190,9 +190,15 @@ def _listing_date(value: object) -> date | None:
     if not text:
         return None
     try:
-        return date.fromisoformat(text[:10])
+        parsed = date.fromisoformat(text[:10])
     except ValueError:
         return None
+    # OpenD's deprecated listing-date field can surface the Unix-epoch sentinel
+    # rather than a trustworthy listing date. The preregistered protocol says
+    # ambiguous listing dates are ineligible, so fail closed on that sentinel.
+    if parsed == date(1970, 1, 1):
+        return None
+    return parsed
 
 
 def _blocked_name(name: str) -> bool:
