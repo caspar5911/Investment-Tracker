@@ -14,8 +14,8 @@ from investment_tracker.quant.phase5.methodology import (
     SELECTED_IMPLEMENTATION_SHA256,
 )
 
-CONTRACT_SHA256 = "f64f31c20172491f6175a176592d463fed36f73ecf2b99542022afa55f50b77e"
-LOCKED_SYMBOLS = ("HACK", "SOXX", "NLR", "URNM", "GEV")
+CONTRACT_SHA256 = "94679f5796be61e03c0d67f7c2c63676c70855e6967f331128ea70c8aa9e30f2"
+LOCKED_SYMBOLS = ("FQAL", "FDMO", "CSB", "FTXO", "VNLA")
 BENCHMARK_SYMBOL = "SPY"
 HOLDOUT_START = "2023-01-01"
 HOLDOUT_END = "2025-12-31"
@@ -111,7 +111,7 @@ class AccessLogMatch(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     path: str = Field(min_length=1)
-    symbol: Literal["HACK", "SOXX", "NLR", "URNM", "GEV"]
+    symbol: Literal["FQAL", "FDMO", "CSB", "FTXO", "VNLA"]
     line_number: int = Field(ge=1)
 
 
@@ -179,7 +179,7 @@ class AcquisitionAuthorization(BaseModel):
     status: Literal["FINAL_HOLDOUT_ACQUISITION_AUTHORIZED"]
     authorization_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
     evaluation_contract_sha256: Literal[
-        "f64f31c20172491f6175a176592d463fed36f73ecf2b99542022afa55f50b77e"
+        "94679f5796be61e03c0d67f7c2c63676c70855e6967f331128ea70c8aa9e30f2"
     ]
     candidate_id: Literal[
         "phase4-d2dbf6f8170a2268972793148db44d29cd42476b65660f136996460bb2d16075"
