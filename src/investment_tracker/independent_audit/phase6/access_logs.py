@@ -18,6 +18,29 @@ _PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+_HISTORY_TOKENS = (
+    "Qot_RequestHistoryKL",
+    "RequestHistoryKL",
+    "request_history_kline",
+    "protoid=3103",
+    "proto_id=3103",
+    "proto id=3103",
+    "proto:3103",
+    "proto=3103",
+    "3103",
+)
+_REHAB_TOKENS = (
+    "Qot_RequestRehab",
+    "RequestRehab",
+    "get_rehab",
+    "protoid=3105",
+    "proto_id=3105",
+    "proto id=3105",
+    "proto:3105",
+    "proto=3105",
+)
+_CONTEXT_RADIUS = 8
+
 
 def _files(paths: tuple[Path, ...]) -> tuple[Path, ...]:
     result: list[Path] = []
@@ -90,6 +113,118 @@ def scan_access_logs(
             sort_keys=True,
             separators=(",", ":"),
         ),
+        encoding="utf-8",
+    )
+    return output
+
+
+def _operation_classification(lines: list[str], line_index: int) -> tuple[str, tuple[str, ...]]:
+    start = max(0, line_index - _CONTEXT_RADIUS)
+    end = min(len(lines), line_index + _CONTEXT_RADIUS + 1)
+    context = "\n".join(lines[start:end])
+    lower = context.lower()
+
+    history_hits = tuple(
+        token
+        for token in _HISTORY_TOKENS
+        if token.lower() in lower
+    )
+    if history_hits:
+        return "HISTORICAL_KLINE_CONTEXT", history_hits
+
+    rehab_hits = tuple(
+        token
+        for token in _REHAB_TOKENS
+        if token.lower() in lower
+    )
+    if rehab_hits:
+        return "REHAB_CONTEXT", rehab_hits
+
+    return "OTHER_OR_UNCLASSIFIED_SYMBOL_CONTEXT", ()
+
+
+def classify_access_logs(
+    paths: tuple[Path, ...],
+    *,
+    output_path: Path,
+) -> Path:
+    files = _files(paths)
+    records: list[dict[str, object]] = []
+    seen: set[tuple[str, int, str, str]] = set()
+
+    for path in files:
+        payload = path.read_bytes()
+        text = payload.decode("utf-8", errors="replace")
+        lines = text.splitlines()
+        for line_index, line in enumerate(lines):
+            for match in _PATTERN.finditer(line):
+                symbol = match.group(1).upper()
+                if symbol not in LOCKED_SYMBOLS:
+                    continue
+                classification, tokens = _operation_classification(lines, line_index)
+                identity = (str(path), line_index + 1, symbol, classification)
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                records.append(
+                    {
+                        "path": str(path),
+                        "line_number": line_index + 1,
+                        "symbol": symbol,
+                        "classification": classification,
+                        "operation_tokens": list(tokens),
+                    }
+                )
+
+    by_symbol: dict[str, dict[str, int]] = {}
+    for symbol in LOCKED_SYMBOLS:
+        symbol_records = [item for item in records if item["symbol"] == symbol]
+        by_symbol[symbol] = {
+            "historical_kline_context": sum(
+                item["classification"] == "HISTORICAL_KLINE_CONTEXT"
+                for item in symbol_records
+            ),
+            "rehab_context": sum(
+                item["classification"] == "REHAB_CONTEXT"
+                for item in symbol_records
+            ),
+            "other_or_unclassified": sum(
+                item["classification"] == "OTHER_OR_UNCLASSIFIED_SYMBOL_CONTEXT"
+                for item in symbol_records
+            ),
+            "total": len(symbol_records),
+        }
+
+    historical = [
+        item for item in records
+        if item["classification"] == "HISTORICAL_KLINE_CONTEXT"
+    ]
+    result = {
+        "schema_version": "PHASE6-ACCESS-LOG-CLASSIFICATION-v1",
+        "status": (
+            "HISTORICAL_KLINE_CONTEXT_FOUND"
+            if historical
+            else "NO_HISTORICAL_KLINE_CONTEXT_FOUND"
+        ),
+        "classifier": {
+            "history_protocol": "Qot_RequestHistoryKL",
+            "history_protocol_id": 3103,
+            "context_radius_lines": _CONTEXT_RADIUS,
+            "raw_line_content_emitted": False,
+            "classification_is_not_a_virgin_holdout_attestation": True,
+        },
+        "locked_symbols": list(LOCKED_SYMBOLS),
+        "counts_by_symbol": by_symbol,
+        "historical_kline_matches": historical,
+        "all_classified_matches": records,
+    }
+
+    output = Path(output_path)
+    if output.exists():
+        raise FileExistsError("PHASE6_ACCESS_LOG_CLASSIFICATION_ALREADY_EXISTS")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(
+        json.dumps(result, sort_keys=True, separators=(",", ":")),
         encoding="utf-8",
     )
     return output
