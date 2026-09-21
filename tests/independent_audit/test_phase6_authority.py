@@ -50,7 +50,7 @@ def _attestation(path: Path) -> Path:
 def test_frozen_contract_exact_identity_and_governance():
     contract = load_frozen_contract(CONTRACT)
     assert contract["schema_version"] == "PHASE6-EVALUATION-CONTRACT-v1"
-    assert CONTRACT_SHA256 == "f64f31c20172491f6175a176592d463fed36f73ecf2b99542022afa55f50b77e"
+    assert CONTRACT_SHA256 == "94679f5796be61e03c0d67f7c2c63676c70855e6967f331128ea70c8aa9e30f2"
 
 
 def test_access_log_scan_does_not_promote_no_match_into_virgin_attestation(tmp_path: Path):
@@ -72,7 +72,7 @@ def test_access_log_scan_does_not_promote_no_match_into_virgin_attestation(tmp_p
 
 def test_access_log_scan_records_locked_symbol_reference_without_line_content(tmp_path: Path):
     log = tmp_path / "OpenD.log"
-    log.write_text("request US.HACK daily\n", encoding="utf-8")
+    log.write_text("request US.FQAL daily\n", encoding="utf-8")
     output = tmp_path / "evidence.json"
     scan_access_logs(
         (log,),
@@ -83,7 +83,7 @@ def test_access_log_scan_records_locked_symbol_reference_without_line_content(tm
     )
     evidence = json.loads(output.read_text(encoding="utf-8"))
     assert evidence["status"] == "LOCKED_SYMBOL_REFERENCE_FOUND"
-    assert evidence["matches"][0]["symbol"] == "HACK"
+    assert evidence["matches"][0]["symbol"] == "FQAL"
     assert "line" not in evidence["matches"][0]
 
 
@@ -133,7 +133,7 @@ def test_history_protocol_context_is_classified_without_emitting_raw_log_text(tm
     log = tmp_path / "OpenD.log"
     log.write_text(
         "protoID=3103 Qot_RequestHistoryKL\n"
-        "security=US.HACK\n"
+        "security=US.FQAL\n"
         "response complete\n",
         encoding="utf-8",
     )
@@ -141,9 +141,9 @@ def test_history_protocol_context_is_classified_without_emitting_raw_log_text(tm
     classify_access_logs((log,), output_path=output)
     result = json.loads(output.read_text(encoding="utf-8"))
     assert result["status"] == "HISTORICAL_KLINE_CONTEXT_FOUND"
-    assert result["counts_by_symbol"]["HACK"]["historical_kline_context"] == 1
+    assert result["counts_by_symbol"]["FQAL"]["historical_kline_context"] == 1
     match = result["historical_kline_matches"][0]
-    assert match["symbol"] == "HACK"
+    assert match["symbol"] == "FQAL"
     assert match["classification"] == "HISTORICAL_KLINE_CONTEXT"
     assert "raw_line" not in match
     assert result["classifier"]["raw_line_content_emitted"] is False
@@ -153,7 +153,7 @@ def test_non_history_symbol_context_remains_unclassified(tmp_path: Path):
     log = tmp_path / "OpenD.log"
     log.write_text(
         "quote metadata refresh\n"
-        "security=US.GEV\n"
+        "security=US.VNLA\n"
         "market state updated\n",
         encoding="utf-8",
     )
@@ -161,4 +161,4 @@ def test_non_history_symbol_context_remains_unclassified(tmp_path: Path):
     classify_access_logs((log,), output_path=output)
     result = json.loads(output.read_text(encoding="utf-8"))
     assert result["status"] == "NO_HISTORICAL_KLINE_CONTEXT_FOUND"
-    assert result["counts_by_symbol"]["GEV"]["other_or_unclassified"] == 1
+    assert result["counts_by_symbol"]["VNLA"]["other_or_unclassified"] == 1
