@@ -22,7 +22,9 @@ def main(argv: list[str] | None = None) -> int:
     result = phase6_preflight(Path(args.repository_root))
     payload = json.dumps(result, sort_keys=True, separators=(",", ":"))
     if args.output:
-        Path(args.output).write_text(payload, encoding="utf-8")
+        output = Path(args.output)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(payload, encoding="utf-8")
     print(payload)
     return 0
 
