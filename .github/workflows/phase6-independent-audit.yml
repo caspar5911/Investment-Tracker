@@ -26,6 +26,7 @@ jobs:
           tests/independent_audit/test_phase6_bundle.py
           tests/independent_audit/test_phase6_evaluate.py
           tests/independent_audit/test_phase6_replacement.py
+          tests/independent_audit/test_phase6_virginity.py
           tests/quant/test_phase6_preseal.py
           tests/quant/test_phase6_bundle_gate.py
           tests/quant/test_phase6_cli.py
@@ -36,7 +37,7 @@ jobs:
           from hashlib import sha256
           from pathlib import Path
           path = Path("data/phase6/phase6-evaluation-contract.json")
-          assert sha256(path.read_bytes()).hexdigest() == "94679f5796be61e03c0d67f7c2c63676c70855e6967f331128ea70c8aa9e30f2"
+          assert sha256(path.read_bytes()).hexdigest() == "f92339ae5e82b31350569407c682c5e1853e542810a833321061b6f441489893"
           PY
       - name: Preserve coordinator pre-unseal isolation
         run: |
@@ -51,6 +52,11 @@ jobs:
         run: |
           ! grep -n -E '\.request_history_kline\(|\.get_market_snapshot\(|\.get_cur_kline\(|\.get_rt_data\(|\.get_rehab\(' \
             src/investment_tracker/independent_audit/phase6/replacement.py
+      - name: Composite virginity capture contains no historical-data call
+        run: |
+          grep -n 'get_history_kl_quota' src/investment_tracker/independent_audit/phase6/virginity.py
+          ! grep -n -E '\.request_history_kline\(|\.get_market_snapshot\(|\.get_cur_kline\(|\.get_rehab\(' \
+            src/investment_tracker/independent_audit/phase6/virginity.py
       - name: Verify sealed Phase 4 remains untouched
         run: |
           git diff --exit-code 69bb4347cbe577c4a1277335eef778ddf5b177d0 HEAD --             src/investment_tracker/quant/phase4             results/phase4/finalization
