@@ -28,6 +28,7 @@ from investment_tracker.quant.phase4.engine.strategies import (
 )
 from investment_tracker.quant.phase5.methodology import frozen_binding
 from investment_tracker.quant.phase6.preseal import (
+    Phase6HoldoutReuseError,
     consume_released_bundle,
     load_release_envelope,
 )
@@ -387,6 +388,10 @@ def evaluate_released_holdout(
         raise ValueError("PHASE6_HOLDOUT_KEY_IDENTITY_MISMATCH")
 
     marker_path = Path(marker_directory) / f"{release.release_id}.consumed.json"
+    if marker_path.exists():
+        raise Phase6HoldoutReuseError(
+            f"final holdout release already consumed: {release.release_id}"
+        )
     consumed = False
     try:
         encrypted = consume_released_bundle(
