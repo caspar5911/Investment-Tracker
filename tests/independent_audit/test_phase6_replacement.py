@@ -146,3 +146,23 @@ def test_insufficient_pool_abstains_without_rule_relaxation():
     )
     assert len(selected) == 2
     assert sum(excluded.values()) == 0
+
+
+def test_unix_epoch_listing_date_is_fail_closed_as_ambiguous():
+    frame = pd.DataFrame(
+        [
+            {"code": "US.AAA", "name": "Alpha ETF", "listing_date": "1970-01-01", "delisting": False},
+            {"code": "US.BBB", "name": "Beta ETF", "listing_date": "2010-01-01", "delisting": False},
+            {"code": "US.CCC", "name": "Gamma ETF", "listing_date": "2011-01-01", "delisting": False},
+            {"code": "US.DDD", "name": "Delta ETF", "listing_date": "2012-01-01", "delisting": False},
+            {"code": "US.EEE", "name": "Epsilon ETF", "listing_date": "2013-01-01", "delisting": False},
+            {"code": "US.FFF", "name": "Zeta ETF", "listing_date": "2014-01-01", "delisting": False},
+        ]
+    )
+    selected, excluded = replacement.select_from_static_frame(
+        frame,
+        contaminated_symbols=set(),
+    )
+    assert "AAA" not in {item.symbol for item in selected}
+    assert excluded["listing_date_missing_or_too_late"] == 1
+    assert len(selected) == 5
