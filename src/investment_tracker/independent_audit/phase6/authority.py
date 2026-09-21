@@ -14,7 +14,7 @@ from investment_tracker.quant.phase5.methodology import (
     SELECTED_IMPLEMENTATION_SHA256,
 )
 
-CONTRACT_SHA256 = "94679f5796be61e03c0d67f7c2c63676c70855e6967f331128ea70c8aa9e30f2"
+CONTRACT_SHA256 = "f92339ae5e82b31350569407c682c5e1853e542810a833321061b6f441489893"
 LOCKED_SYMBOLS = ("FQAL", "FDMO", "CSB", "FTXO", "VNLA")
 BENCHMARK_SYMBOL = "SPY"
 HOLDOUT_START = "2023-01-01"
@@ -146,28 +146,40 @@ class AccessLogEvidence(BaseModel):
 class VirginHoldoutAttestation(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    schema_version: Literal["PHASE6-VIRGIN-HOLDOUT-ATTESTATION-v1"]
+    schema_version: Literal["PHASE6-VIRGIN-HOLDOUT-ATTESTATION-v2"]
     authority: Literal["INDEPENDENT_AUDIT"]
-    status: Literal["INDEPENDENTLY_VERIFIED_NO_PRIOR_LOCKED_SYMBOL_ACCESS"]
+    status: Literal["COMPOSITE_EVIDENCE_NO_PRIOR_LOCKED_SYMBOL_ACCESS_FOUND"]
     attestation_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
     locked_symbols: tuple[str, ...]
-    evidence_kind: Literal["PROVIDER_SIDE_QUERY_HISTORY"]
+    evidence_kind: Literal["COMPOSITE_PROVIDER_QUOTA_AND_RETAINED_LOGS"]
     evidence_bundle_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    coverage_start_utc: datetime
-    coverage_end_utc: datetime
-    complete_query_history: Literal[True]
-    independent_source: Literal[True]
+    captured_at_utc: datetime
+    provider_quota_protocol_id: Literal[3104]
+    provider_quota_window_days: Literal[7]
+    provider_used_quota: int = Field(ge=0)
+    provider_remaining_quota: int = Field(ge=0)
+    provider_detail_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    provider_locked_symbol_matches: tuple[()] = ()
+    retained_log_manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    retained_log_history_context_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    retained_log_locked_symbol_history_matches: tuple[()] = ()
+    complete_query_history: Literal[False]
+    independent_provider_component: Literal[True]
+    local_retained_log_component: Literal[True]
     coordinator_self_report_only: Literal[False]
-    limitations: tuple[()] = ()
+    limitations: tuple[str, str]
 
     @model_validator(mode="after")
     def validate_attestation(self) -> "VirginHoldoutAttestation":
-        _require_aware(self.coverage_start_utc, "coverage_start_utc")
-        _require_aware(self.coverage_end_utc, "coverage_end_utc")
-        if self.coverage_end_utc < self.coverage_start_utc:
-            raise ValueError("attestation coverage must be chronological")
+        _require_aware(self.captured_at_utc, "captured_at_utc")
         if self.locked_symbols != LOCKED_SYMBOLS:
             raise ValueError("attestation must cover the exact locked symbol set")
+        expected_limitations = (
+            "PROVIDER_QUOTA_HISTORY_LIMITED_TO_CURRENT_7_DAY_PERIOD",
+            "RETAINED_LOCAL_LOGS_NOT_PROVIDER_IMMUTABLE",
+        )
+        if self.limitations != expected_limitations:
+            raise ValueError("composite attestation limitations must remain explicit")
         return self
 
 
@@ -179,7 +191,7 @@ class AcquisitionAuthorization(BaseModel):
     status: Literal["FINAL_HOLDOUT_ACQUISITION_AUTHORIZED"]
     authorization_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
     evaluation_contract_sha256: Literal[
-        "94679f5796be61e03c0d67f7c2c63676c70855e6967f331128ea70c8aa9e30f2"
+        "f92339ae5e82b31350569407c682c5e1853e542810a833321061b6f441489893"
     ]
     candidate_id: Literal[
         "phase4-d2dbf6f8170a2268972793148db44d29cd42476b65660f136996460bb2d16075"
