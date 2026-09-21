@@ -26,19 +26,31 @@ CONTRACT = ROOT / "data/phase6/phase6-evaluation-contract.json"
 
 def _attestation(path: Path) -> Path:
     value = VirginHoldoutAttestation(
-        schema_version="PHASE6-VIRGIN-HOLDOUT-ATTESTATION-v1",
+        schema_version="PHASE6-VIRGIN-HOLDOUT-ATTESTATION-v2",
         authority="INDEPENDENT_AUDIT",
-        status="INDEPENDENTLY_VERIFIED_NO_PRIOR_LOCKED_SYMBOL_ACCESS",
+        status="COMPOSITE_EVIDENCE_NO_PRIOR_LOCKED_SYMBOL_ACCESS_FOUND",
         attestation_id="audit-test-attestation",
         locked_symbols=LOCKED_SYMBOLS,
-        evidence_kind="PROVIDER_SIDE_QUERY_HISTORY",
+        evidence_kind="COMPOSITE_PROVIDER_QUOTA_AND_RETAINED_LOGS",
         evidence_bundle_sha256="a" * 64,
-        coverage_start_utc=datetime(2026, 9, 1, tzinfo=timezone.utc),
-        coverage_end_utc=datetime(2026, 9, 20, tzinfo=timezone.utc),
-        complete_query_history=True,
-        independent_source=True,
+        captured_at_utc=datetime(2026, 9, 22, tzinfo=timezone.utc),
+        provider_quota_protocol_id=3104,
+        provider_quota_window_days=7,
+        provider_used_quota=13,
+        provider_remaining_quota=287,
+        provider_detail_sha256="b" * 64,
+        provider_locked_symbol_matches=(),
+        retained_log_manifest_sha256="c" * 64,
+        retained_log_history_context_sha256="d" * 64,
+        retained_log_locked_symbol_history_matches=(),
+        complete_query_history=False,
+        independent_provider_component=True,
+        local_retained_log_component=True,
         coordinator_self_report_only=False,
-        limitations=(),
+        limitations=(
+            "PROVIDER_QUOTA_HISTORY_LIMITED_TO_CURRENT_7_DAY_PERIOD",
+            "RETAINED_LOCAL_LOGS_NOT_PROVIDER_IMMUTABLE",
+        ),
     )
     path.write_text(
         json.dumps(value.model_dump(mode="json"), sort_keys=True, separators=(",", ":")),
@@ -46,11 +58,10 @@ def _attestation(path: Path) -> Path:
     )
     return path
 
-
 def test_frozen_contract_exact_identity_and_governance():
     contract = load_frozen_contract(CONTRACT)
     assert contract["schema_version"] == "PHASE6-EVALUATION-CONTRACT-v1"
-    assert CONTRACT_SHA256 == "94679f5796be61e03c0d67f7c2c63676c70855e6967f331128ea70c8aa9e30f2"
+    assert CONTRACT_SHA256 == "f92339ae5e82b31350569407c682c5e1853e542810a833321061b6f441489893"
 
 
 def test_access_log_scan_does_not_promote_no_match_into_virgin_attestation(tmp_path: Path):
@@ -67,7 +78,7 @@ def test_access_log_scan_does_not_promote_no_match_into_virgin_attestation(tmp_p
     evidence = json.loads(output.read_text(encoding="utf-8"))
     assert evidence["status"] == "NO_LOCKED_SYMBOL_REFERENCE_FOUND_IN_SUPPLIED_LOGS"
     assert evidence["matches"] == []
-    assert evidence["schema_version"] != "PHASE6-VIRGIN-HOLDOUT-ATTESTATION-v1"
+    assert not evidence["schema_version"].startswith("PHASE6-VIRGIN-HOLDOUT-ATTESTATION")
 
 
 def test_access_log_scan_records_locked_symbol_reference_without_line_content(tmp_path: Path):
