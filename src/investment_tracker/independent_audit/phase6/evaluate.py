@@ -208,6 +208,98 @@ def _benchmark_replay(spy_panel: MarketPanel, friction_bps: int):
     )
 
 
+def _metric_value(value: float) -> dict[str, object]:
+    if not math.isfinite(value):
+        return {
+            "schema_version": "PHASE4-METRIC-VALUE-v1",
+            "value": None,
+            "status": "UNKNOWN",
+            "reason": "INVALID_INPUT",
+        }
+    return {
+        "schema_version": "PHASE4-METRIC-VALUE-v1",
+        "value": float(value),
+        "status": "AVAILABLE",
+        "reason": "OK",
+    }
+
+
+def _contract_metric_projection(
+    *,
+    primary,
+    benchmark,
+    supported,
+    durability,
+    bootstrap,
+) -> dict[str, object]:
+    benchmark_return = (
+        float(benchmark.close_equity[-1] / benchmark.close_equity[0] - 1.0)
+        if benchmark.close_equity
+        else float("nan")
+    )
+    realized = tuple(float(value) for value in primary.realized_gross_exposure)
+    target = tuple(float(value) for value in primary.target_gross_exposure)
+    exposure_valid = (
+        len(realized) == len(target) == len(primary.states)
+        and bool(realized)
+        and all(math.isfinite(value) and 0.0 <= value <= 1.0 + 1e-12 for value in realized)
+        and all(math.isfinite(value) and 0.0 <= value <= 1.0 + 1e-12 for value in target)
+    )
+    maximum_realized = max(realized) if exposure_valid else float("nan")
+    month_returns = [
+        {"period": label, "return": metric.model_dump(mode="json")}
+        for label, metric in zip(
+            durability.month_period_labels,
+            durability.month_returns,
+            strict=True,
+        )
+    ]
+    year_returns = [
+        {"period": label, "return": metric.model_dump(mode="json")}
+        for label, metric in zip(
+            durability.year_period_labels,
+            durability.year_returns,
+            strict=True,
+        )
+    ]
+    return {
+        "total_return": supported.total_return.model_dump(mode="json"),
+        "cagr": supported.cagr.model_dump(mode="json"),
+        "sharpe": supported.sharpe.model_dump(mode="json"),
+        "sortino": supported.sortino.model_dump(mode="json"),
+        "annualized_one_way_turnover": supported.annualized_one_way_turnover.model_dump(mode="json"),
+        "average_gross_exposure": supported.average_realized_gross_exposure.model_dump(mode="json"),
+        "maximum_gross_exposure": _metric_value(maximum_realized),
+        "all_session_exposures_valid": exposure_valid,
+        "benchmark_total_return": _metric_value(benchmark_return),
+        "benchmark_excess_return": supported.benchmark_excess_return.model_dump(mode="json"),
+        "calendar_month_returns": month_returns,
+        "calendar_year_returns": year_returns,
+        "positive_month_percentage": durability.positive_month_fraction.model_dump(mode="json"),
+        "positive_year_percentage": durability.positive_year_fraction.model_dump(mode="json"),
+        "average_winning_month": durability.average_positive_month.model_dump(mode="json"),
+        "average_losing_month": durability.average_negative_month.model_dump(mode="json"),
+        "worst_month": durability.worst_month.model_dump(mode="json"),
+        "worst_year": durability.worst_year.model_dump(mode="json"),
+        "longest_losing_month_sequence": durability.longest_negative_month_streak.model_dump(mode="json"),
+        "rolling_12_month": durability.rolling_12.model_dump(mode="json"),
+        "rolling_36_month": durability.rolling_36.model_dump(mode="json"),
+        "top_three_positive_month_return_concentration": durability.top_three_positive_month_concentration.model_dump(mode="json"),
+        "bootstrap_lower_endpoint": bootstrap.percentile_05.model_dump(mode="json"),
+        "bootstrap_upper_endpoint": bootstrap.percentile_95.model_dump(mode="json"),
+        "max_drawdown": {
+            "value": None,
+            "status": "UNKNOWN",
+            "reason": "DQ-030_UNRESOLVED",
+        },
+        "calmar": {
+            "value": None,
+            "status": "UNKNOWN",
+            "reason": "DQ-030_UNRESOLVED",
+        },
+    }
+
+
 def _evaluate_plain_bundle(plaintext: bytes) -> dict[str, object]:
     manifest, entries = open_plain_bundle(plaintext)
     _validate_manifest(manifest)
@@ -253,6 +345,13 @@ def _evaluate_plain_bundle(plaintext: bytes) -> dict[str, object]:
         "phase7_started": False,
         "production_readiness_approved": False,
         "metrics": supported.model_dump(mode="json"),
+        "contract_metrics": _contract_metric_projection(
+            primary=primary,
+            benchmark=benchmark,
+            supported=supported,
+            durability=durability,
+            bootstrap=bootstrap,
+        ),
         "durability": durability.model_dump(mode="json"),
         "friction": friction.model_dump(mode="json"),
         "bootstrap": bootstrap.model_dump(mode="json"),
