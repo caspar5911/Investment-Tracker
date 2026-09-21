@@ -108,7 +108,26 @@ def main(argv: list[str] | None = None) -> int:
             host=args.host,
             port=args.port,
         )
-        print(path)
+        result = json.loads(path.read_text(encoding="utf-8"))
+        print(
+            json.dumps(
+                {
+                    "status": result["status"],
+                    "selected_symbols": [
+                        item["symbol"] for item in result.get("selected", [])
+                    ],
+                    "selection_seed_sha256": result["selection_seed_sha256"],
+                    "static_snapshot_sha256": result["static_snapshot_sha256"],
+                    "log_manifest_sha256": result["log_manifest_sha256"],
+                    "history_context_manifest_sha256": result[
+                        "history_context_manifest_sha256"
+                    ],
+                    "output": str(path),
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
         return 0
 
     if args.command == "issue-acquisition-authorization":
