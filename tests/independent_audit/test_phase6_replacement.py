@@ -166,3 +166,20 @@ def test_unix_epoch_listing_date_is_fail_closed_as_ambiguous():
     assert "AAA" not in {item.symbol for item in selected}
     assert excluded["listing_date_missing_or_too_late"] == 1
     assert len(selected) == 5
+
+
+def test_log_parser_detects_bare_candidate_ticker_near_history_protocol(tmp_path: Path):
+    log = tmp_path / "OpenD.log"
+    log.write_text(
+        "Qot_RequestHistoryKL protoID=3103\n"
+        "security=BBCA\n"
+        "response complete\n",
+        encoding="utf-8",
+    )
+    contaminated, _, contexts = replacement._history_context_symbols(
+        (log,),
+        candidate_symbols={"BBCA", "FQAL"},
+    )
+    assert "BBCA" in contaminated
+    assert "FQAL" not in contaminated
+    assert contexts[0]["symbols"] == ["BBCA"]
