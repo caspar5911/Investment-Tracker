@@ -5,7 +5,7 @@ from datetime import datetime
 import json
 from pathlib import Path
 
-from .access_logs import scan_access_logs
+from .access_logs import classify_access_logs, scan_access_logs
 from .evaluate import evaluate_released_holdout
 from .opend_qfq import acquire_and_seal
 from .release import (
@@ -34,6 +34,10 @@ def main(argv: list[str] | None = None) -> int:
     logs.add_argument("--coverage-start-utc", type=_dt, required=True)
     logs.add_argument("--coverage-end-utc", type=_dt, required=True)
     logs.add_argument("--output", required=True)
+
+    classify = sub.add_parser("classify-access-logs")
+    classify.add_argument("--path", action="append", required=True)
+    classify.add_argument("--output", required=True)
 
     authorize = sub.add_parser("issue-acquisition-authorization")
     authorize.add_argument("--contract", required=True)
@@ -75,6 +79,14 @@ def main(argv: list[str] | None = None) -> int:
             source_description=args.source_description,
             coverage_start_utc=args.coverage_start_utc,
             coverage_end_utc=args.coverage_end_utc,
+            output_path=Path(args.output),
+        )
+        print(path)
+        return 0
+
+    if args.command == "classify-access-logs":
+        path = classify_access_logs(
+            tuple(Path(item) for item in args.path),
             output_path=Path(args.output),
         )
         print(path)
