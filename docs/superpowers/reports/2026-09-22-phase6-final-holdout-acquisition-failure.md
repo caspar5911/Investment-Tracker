@@ -62,6 +62,25 @@ Based on the deterministic acquisition loop order, the first locked symbol
 requested was `FQAL`; validation failed before the loop could advance to the
 next symbol.
 
+This was independently corroborated by the provider-side OpenD quota ledger
+captured after the failure:
+
+- before acquisition: used quota = 13;
+- after acquisition: used quota = 14;
+- new locked-symbol entry: `US.FQAL`;
+- provider request time: `2026-09-22 01:56:28` (local OpenD timestamp);
+- `FDMO`, `CSB`, `FTXO`, and `VNLA` were absent from the provider ledger.
+
+The acquisition-start marker independently records:
+
+- `historical_access_started=true`;
+- `historical_access_started_at_utc=2026-09-21T17:56:28.372468+00:00`;
+- acquisition authorization SHA-256
+  `b1374c58b54e70095916f5650e98f7ac7cd1d4788e81b0faa0a431aa43a5bbc4`.
+
+The provider timestamp and UTC marker timestamp refer to the same acquisition
+event.
+
 ## Governance consequence
 
 The acquisition-start guard had already consumed the authorization before the
