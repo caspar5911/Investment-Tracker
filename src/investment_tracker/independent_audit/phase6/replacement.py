@@ -143,6 +143,8 @@ def _files(paths: tuple[Path, ...]) -> tuple[Path, ...]:
 
 def _history_context_symbols(
     paths: tuple[Path, ...],
+    *,
+    candidate_symbols: set[str] | None = None,
 ) -> tuple[set[str], list[dict[str, object]], list[dict[str, object]]]:
     contaminated: set[str] = set()
     file_manifest: list[dict[str, object]] = []
@@ -167,7 +169,15 @@ def _history_context_symbols(
             start = max(0, history_index - _CONTEXT_RADIUS)
             end = min(len(lines), history_index + _CONTEXT_RADIUS + 1)
             context = "\n".join(lines[start:end]).upper()
-            symbols = sorted(set(_US_SYMBOL_PATTERN.findall(context)))
+            symbols = set(_US_SYMBOL_PATTERN.findall(context))
+            if candidate_symbols:
+                for candidate in candidate_symbols:
+                    pattern = re.compile(
+                        rf"(?<![A-Z0-9])(?:US[.])?{re.escape(candidate)}(?![A-Z0-9])"
+                    )
+                    if pattern.search(context):
+                        symbols.add(candidate)
+            symbols = sorted(symbols)
             for symbol in symbols:
                 contaminated.add(symbol)
             contexts.append(
@@ -303,10 +313,18 @@ def acquire_and_select(
         context.close()
 
     # The final log snapshot is intentionally taken after the permitted static
-    # metadata request and immediately before deterministic ranking. This closes
-    # the selection-time race in which another historical request could occur
-    # after an earlier contamination scan.
-    contaminated, file_manifest, history_contexts = _history_context_symbols(log_paths)
+    # metadata request and immediately before deterministic ranking. Candidate
+    # ticker tokens are known from static metadata only, so checking both
+    # US.<ticker> and exact bare-ticker forms does not touch market history.
+    candidate_symbols = {
+        str(code).strip().upper()[3:]
+        for code in frame["code"].tolist()
+        if str(code).strip().upper().startswith("US.")
+    }
+    contaminated, file_manifest, history_contexts = _history_context_symbols(
+        log_paths,
+        candidate_symbols=candidate_symbols,
+    )
 
     static_snapshot = _canonical_static_snapshot(frame)
     selected, excluded = select_from_static_frame(
