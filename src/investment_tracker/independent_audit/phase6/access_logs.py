@@ -27,7 +27,6 @@ _HISTORY_TOKENS = (
     "proto id=3103",
     "proto:3103",
     "proto=3103",
-    "3103",
 )
 _REHAB_TOKENS = (
     "Qot_RequestRehab",
