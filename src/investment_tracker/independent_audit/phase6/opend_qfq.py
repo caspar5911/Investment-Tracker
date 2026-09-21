@@ -177,6 +177,27 @@ def acquire_and_seal(
     authorization_bytes = Path(authorization_path).read_bytes()
     authorization_sha = sha256_bytes(authorization_bytes)
 
+    output.mkdir(parents=True, exist_ok=True)
+    attempt_path = output / f"{authorization.authorization_id}.acquisition-started.json"
+    attempt = {
+        "schema_version": "PHASE6-HOLDOUT-ACQUISITION-ATTEMPT-v1",
+        "authority": "INDEPENDENT_AUDIT",
+        "status": "FINAL_HOLDOUT_ACQUISITION_STARTED",
+        "authorization_id": authorization.authorization_id,
+        "evaluation_contract_sha256": CONTRACT_SHA256,
+        "acquisition_authorization_sha256": authorization_sha,
+        "locked_symbols": list(LOCKED_SYMBOLS),
+        "benchmark_symbol": BENCHMARK_SYMBOL,
+        "historical_access_started": False,
+    }
+    try:
+        with attempt_path.open("x", encoding="utf-8") as handle:
+            json.dump(attempt, handle, sort_keys=True, separators=(",", ":"))
+    except FileExistsError as exc:
+        raise RuntimeError(
+            f"PHASE6_ACQUISITION_AUTHORIZATION_ALREADY_CONSUMED:{authorization.authorization_id}"
+        ) from exc
+
     warmup, scored = expected_sessions()
     required_sessions = warmup.append(scored)
     request_start = warmup[0].date().isoformat()
@@ -186,6 +207,12 @@ def acquire_and_seal(
     context = sdk.OpenQuoteContext(host=host, port=port)
     frames: dict[str, pd.DataFrame] = {}
     try:
+        attempt["historical_access_started"] = True
+        attempt["historical_access_started_at_utc"] = datetime.now(timezone.utc).isoformat()
+        attempt_path.write_text(
+            json.dumps(attempt, sort_keys=True, separators=(",", ":")),
+            encoding="utf-8",
+        )
         for symbol in DATA_SYMBOLS:
             raw = _page_qfq(
                 context,
@@ -247,7 +274,6 @@ def acquire_and_seal(
     bundle_sha = sha256_bytes(encrypted)
     holdout_id = f"phase6-holdout-{plaintext_sha[:32]}"
 
-    output.mkdir(parents=True, exist_ok=True)
     bundle_path = output / f"{holdout_id}.bundle.aesgcm"
     key_path = output / f"{holdout_id}.key"
     receipt_path = output / f"{holdout_id}.receipt.json"
