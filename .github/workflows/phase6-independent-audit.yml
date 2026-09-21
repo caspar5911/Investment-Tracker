@@ -36,7 +36,7 @@ jobs:
           from hashlib import sha256
           from pathlib import Path
           path = Path("data/phase6/phase6-evaluation-contract.json")
-          assert sha256(path.read_bytes()).hexdigest() == "f64f31c20172491f6175a176592d463fed36f73ecf2b99542022afa55f50b77e"
+          assert sha256(path.read_bytes()).hexdigest() == "94679f5796be61e03c0d67f7c2c63676c70855e6967f331128ea70c8aa9e30f2"
           PY
       - name: Preserve coordinator pre-unseal isolation
         run: |
@@ -47,6 +47,10 @@ jobs:
           ! grep -R -n -E 'OpenSecTradeContext|place_order|unlock_trade|modify_order'             src/investment_tracker/independent_audit/phase6
           grep -n 'AuType.QFQ' src/investment_tracker/independent_audit/phase6/opend_qfq.py
           ! grep -n 'AuType.NONE' src/investment_tracker/independent_audit/phase6/opend_qfq.py
+      - name: Replacement selector contains no market-data call
+        run: |
+          ! grep -n -E '\.request_history_kline\(|\.get_market_snapshot\(|\.get_cur_kline\(|\.get_rt_data\(|\.get_rehab\(' \
+            src/investment_tracker/independent_audit/phase6/replacement.py
       - name: Verify sealed Phase 4 remains untouched
         run: |
           git diff --exit-code 69bb4347cbe577c4a1277335eef778ddf5b177d0 HEAD --             src/investment_tracker/quant/phase4             results/phase4/finalization
