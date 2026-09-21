@@ -47,7 +47,7 @@ _NAME_BLOCK_TOKENS = (
     "ULTRASHORT",
     "ULTRA",
     "BEAR",
-    " ETN",
+    "ETN",
 )
 _CONTEXT_RADIUS = 8
 
