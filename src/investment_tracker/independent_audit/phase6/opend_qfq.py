@@ -115,7 +115,7 @@ def _validated_frame(
         frame["time_key"].astype(str).str.slice(0, 10),
         errors="raise",
         utc=True,
-    ).normalize()
+    ).dt.normalize()
     if sessions.duplicated().any():
         raise ValueError(f"PHASE6_DUPLICATE_SESSION:{symbol}")
     values = pd.DataFrame(index=pd.DatetimeIndex(sessions))
