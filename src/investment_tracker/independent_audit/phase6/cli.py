@@ -12,6 +12,7 @@ from .release import (
     issue_acquisition_authorization,
     issue_holdout_release,
 )
+from .replacement import acquire_and_select
 
 
 def _dt(value: str) -> datetime:
@@ -38,6 +39,13 @@ def main(argv: list[str] | None = None) -> int:
     classify = sub.add_parser("classify-access-logs")
     classify.add_argument("--path", action="append", required=True)
     classify.add_argument("--output", required=True)
+
+    replacement = sub.add_parser("select-replacement-holdout")
+    replacement.add_argument("--log-path", action="append", required=True)
+    replacement.add_argument("--output", required=True)
+    replacement.add_argument("--static-snapshot-output", required=True)
+    replacement.add_argument("--host", default="127.0.0.1")
+    replacement.add_argument("--port", type=int, default=11111)
 
     authorize = sub.add_parser("issue-acquisition-authorization")
     authorize.add_argument("--contract", required=True)
@@ -88,6 +96,17 @@ def main(argv: list[str] | None = None) -> int:
         path = classify_access_logs(
             tuple(Path(item) for item in args.path),
             output_path=Path(args.output),
+        )
+        print(path)
+        return 0
+
+    if args.command == "select-replacement-holdout":
+        path = acquire_and_select(
+            log_paths=tuple(Path(item) for item in args.log_path),
+            output_path=Path(args.output),
+            static_snapshot_path=Path(args.static_snapshot_output),
+            host=args.host,
+            port=args.port,
         )
         print(path)
         return 0
