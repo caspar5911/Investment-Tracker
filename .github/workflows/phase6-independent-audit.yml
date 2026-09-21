@@ -25,6 +25,7 @@ jobs:
           tests/independent_audit/test_phase6_authority.py
           tests/independent_audit/test_phase6_bundle.py
           tests/independent_audit/test_phase6_evaluate.py
+          tests/independent_audit/test_phase6_replacement.py
           tests/quant/test_phase6_preseal.py
           tests/quant/test_phase6_bundle_gate.py
           tests/quant/test_phase6_cli.py
