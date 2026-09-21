@@ -288,14 +288,18 @@ def acquire_and_select(
         if output.exists():
             raise FileExistsError(f"PHASE6_REPLACEMENT_OUTPUT_EXISTS:{output.name}")
 
-    contaminated, file_manifest, history_contexts = _history_context_symbols(log_paths)
-
     sdk, sdk_name = _load_sdk()
     context = sdk.OpenQuoteContext(host=host, port=port)
     try:
         frame = _static_frame(context, sdk)
     finally:
         context.close()
+
+    # The final log snapshot is intentionally taken after the permitted static
+    # metadata request and immediately before deterministic ranking. This closes
+    # the selection-time race in which another historical request could occur
+    # after an earlier contamination scan.
+    contaminated, file_manifest, history_contexts = _history_context_symbols(log_paths)
 
     static_snapshot = _canonical_static_snapshot(frame)
     selected, excluded = select_from_static_frame(
