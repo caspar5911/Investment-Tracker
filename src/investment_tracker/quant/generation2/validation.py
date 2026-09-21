@@ -86,6 +86,7 @@ __all__ = [
     "SURVIVOR_SELECTION_ORDER",
     "VALIDATION_SCHEMA",
     "assess_pass",
+    "build_validation_payload",
     "build_validation_targets",
     "evaluate_validation_candidate",
     "frozen_candidate_by_id",
@@ -315,6 +316,34 @@ def run_validation_campaign(
     }
 
 
+def build_validation_payload(
+    result: dict,
+    friction_cases: tuple[int, ...] = REQUIRED_FRICTION_CASES_BPS,
+) -> dict:
+    """Assemble the self-hashing VALIDATION report payload (no file writes).
+
+    This is the single authority for the VALIDATION report content: sealing
+    and independent reproduction (C6) both consume it so they can never
+    diverge. Candidate records are stored in shortlist order.
+    """
+    shortlist = result["shortlist"]
+    for candidate_id in shortlist:
+        assert_frozen_candidate(frozen_candidate_by_id(candidate_id))
+    payload: dict = {
+        "schema_version": VALIDATION_SCHEMA,
+        "status": result["status"],
+        "grid_manifest_sha256": grid_manifest_sha256(),
+        "train_report_sha256": result["train_report_sha256"],
+        "friction_cases_bps": [int(bps) for bps in friction_cases],
+        "shortlist": list(shortlist),
+        "survivor": result["survivor"],
+        "survivor_selection_order": list(SURVIVOR_SELECTION_ORDER),
+        "candidates": [result["candidates"][cid] for cid in shortlist],
+    }
+    payload["report_sha256"] = content_sha256(payload)
+    return payload
+
+
 def seal_validation_report(
     result: dict,
     root: Path | str,
@@ -333,21 +362,7 @@ def seal_validation_report(
             "VALIDATION_REPORT_EXISTS",
             f"a VALIDATION report already exists at {report_path}",
         )
-    shortlist = result["shortlist"]
-    for candidate_id in shortlist:
-        assert_frozen_candidate(frozen_candidate_by_id(candidate_id))
-    payload: dict = {
-        "schema_version": VALIDATION_SCHEMA,
-        "status": result["status"],
-        "grid_manifest_sha256": grid_manifest_sha256(),
-        "train_report_sha256": result["train_report_sha256"],
-        "friction_cases_bps": [int(bps) for bps in friction_cases],
-        "shortlist": list(shortlist),
-        "survivor": result["survivor"],
-        "survivor_selection_order": list(SURVIVOR_SELECTION_ORDER),
-        "candidates": [result["candidates"][cid] for cid in shortlist],
-    }
-    payload["report_sha256"] = content_sha256(payload)
+    payload = build_validation_payload(result, friction_cases)
     root.mkdir(parents=True, exist_ok=True)
     try:
         with report_path.open("xb") as handle:
