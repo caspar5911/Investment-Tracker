@@ -71,6 +71,8 @@ __all__ = [
     "REPORT_NAME",
     "TRAIN_CAMPAIGN_SCHEMA",
     "TRAIN_CAMPAIGN_STATUS",
+    "assert_frozen_candidate",
+    "build_friction_cases",
     "canonical_bytes",
     "content_sha256",
     "evaluate_candidate",
@@ -120,7 +122,7 @@ def _frozen_grid_order() -> tuple[str, ...]:
     return tuple(entry["candidate_id"] for entry in canonical_grid_manifest()["candidates"])
 
 
-def _require_frozen_candidate(candidate: GridCandidate) -> dict:
+def assert_frozen_candidate(candidate: GridCandidate) -> dict:
     entries = _frozen_entries()
     entry = entries.get(candidate.candidate_id)
     if entry is None:
@@ -232,15 +234,18 @@ def _disqualification_reasons(friction_cases: dict[str, dict]) -> list[str]:
     return reasons
 
 
-def evaluate_candidate(
-    candidate: GridCandidate,
+def build_friction_cases(
     bars: dict[str, pd.DataFrame],
-    friction_cases: tuple[int, ...] = REQUIRED_FRICTION_CASES_BPS,
+    targets: tuple,
+    friction_cases: tuple[int, ...],
     initial_cash: float = INITIAL_CASH,
-) -> dict:
-    """Evaluate one frozen candidate on the TRAIN bars at every friction case."""
-    _require_frozen_candidate(candidate)
-    targets = build_targets(candidate, bars)
+) -> dict[str, dict]:
+    """Run the decision-ledger replay for ``targets`` at every friction case.
+
+    This is the shared case-construction primitive used by both the TRAIN
+    campaign and the VALIDATION campaign, so both record byte-identical,
+    content-addressed case payloads for a given replay.
+    """
     cases: dict[str, dict] = {}
     for bps in friction_cases:
         case = _failed_case(int(bps))
@@ -256,6 +261,19 @@ def evaluate_candidate(
         else:
             case = _case_payload(int(bps), replay)
         cases[str(bps)] = case
+    return cases
+
+
+def evaluate_candidate(
+    candidate: GridCandidate,
+    bars: dict[str, pd.DataFrame],
+    friction_cases: tuple[int, ...] = REQUIRED_FRICTION_CASES_BPS,
+    initial_cash: float = INITIAL_CASH,
+) -> dict:
+    """Evaluate one frozen candidate on the TRAIN bars at every friction case."""
+    assert_frozen_candidate(candidate)
+    targets = build_targets(candidate, bars)
+    cases = build_friction_cases(bars, targets, friction_cases, initial_cash)
     reasons = _disqualification_reasons(cases)
     return {
         "candidate_id": candidate.candidate_id,
