@@ -287,6 +287,7 @@ def evaluate_released_holdout(
     if sha256(key).hexdigest() != receipt.get("key_sha256"):
         raise ValueError("PHASE6_HOLDOUT_KEY_IDENTITY_MISMATCH")
 
+    marker_path = Path(marker_directory) / f"{release.release_id}.consumed.json"
     consumed = False
     try:
         encrypted = consume_released_bundle(
@@ -306,6 +307,7 @@ def evaluate_released_holdout(
             "one_time_consumed": True,
         }
     except Exception as exc:
+        consumed = consumed or marker_path.is_file()
         if not consumed:
             raise
         result = {
