@@ -30,3 +30,23 @@ def test_preflight_cli_writes_compact_readiness_record(
 
     rendered = json.loads(capsys.readouterr().out)
     assert rendered == payload
+
+
+def test_preflight_cli_creates_missing_output_parent_directory(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "data" / "phase6" / "phase6-preflight.json"
+    assert not output.parent.exists()
+
+    code = main(
+        [
+            "preflight",
+            "--repository-root",
+            ".",
+            "--output",
+            str(output),
+        ]
+    )
+
+    assert code == 0
+    assert output.is_file()
