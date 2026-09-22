@@ -33,6 +33,7 @@ class SuccessorAcquisitionAuthorization(BaseModel):
     binding_sha256: Literal["fd482e62e81d6813132f3aef747aecbcb07b5e4960b559dc1253510c95f49c8b"]
     implementation_sha256: Literal["35a3ad8f92598021bbfbd2d5d9337036af525b71f978ab053827c4922da60f1b"]
     successor_normalizer_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    successor_evaluator_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
     phase6_contract_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     selection_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -91,6 +92,7 @@ def load_acquisition_authorization(
         or auth.binding_sha256 != contract.get("strategy", {}).get("binding_sha256")
         or auth.implementation_sha256 != contract.get("strategy", {}).get("implementation_sha256")
         or auth.successor_normalizer_sha256 != contract.get("methodology", {}).get("successor_normalizer_sha256")
+        or auth.successor_evaluator_sha256 != contract.get("methodology", {}).get("successor_evaluator_sha256")
         or auth.phase6_contract_sha256 != _sha(phase6_contract_path)
         or auth.selection_sha256 != _sha(selection_path)
         or auth.virginity_attestation_sha256 != _sha(virginity_attestation_path)
