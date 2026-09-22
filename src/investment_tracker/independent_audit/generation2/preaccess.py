@@ -23,6 +23,7 @@ def evaluate_preaccess(
     selection_path: Path,
     selection_contract_path: Path,
     reproduction_report_path: Path,
+    reconciliation_path: Path,
 ) -> dict[str, Any]:
     attestation = verify_attestation(
         attestation_path=attestation_path,
@@ -35,8 +36,18 @@ def evaluate_preaccess(
     if reproduction.get("survivor") != FROZEN_CANDIDATE_ID:
         raise ValueError("GEN2_PREACCESS_SURVIVOR_MISMATCH")
 
-    independent = reproduction.get("independent_source_established")
-    if independent is not True:
+    try:
+        reconciliation = json.loads(Path(reconciliation_path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        reconciliation = None
+
+    independent = bool(
+        isinstance(reconciliation, dict)
+        and reconciliation.get("status") == "MATCHED"
+        and reconciliation.get("independent_source_established") is True
+        and reconciliation.get("decision_critical") is False
+    )
+    if not independent:
         return {
             "schema_version": "GENERATION2-PHASE6-PREACCESS-v1",
             "status": STATUS_BLOCKED,
@@ -46,6 +57,9 @@ def evaluate_preaccess(
             "virginity_attestation_id": attestation["attestation_id"],
             "virginity_status": attestation["status"],
             "independent_source_established": False,
+            "independent_reconciliation_status": (
+                reconciliation.get("status") if isinstance(reconciliation, dict) else "MISSING"
+            ),
             "historical_acquisition_authorized": False,
             "phase7_authorized": False,
             "production_readiness_approved": False,
@@ -60,6 +74,7 @@ def evaluate_preaccess(
         "virginity_attestation_id": attestation["attestation_id"],
         "virginity_status": attestation["status"],
         "independent_source_established": True,
+        "independent_reconciliation_status": reconciliation.get("status"),
         "historical_acquisition_authorized": False,
         "phase7_authorized": False,
         "production_readiness_approved": False,
