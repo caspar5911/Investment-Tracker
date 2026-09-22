@@ -170,6 +170,7 @@ def _fixture(tmp_path: Path):
             "symbol_substitution_after_access_allowed": False,
             "historical_data_included_in_authorization_artifact": False,
             "holdout_performance_inspected": False,
+            "one_time_evaluation_after_verified_release_authorized": True,
             "phase7_authorized": False,
             "production_readiness_approved": False,
             "recon009_status": "OPEN",
