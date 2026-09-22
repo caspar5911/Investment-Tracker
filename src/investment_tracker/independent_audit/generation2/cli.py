@@ -63,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
     contract.add_argument("--selection-contract", default="data/governance/generation2-holdout-selection-contract.json")
     contract.add_argument("--attestation", required=True)
     contract.add_argument("--evidence", required=True)
-    contract.add_argument("--reconciliation", required=True)
+    contract.add_argument("--provenance-root", required=True)
     contract.add_argument("--output", required=True)
 
     args = parser.parse_args(argv)
@@ -153,7 +153,7 @@ def main(argv: list[str] | None = None) -> int:
             selection_path=Path(args.selection),
             selection_contract_path=Path(args.selection_contract),
             reproduction_report_path=Path(args.reproduction_report),
-            reconciliation_path=Path(args.reconciliation),
+            provenance_root=Path(args.provenance_root),
         )
         write_preaccess_status(result, Path(args.output))
         print(json.dumps(result, sort_keys=True, separators=(",", ":")))
