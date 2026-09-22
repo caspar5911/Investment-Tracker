@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .holdout_selection import acquire_and_select
 from .virginity import capture_composite_virginity
+from .research_provenance_export import export_and_reconcile
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -31,6 +32,12 @@ def main(argv: list[str] | None = None) -> int:
     virgin.add_argument("--selection-contract", default="data/governance/generation2-holdout-selection-contract.json")
     virgin.add_argument("--host", default="127.0.0.1")
     virgin.add_argument("--port", type=int, default=11111)
+
+    provenance = sub.add_parser("export-research-provenance")
+    provenance.add_argument("--output-root", required=True)
+    provenance.add_argument("--reproduction-report", default="data/governance/generation2-campaign/reproduction-report.json")
+    provenance.add_argument("--host", default="127.0.0.1")
+    provenance.add_argument("--port", type=int, default=11111)
 
     args = parser.parse_args(argv)
 
@@ -89,6 +96,16 @@ def main(argv: list[str] | None = None) -> int:
             "evidence_output": str(evidence),
             "attestation_output": str(attestation),
         }, sort_keys=True, separators=(",", ":")))
+        return 0
+
+    if args.command == "export-research-provenance":
+        result = export_and_reconcile(
+            output_root=Path(args.output_root),
+            reproduction_report_path=Path(args.reproduction_report),
+            host=args.host,
+            port=args.port,
+        )
+        print(json.dumps(result, sort_keys=True, separators=(",", ":")))
         return 0
 
     raise ValueError("GENERATION2_AUDIT_COMMAND_UNSUPPORTED")
