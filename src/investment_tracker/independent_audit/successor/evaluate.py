@@ -142,6 +142,7 @@ def _validate_manifest(
         "binding_sha256": contract["strategy"]["binding_sha256"],
         "implementation_sha256": contract["strategy"]["implementation_sha256"],
         "successor_normalizer_sha256": contract["methodology"]["successor_normalizer_sha256"],
+        "successor_evaluator_sha256": contract["methodology"]["successor_evaluator_sha256"],
         "locked_symbols": list(locked),
         "benchmark_reference_symbol": benchmark,
         "holdout_start": contract["final_holdout"]["calendar_start"],
