@@ -26,6 +26,7 @@ jobs:
           tests/independent_audit/test_generation2_virginity.py
           tests/independent_audit/test_generation2_preaccess.py
           tests/independent_audit/test_generation2_research_provenance_export.py
+          tests/independent_audit/test_generation2_research_provenance_cache.py
       - name: Verify survivor identity
         run: >-
           python -c "from investment_tracker.quant.generation2.survivor_identity import verify_survivor_identity;
@@ -38,6 +39,9 @@ jobs:
           grep -n 'get_history_kl_quota' src/investment_tracker/independent_audit/generation2/holdout_selection.py
           grep -n 'get_history_kl_quota' src/investment_tracker/independent_audit/generation2/virginity.py || true
           ! grep -n -E 'request_history_kline|get_market_snapshot|get_cur_kline|get_rt_data|get_order_book|get_ticker|get_rehab|OpenSecTradeContext|place_order|unlock_trade|modify_order'             src/investment_tracker/independent_audit/generation2/holdout_selection.py             src/investment_tracker/independent_audit/generation2/virginity.py
+      - name: Cache provenance path is network-free
+        run: |
+          ! grep -n -E 'OpenQuoteContext|request_history_kline|get_market_snapshot|get_cur_kline|get_rt_data|get_rehab|OpenSecTradeContext|place_order|unlock_trade|modify_order'             src/investment_tracker/independent_audit/generation2/research_provenance_cache.py
       - name: Provenance export is research-only and pre-2023
         run: |
           python - <<'PY'
