@@ -179,3 +179,22 @@ def test_full_selector_uses_only_static_and_quota_interfaces(monkeypatch, tmp_pa
     assert ctx.closed is True
     assert payload["safety"]["historical_market_data_api_called"] is False
     assert payload["safety"]["phase6_authorized"] is False
+
+
+def test_current_frozen_inputs_verify_against_registry_and_survivor_identity():
+    contract, contract_sha, exclusions = hs._verify_frozen_inputs(
+        contract_path=Path("data/governance/generation2-holdout-selection-contract.json"),
+        identity_root=Path("data/governance/generation2-campaign"),
+        registry_path=Path("data/governance/holdout-exclusion-registry.json"),
+    )
+    assert contract["holdout_exclusion_registry_sha256"] == hs.FROZEN_REGISTRY_SHA256
+    assert len(exclusions) == 18
+    assert contract_sha
+
+
+def test_contract_seed_material_hashes_to_frozen_seed():
+    payload, _ = hs._load_contract(
+        Path("data/governance/generation2-holdout-selection-contract.json")
+    )
+    material = payload["ranking"]["seed_material"]
+    assert hs.sha256(material.encode("ascii")).hexdigest() == hs.FROZEN_SEED_SHA256
