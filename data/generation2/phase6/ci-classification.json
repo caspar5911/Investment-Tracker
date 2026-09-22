@@ -1,0 +1,49 @@
+{
+  "schema_version": "GENERATION2-PHASE6-CI-CLASSIFICATION-v1",
+  "authority": "INDEPENDENT_AUDIT",
+  "status": "LEGACY_FULL_SUITE_ENVIRONMENT_FAILURE_CLASSIFIED",
+  "authorization_commit_sha": "51f077cc5acddd02a231567088f70a3c7bdb7d36",
+  "full_suite": {
+    "workflow": "tests",
+    "run_id": 35718227521,
+    "run_number": 411,
+    "conclusion": "failure",
+    "classified_root_cause": "GITHUB_RUNNER_MISSING_LEGACY_PHASE4_GITIGNORED_EVIDENCE",
+    "representative_failures": [
+      "BootstrapEvidenceError: pinned source is not a regular file",
+      "Gate3AuthorityError: INPUT_IDENTITY_MISMATCH: pinned input missing",
+      "FileNotFoundError: data/cache/phase3/normalized/.../metadata.json"
+    ],
+    "full_suite_green": false
+  },
+  "dedicated_generation2_gates": {
+    "generation2-holdout-selection-audit": {
+      "run_id": 35718227610,
+      "conclusion": "success"
+    },
+    "phase6-independent-audit": {
+      "run_id": 35718227489,
+      "conclusion": "success"
+    },
+    "phase6-preseal-static": {
+      "run_id": 35718227470,
+      "conclusion": "success"
+    },
+    "generation2-synthetic-rehearsal-gate": {
+      "job_id": 106714677094,
+      "conclusion": "success"
+    }
+  },
+  "assessment": {
+    "generation2_regression_detected": false,
+    "authorization_logic_failure_detected": false,
+    "holdout_history_accessed": false,
+    "generic_suite_failure_waived_as_green": false,
+    "generic_suite_failure_preserved_as_open_limitation": true,
+    "dedicated_generation2_gates_required_for_acquisition": true
+  },
+  "limitations": [
+    "FULL_REPOSITORY_TEST_WORKFLOW_REMAINS_RED",
+    "LEGACY_PHASE4_GITIGNORED_EVIDENCE_NOT_AVAILABLE_ON_GITHUB_HOSTED_RUNNER"
+  ]
+}
