@@ -11,7 +11,7 @@ from .research_provenance_cache import build_from_phase3_cache
 from .preaccess import evaluate_preaccess, write_preaccess_status
 from .phase6_contract import build_contract, seal_contract
 from .authorization import issue_authorization
-from .acquisition import acquire_and_seal
+from .acquisition import acquire_and_seal, preflight_acquisition
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -79,6 +79,19 @@ def main(argv: list[str] | None = None) -> int:
     auth.add_argument("--ci-run-id", required=True, type=int)
     auth.add_argument("--ci-conclusion", required=True)
     auth.add_argument("--output", required=True)
+
+    preflight_acquire = sub.add_parser("preflight-final-holdout")
+    preflight_acquire.add_argument("--repository-root", default=".")
+    preflight_acquire.add_argument("--contract", default="data/generation2/phase6/evaluation-contract.json")
+    preflight_acquire.add_argument("--authorization", default="data/generation2/phase6/acquisition-authorization.json")
+    preflight_acquire.add_argument("--preaccess-status", default="data/generation2/preaccess/preaccess-status.json")
+    preflight_acquire.add_argument("--attestation", default="data/generation2/preaccess/virginity-attestation.json")
+    preflight_acquire.add_argument("--evidence", default="data/generation2/preaccess/virginity-evidence.json")
+    preflight_acquire.add_argument("--provenance-root", default="data/generation2/preaccess/provenance")
+    preflight_acquire.add_argument("--ci-classification", default="data/generation2/phase6/ci-classification.json")
+    preflight_acquire.add_argument("--authorization-commit-sha", required=True)
+    preflight_acquire.add_argument("--host", default="127.0.0.1")
+    preflight_acquire.add_argument("--port", type=int, default=11111)
 
     acquire = sub.add_parser("acquire-final-holdout")
     acquire.add_argument("--repository-root", default=".")
@@ -151,6 +164,17 @@ def main(argv: list[str] | None = None) -> int:
             "evidence_output": str(evidence),
             "attestation_output": str(attestation),
         }, sort_keys=True, separators=(",", ":")))
+        return 0
+
+    if args.command == "preflight-final-holdout":
+        result = preflight_acquisition(
+            repository_root=Path(args.repository_root), contract_path=Path(args.contract),
+            authorization_path=Path(args.authorization), preaccess_status_path=Path(args.preaccess_status),
+            attestation_path=Path(args.attestation), evidence_path=Path(args.evidence),
+            provenance_root=Path(args.provenance_root), ci_classification_path=Path(args.ci_classification),
+            authorization_commit_sha=args.authorization_commit_sha, host=args.host, port=args.port,
+        )
+        print(json.dumps(result, sort_keys=True,separators=(",",":")))
         return 0
 
     if args.command == "acquire-final-holdout":
