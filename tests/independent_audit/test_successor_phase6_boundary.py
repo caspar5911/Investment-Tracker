@@ -29,6 +29,7 @@ CA_CONTRACT = ROOT / "data/governance/successor/corporate-action-normalization-v
 REGISTRY = ROOT / "data/governance/holdout-exclusion-registry.json"
 CLOSURE = ROOT / "data/generation2/phase6/phase6-final-holdout-closure.json"
 NORMALIZER = ROOT / "src/investment_tracker/quant/successor/corporate_actions_v2.py"
+EVALUATOR = ROOT / "src/investment_tracker/independent_audit/successor/evaluate.py"
 CANDIDATE = "G2-A|lookback=189|skip=21|top_k=1|rebalance=21"
 BINDING = "fd482e62e81d6813132f3aef747aecbcb07b5e4960b559dc1253510c95f49c8b"
 IMPLEMENTATION = "35a3ad8f92598021bbfbd2d5d9337036af525b71f978ab053827c4922da60f1b"
@@ -63,6 +64,7 @@ def _fixture(tmp_path: Path):
             "implementation_sha256": IMPLEMENTATION,
             "corporate_action_contract_sha256": _sha(CA_CONTRACT),
             "successor_normalizer_sha256": _sha(NORMALIZER),
+            "successor_evaluator_sha256": _sha(EVALUATOR),
             "holdout_exclusion_registry_sha256": _sha(REGISTRY),
             "evaluation_calendar_start": "2023-01-01",
             "evaluation_calendar_end": "2025-12-31",
@@ -96,6 +98,7 @@ def _fixture(tmp_path: Path):
             "binding_sha256": BINDING,
             "implementation_sha256": IMPLEMENTATION,
             "successor_normalizer_sha256": _sha(NORMALIZER),
+            "successor_evaluator_sha256": _sha(EVALUATOR),
             "historical_market_data_api_called": False,
             "protected_history_access_authorized": False,
             "selected": [
@@ -140,6 +143,7 @@ def _fixture(tmp_path: Path):
         virginity_attestation_path=attestation,
         corporate_action_contract_path=CA_CONTRACT,
         successor_normalizer_path=NORMALIZER,
+        successor_evaluator_path=EVALUATOR,
         holdout_exclusion_registry_path=REGISTRY,
         predecessor_closure_path=CLOSURE,
     )
@@ -159,6 +163,7 @@ def _fixture(tmp_path: Path):
             "binding_sha256": BINDING,
             "implementation_sha256": IMPLEMENTATION,
             "successor_normalizer_sha256": _sha(NORMALIZER),
+            "successor_evaluator_sha256": _sha(EVALUATOR),
             "phase6_contract_sha256": _sha(phase6),
             "selection_sha256": _sha(selection),
             "virginity_attestation_sha256": _sha(attestation),
