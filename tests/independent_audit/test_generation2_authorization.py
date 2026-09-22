@@ -82,3 +82,21 @@ def test_existing_authorization_refused(monkeypatch, tmp_path: Path):
             attestation_path=tmp_path/"a", evidence_path=tmp_path/"e", provenance_root=tmp_path/"prov",
             evidence_commit_sha="a"*40, ci_run_id=1, ci_conclusion="failure", output_path=out
         )
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+def test_committed_authorization_artifact_roundtrips():
+    auth = a.load_authorization(
+        authorization_path=ROOT / "data/generation2/phase6/acquisition-authorization.json",
+        repository_root=ROOT,
+        contract_path=ROOT / "data/generation2/phase6/evaluation-contract.json",
+        preaccess_status_path=ROOT / "data/generation2/preaccess/preaccess-status.json",
+        attestation_path=ROOT / "data/generation2/preaccess/virginity-attestation.json",
+        evidence_path=ROOT / "data/generation2/preaccess/virginity-evidence.json",
+        provenance_root=ROOT / "data/generation2/preaccess/provenance",
+    )
+    assert auth.status == a.AUTH_STATUS
+    assert auth.evidence_commit_sha == "9eee39dccf53afb57c657c830bbed82efcdb023e"
+    assert auth.ci_run_id == 35717809558
+    assert auth.locked_symbols == a.LOCKED_SYMBOLS
