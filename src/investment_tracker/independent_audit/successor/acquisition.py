@@ -279,6 +279,19 @@ def _write_exclusive(path: Path, payload: bytes) -> None:
             os.fsync(handle.fileno())
     except FileExistsError as exc:
         raise RuntimeError("SUCCESSOR_ACQUISITION_AUTHORIZATION_ALREADY_CONSUMED") from exc
+    if path.read_bytes() != payload:
+        raise OSError("SUCCESSOR_ACQUISITION_MARKER_READBACK_FAILED")
+
+
+def _replace_verified(path: Path, payload: bytes) -> None:
+    partial = path.with_name(path.name + ".partial")
+    with partial.open("wb") as handle:
+        handle.write(payload)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(partial, path)
+    if path.read_bytes() != payload:
+        raise OSError("SUCCESSOR_ACQUISITION_MARKER_READBACK_FAILED")
 
 
 def preflight_acquisition(
@@ -388,7 +401,7 @@ def acquire_and_seal(
 
     marker["historical_access_started"] = True
     marker["historical_access_started_at_utc"] = datetime.now(timezone.utc).isoformat()
-    marker_path.write_bytes(_canonical_bytes(marker))
+    _replace_verified(marker_path, _canonical_bytes(marker))
 
     context = sdk.OpenQuoteContext(host=host, port=port)
     entries: dict[str, bytes] = {}
