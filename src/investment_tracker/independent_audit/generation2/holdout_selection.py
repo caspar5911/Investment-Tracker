@@ -89,6 +89,11 @@ def _load_contract(path: Path) -> tuple[dict[str, Any], str]:
     ranking = payload.get("ranking")
     if not isinstance(ranking, dict) or ranking.get("seed_sha256") != FROZEN_SEED_SHA256:
         raise ValueError("GEN2_HOLDOUT_SELECTION_SEED_MISMATCH")
+    seed_material = ranking.get("seed_material")
+    if not isinstance(seed_material, str):
+        raise ValueError("GEN2_HOLDOUT_SELECTION_SEED_MATERIAL_INVALID")
+    if sha256(seed_material.encode("ascii")).hexdigest() != FROZEN_SEED_SHA256:
+        raise ValueError("GEN2_HOLDOUT_SELECTION_SEED_MATERIAL_MISMATCH")
     return payload, sha256(raw).hexdigest()
 
 
