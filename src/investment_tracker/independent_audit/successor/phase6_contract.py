@@ -45,6 +45,7 @@ def build_phase6_contract(
     virginity_attestation_path: Path,
     corporate_action_contract_path: Path,
     successor_normalizer_path: Path,
+    successor_evaluator_path: Path,
     holdout_exclusion_registry_path: Path,
     predecessor_closure_path: Path,
 ) -> dict[str, Any]:
@@ -54,6 +55,7 @@ def build_phase6_contract(
         holdout_exclusion_registry_path=holdout_exclusion_registry_path,
         predecessor_closure_path=predecessor_closure_path,
         successor_normalizer_path=successor_normalizer_path,
+        successor_evaluator_path=successor_evaluator_path,
     )
     selection, symbols = _load_selection(selection_path)
     if (
@@ -64,6 +66,7 @@ def build_phase6_contract(
         or selection.get("binding_sha256") != auth.binding_sha256
         or selection.get("implementation_sha256") != auth.implementation_sha256
         or selection.get("successor_normalizer_sha256") != auth.successor_normalizer_sha256
+        or selection.get("successor_evaluator_sha256") != auth.successor_evaluator_sha256
         or len(symbols) != auth.selection_count
     ):
         raise ValueError("SUCCESSOR_PHASE6_SELECTION_IDENTITY_MISMATCH")
@@ -119,6 +122,7 @@ def build_phase6_contract(
             "corporate_action_normalization_contract": "CORPORATE-ACTION-NORMALIZATION-CONTRACT-v2",
             "corporate_action_contract_sha256": _sha(corporate_action_contract_path),
             "successor_normalizer_sha256": _sha(successor_normalizer_path),
+            "successor_evaluator_sha256": _sha(successor_evaluator_path),
             "corporate_action_sources": [
                 "MOOMOO_REHAB",
                 "MOOMOO_CORPORATE_ACTION_DIVIDENDS",
