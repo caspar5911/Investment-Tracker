@@ -34,6 +34,8 @@ class SuccessorAcquisitionAuthorization(BaseModel):
     implementation_sha256: Literal["35a3ad8f92598021bbfbd2d5d9337036af525b71f978ab053827c4922da60f1b"]
     successor_normalizer_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     successor_evaluator_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    acquisition_implementation_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    release_implementation_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
     phase6_contract_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     selection_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -80,6 +82,12 @@ def load_acquisition_authorization(
         ) from exc
 
     contract = verify_phase6_contract(phase6_contract_path)
+    acquisition_impl = Path(__file__).with_name("acquisition.py")
+    release_impl = Path(__file__).with_name("release.py")
+    if auth.acquisition_implementation_sha256 != _sha(acquisition_impl):
+        raise SuccessorAcquisitionAuthorityError("SUCCESSOR_ACQUISITION_IMPLEMENTATION_IDENTITY_MISMATCH")
+    if auth.release_implementation_sha256 != _sha(release_impl):
+        raise SuccessorAcquisitionAuthorityError("SUCCESSOR_RELEASE_IMPLEMENTATION_IDENTITY_MISMATCH")
     attestation = verify_attestation(
         selection_path=selection_path,
         evidence_path=virginity_evidence_path,
