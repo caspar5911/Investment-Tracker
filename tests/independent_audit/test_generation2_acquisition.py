@@ -176,3 +176,34 @@ def test_expected_sessions_match_frozen_contract():
     assert scored[0].date().isoformat() >= "2023-01-01"
     assert scored[-1].date().isoformat() <= "2025-12-31"
     assert warmup[-1] < scored[0]
+
+
+def test_safe_preflight_never_creates_consumption_marker(monkeypatch, tmp_path: Path):
+    class Ctx:
+        def close(self):
+            pass
+    sdk = SimpleNamespace(
+        OpenQuoteContext=lambda *args, **kwargs: Ctx(),
+        RET_OK=0,
+        AuType=SimpleNamespace(QFQ="QFQ", NONE="NONE"),
+        KLType=SimpleNamespace(K_DAY="K_DAY"),
+        __version__="test",
+    )
+    monkeypatch.setattr(a, "_load_sdk", lambda: (sdk, "fake"))
+    monkeypatch.setattr(a, "_verify_sdk_capabilities", lambda sdk: None)
+    monkeypatch.setattr(a, "_provider_quota_preflight", lambda context, sdk: {"used": 14, "remaining": 286, "locked_matches": []})
+    result = a.preflight_acquisition(
+        repository_root=ROOT,
+        contract_path=CONTRACT,
+        authorization_path=AUTH,
+        preaccess_status_path=PREACCESS,
+        attestation_path=ATTESTATION,
+        evidence_path=EVIDENCE,
+        provenance_root=PROVENANCE,
+        ci_classification_path=CLASSIFICATION,
+        authorization_commit_sha=AUTH_COMMIT,
+    )
+    assert result["status"] == "GEN2_ACQUISITION_PREFLIGHT_READY"
+    assert result["historical_market_data_api_called"] is False
+    assert result["historical_access_consumed"] is False
+    assert not list(tmp_path.glob("*.acquisition-start.json"))
