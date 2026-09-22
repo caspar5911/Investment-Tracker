@@ -36,6 +36,8 @@ REGISTRY = ROOT / "data/governance/holdout-exclusion-registry.json"
 CLOSURE = ROOT / "data/generation2/phase6/phase6-final-holdout-closure.json"
 NORMALIZER = ROOT / "src/investment_tracker/quant/successor/corporate_actions_v2.py"
 EVALUATOR = ROOT / "src/investment_tracker/independent_audit/successor/evaluate.py"
+ACQUISITION_IMPL = ROOT / "src/investment_tracker/independent_audit/successor/acquisition.py"
+RELEASE_IMPL = ROOT / "src/investment_tracker/independent_audit/successor/release.py"
 CANDIDATE = "G2-A|lookback=189|skip=21|top_k=1|rebalance=21"
 BINDING = "fd482e62e81d6813132f3aef747aecbcb07b5e4960b559dc1253510c95f49c8b"
 IMPLEMENTATION = "35a3ad8f92598021bbfbd2d5d9337036af525b71f978ab053827c4922da60f1b"
@@ -170,6 +172,8 @@ def _fixture(tmp_path: Path):
             "implementation_sha256": IMPLEMENTATION,
             "successor_normalizer_sha256": _sha(NORMALIZER),
             "successor_evaluator_sha256": _sha(EVALUATOR),
+            "acquisition_implementation_sha256": _sha(ACQUISITION_IMPL),
+            "release_implementation_sha256": _sha(RELEASE_IMPL),
             "phase6_contract_sha256": _sha(phase6),
             "selection_sha256": _sha(selection),
             "virginity_attestation_sha256": _sha(attestation),
