@@ -27,7 +27,7 @@ def test_contract_build_requires_ready_preaccess(monkeypatch, tmp_path: Path):
             selection_contract_path=tmp_path / "selection-contract.json",
             virginity_attestation_path=tmp_path / "attestation.json",
             virginity_evidence_path=tmp_path / "evidence.json",
-            reconciliation_path=tmp_path / "reconciliation.json",
+            provenance_root=tmp_path / "provenance",
         )
 
 
@@ -36,15 +36,23 @@ def test_contract_builds_only_from_verified_ready_inputs(monkeypatch, tmp_path: 
         "status": "GENERATION2_PHASE6_PREACCESS_READY",
         "locked_symbols": list(pc.LOCKED_SYMBOLS),
         "independent_source_established": True,
+        "primary_snapshot_sha256": "a" * 64,
+        "provider_origin_snapshot_sha256": "b" * 64,
+        "reconciliation_sha256": "c" * 64,
     })
     selection = _write(tmp_path / "selection.json", {"x": 1})
     selection_contract = _write(tmp_path / "selection-contract.json", {"x": 2})
     attestation = _write(tmp_path / "attestation.json", {"x": 3})
     evidence = _write(tmp_path / "evidence.json", {"x": 4})
-    reconciliation = _write(tmp_path / "reconciliation.json", {
+    provenance_root = tmp_path / "provenance"
+    provenance_root.mkdir()
+    monkeypatch.setattr(pc, "verify_cache_provenance", lambda root: {
         "status": "MATCHED",
         "independent_source_established": True,
         "decision_critical": False,
+        "primary_snapshot_sha256": "a" * 64,
+        "provider_origin_snapshot_sha256": "b" * 64,
+        "reconciliation_sha256": "c" * 64,
     })
 
     monkeypatch.setattr(pc, "verify_attestation", lambda **kwargs: {"status": "ok"})
@@ -77,7 +85,7 @@ def test_contract_builds_only_from_verified_ready_inputs(monkeypatch, tmp_path: 
         selection_contract_path=selection_contract,
         virginity_attestation_path=attestation,
         virginity_evidence_path=evidence,
-        reconciliation_path=reconciliation,
+        provenance_root=provenance_root,
     )
     assert payload["status"] == pc.CONTRACT_STATUS
     assert payload["final_holdout"]["locked_symbols"] == list(pc.LOCKED_SYMBOLS)
