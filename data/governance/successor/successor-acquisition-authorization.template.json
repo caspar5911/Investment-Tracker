@@ -32,6 +32,8 @@
     "recon009_status": "OPEN",
     "paper_only": true,
     "one_time_evaluation_after_verified_release_authorized": true,
-    "successor_evaluator_sha256": "<sha256>"
+    "successor_evaluator_sha256": "<sha256>",
+    "acquisition_implementation_sha256": "<sha256 of successor/acquisition.py>",
+    "release_implementation_sha256": "<sha256 of successor/release.py>"
   }
 }
