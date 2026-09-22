@@ -70,19 +70,22 @@ def _write(path: Path, payload: dict) -> Path:
     return path
 
 
+def _load(path: Path):
+    return load_methodology_authorization(
+        authorization_path=path,
+        corporate_action_contract_path=CONTRACT,
+        holdout_exclusion_registry_path=REGISTRY,
+        predecessor_closure_path=CLOSURE,
+        successor_normalizer_path=NORMALIZER,
+    )
+
+
 def test_missing_real_audit_authorization_fails_closed(tmp_path: Path) -> None:
     with pytest.raises(
         SuccessorAuthorityError,
         match="SUCCESSOR_INDEPENDENT_AUDIT_AUTHORIZATION_MISSING",
     ):
-        load_methodology_authorization(
-            authorization_path=tmp_path / "missing.json",
-            corporate_action_contract_path=CONTRACT,
-            holdout_exclusion_registry_path=REGISTRY,
-            predecessor_closure_path=CLOSURE,
-        successor_normalizer_path=NORMALIZER,
-            successor_normalizer_path=NORMALIZER,
-        )
+        _load(tmp_path / "missing.json")
 
 
 def test_non_authorizing_template_cannot_be_used_as_approval() -> None:
@@ -90,25 +93,12 @@ def test_non_authorizing_template_cannot_be_used_as_approval() -> None:
         SuccessorAuthorityError,
         match="SUCCESSOR_INDEPENDENT_AUDIT_AUTHORIZATION_INVALID",
     ):
-        load_methodology_authorization(
-            authorization_path=TEMPLATE,
-            corporate_action_contract_path=CONTRACT,
-            holdout_exclusion_registry_path=REGISTRY,
-            predecessor_closure_path=CLOSURE,
-        successor_normalizer_path=NORMALIZER,
-            successor_normalizer_path=NORMALIZER,
-        )
+        _load(TEMPLATE)
 
 
 def test_valid_synthetic_authority_fixture_binds_exact_governance(tmp_path: Path) -> None:
     auth_path = _write(tmp_path / "auth.json", _authorization())
-    auth = load_methodology_authorization(
-        authorization_path=auth_path,
-        corporate_action_contract_path=CONTRACT,
-        holdout_exclusion_registry_path=REGISTRY,
-        predecessor_closure_path=CLOSURE,
-        successor_normalizer_path=NORMALIZER,
-    )
+    auth = _load(auth_path)
     assert auth.successor_methodology_authorized is True
     assert auth.new_virgin_holdout_selection_authorized is True
     assert auth.protected_history_access_authorized is False
@@ -124,14 +114,18 @@ def test_tampered_contract_identity_fails_closed(tmp_path: Path) -> None:
         SuccessorAuthorityError,
         match="SUCCESSOR_CORPORATE_ACTION_CONTRACT_IDENTITY_MISMATCH",
     ):
-        load_methodology_authorization(
-            authorization_path=auth_path,
-            corporate_action_contract_path=CONTRACT,
-            holdout_exclusion_registry_path=REGISTRY,
-            predecessor_closure_path=CLOSURE,
-        successor_normalizer_path=NORMALIZER,
-            successor_normalizer_path=NORMALIZER,
-        )
+        _load(auth_path)
+
+
+def test_tampered_normalizer_identity_fails_closed(tmp_path: Path) -> None:
+    payload = _authorization()
+    payload["successor_normalizer_sha256"] = "0" * 64
+    auth_path = _write(tmp_path / "auth.json", payload)
+    with pytest.raises(
+        SuccessorAuthorityError,
+        match="SUCCESSOR_NORMALIZER_IDENTITY_MISMATCH",
+    ):
+        _load(auth_path)
 
 
 def test_selection_contract_requires_valid_audit_authority(tmp_path: Path) -> None:
@@ -145,6 +139,8 @@ def test_selection_contract_requires_valid_audit_authority(tmp_path: Path) -> No
     )
     assert contract["status"] == "FROZEN_AFTER_INDEPENDENT_AUDIT_BEFORE_CANDIDATE_QUERY"
     assert contract["successor_formal_name"] == "GENERATION_3_TEST_FIXTURE"
+    assert contract["candidate_id"] == _authorization()["candidate_id"]
+    assert contract["successor_normalizer_sha256"] == _sha(NORMALIZER)
     assert contract["governance"]["protected_history_access_authorized"] is False
     assert contract["governance"]["phase7_authorized"] is False
     assert contract["governance"]["recon009_status"] == "OPEN"
