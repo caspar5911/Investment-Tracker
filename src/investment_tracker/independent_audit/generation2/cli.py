@@ -9,6 +9,7 @@ from .virginity import capture_composite_virginity
 from .research_provenance_export import export_and_reconcile
 from .research_provenance_cache import build_from_phase3_cache
 from .preaccess import evaluate_preaccess, write_preaccess_status
+from .phase6_contract import build_contract, seal_contract
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -54,6 +55,16 @@ def main(argv: list[str] | None = None) -> int:
     preaccess.add_argument("--reproduction-report", default="data/governance/generation2-campaign/reproduction-report.json")
     preaccess.add_argument("--reconciliation", required=True)
     preaccess.add_argument("--output", required=True)
+
+    contract = sub.add_parser("seal-phase6-contract")
+    contract.add_argument("--repository-root", default=".")
+    contract.add_argument("--preaccess-status", required=True)
+    contract.add_argument("--selection", default="data/generation2/holdout-selection/selection.json")
+    contract.add_argument("--selection-contract", default="data/governance/generation2-holdout-selection-contract.json")
+    contract.add_argument("--attestation", required=True)
+    contract.add_argument("--evidence", required=True)
+    contract.add_argument("--reconciliation", required=True)
+    contract.add_argument("--output", required=True)
 
     args = parser.parse_args(argv)
 
@@ -111,6 +122,27 @@ def main(argv: list[str] | None = None) -> int:
             "historical_acquisition_authorized": payload["historical_acquisition_authorized"],
             "evidence_output": str(evidence),
             "attestation_output": str(attestation),
+        }, sort_keys=True, separators=(",", ":")))
+        return 0
+
+    if args.command == "seal-phase6-contract":
+        payload = build_contract(
+            repository_root=Path(args.repository_root),
+            preaccess_status_path=Path(args.preaccess_status),
+            selection_path=Path(args.selection),
+            selection_contract_path=Path(args.selection_contract),
+            virginity_attestation_path=Path(args.attestation),
+            virginity_evidence_path=Path(args.evidence),
+            reconciliation_path=Path(args.reconciliation),
+        )
+        seal_contract(payload, Path(args.output))
+        print(json.dumps({
+            "status": payload["status"],
+            "contract_sha256": payload["contract_sha256"],
+            "candidate_id": payload["strategy"]["candidate_id"],
+            "locked_symbols": payload["final_holdout"]["locked_symbols"],
+            "historical_access_authorized": payload["governance"]["historical_access_authorized"],
+            "output": args.output,
         }, sort_keys=True, separators=(",", ":")))
         return 0
 
