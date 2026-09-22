@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from .holdout_selection import acquire_and_select
+from .virginity import capture_composite_virginity
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -21,6 +22,15 @@ def main(argv: list[str] | None = None) -> int:
     select.add_argument("--registry", default="data/governance/holdout-exclusion-registry.json")
     select.add_argument("--host", default="127.0.0.1")
     select.add_argument("--port", type=int, default=11111)
+
+    virgin = sub.add_parser("capture-composite-virginity")
+    virgin.add_argument("--log-path", action="append", required=True)
+    virgin.add_argument("--evidence-output", required=True)
+    virgin.add_argument("--attestation-output", required=True)
+    virgin.add_argument("--selection", default="data/generation2/holdout-selection/selection.json")
+    virgin.add_argument("--selection-contract", default="data/governance/generation2-holdout-selection-contract.json")
+    virgin.add_argument("--host", default="127.0.0.1")
+    virgin.add_argument("--port", type=int, default=11111)
 
     args = parser.parse_args(argv)
 
@@ -54,6 +64,31 @@ def main(argv: list[str] | None = None) -> int:
                 separators=(",", ":"),
             )
         )
+        return 0
+
+    if args.command == "capture-composite-virginity":
+        evidence, attestation = capture_composite_virginity(
+            log_paths=tuple(Path(item) for item in args.log_path),
+            evidence_output_path=Path(args.evidence_output),
+            attestation_output_path=Path(args.attestation_output),
+            selection_path=Path(args.selection),
+            selection_contract_path=Path(args.selection_contract),
+            host=args.host,
+            port=args.port,
+        )
+        payload = json.loads(attestation.read_text(encoding="utf-8"))
+        print(json.dumps({
+            "status": payload["status"],
+            "locked_symbols": payload["locked_symbols"],
+            "provider_used_quota": payload["provider_used_quota"],
+            "provider_remaining_quota": payload["provider_remaining_quota"],
+            "evidence_bundle_sha256": payload["evidence_bundle_sha256"],
+            "selection_sha256": payload["selection_sha256"],
+            "independent_source_provenance_gate": payload["independent_source_provenance_gate"],
+            "historical_acquisition_authorized": payload["historical_acquisition_authorized"],
+            "evidence_output": str(evidence),
+            "attestation_output": str(attestation),
+        }, sort_keys=True, separators=(",", ":")))
         return 0
 
     raise ValueError("GENERATION2_AUDIT_COMMAND_UNSUPPORTED")
