@@ -256,6 +256,22 @@ def _write_marker(path: Path, payload: dict[str, Any], *, exclusive: bool) -> No
             h.flush()
             os.fsync(h.fileno())
         os.replace(tmp, path)
+    if path.read_bytes() != data:
+        raise OSError("GEN2_ACQUISITION_MARKER_READBACK_FAILED")
+
+
+def _write_exclusive_verified(path: Path, payload: bytes) -> str:
+    try:
+        with path.open("xb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except FileExistsError as exc:
+        raise FileExistsError(f"GEN2_ACQUISITION_IMMUTABLE_OUTPUT_EXISTS:{path.name}") from exc
+    readback = path.read_bytes()
+    if readback != payload:
+        raise OSError(f"GEN2_ACQUISITION_ARTIFACT_READBACK_FAILED:{path.name}")
+    return _sha_bytes(readback)
 
 
 def _verify_ci_classification(path: Path, authorization_commit_sha: str) -> dict[str, Any]:
@@ -466,8 +482,9 @@ def acquire_and_seal(
     for p in (bundle_path, key_path, receipt_path):
         if p.exists():
             raise FileExistsError(f"GEN2_ACQUISITION_IMMUTABLE_OUTPUT_EXISTS:{p.name}")
-    bundle_path.write_bytes(encrypted)
-    key_path.write_text(key.hex(), encoding="ascii")
+    bundle_readback_sha = _write_exclusive_verified(bundle_path, encrypted)
+    key_payload = key.hex().encode("ascii")
+    _write_exclusive_verified(key_path, key_payload)
     try:
         key_path.chmod(0o600)
     except OSError:
@@ -502,6 +519,22 @@ def acquire_and_seal(
         "performance_computed": False,
         "performance_inspected": False,
         "retry_allowed": False,
+        "artifact_readback_verified": True,
     }
-    receipt_path.write_bytes(_canonical_bytes(receipt))
+    receipt["receipt_sha256"] = _sha_bytes(_canonical_bytes(receipt))
+    receipt_payload = _canonical_bytes(receipt)
+    receipt_file_sha = _write_exclusive_verified(receipt_path, receipt_payload)
+    if bundle_readback_sha != encrypted_sha or sha256(bytes.fromhex(key_path.read_text(encoding="ascii"))).hexdigest() != receipt["key_sha256"]:
+        raise OSError("GEN2_ACQUISITION_ARTIFACT_HASH_READBACK_FAILED")
+    marker_payload.update(
+        {
+            "status": "FINAL_HOLDOUT_ACQUISITION_SEALED",
+            "sealed_at_utc": datetime.now(timezone.utc).isoformat(),
+            "holdout_id": holdout_id,
+            "bundle_sha256": encrypted_sha,
+            "receipt_sha256": receipt_file_sha,
+            "artifact_readback_verified": True,
+        }
+    )
+    _write_marker(marker, marker_payload, exclusive=False)
     return receipt_path

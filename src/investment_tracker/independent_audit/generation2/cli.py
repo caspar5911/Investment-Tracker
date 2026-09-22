@@ -12,6 +12,8 @@ from .preaccess import evaluate_preaccess, write_preaccess_status
 from .phase6_contract import build_contract, seal_contract
 from .authorization import issue_authorization
 from .acquisition import acquire_and_seal, preflight_acquisition
+from .release import issue_release
+from .evaluate import evaluate_released_holdout
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -107,6 +109,24 @@ def main(argv: list[str] | None = None) -> int:
     acquire.add_argument("--host", default="127.0.0.1")
     acquire.add_argument("--port", type=int, default=11111)
 
+    release = sub.add_parser("issue-final-holdout-release")
+    release.add_argument("--contract", default="data/generation2/phase6/evaluation-contract.json")
+    release.add_argument("--authorization", default="data/generation2/phase6/acquisition-authorization.json")
+    release.add_argument("--receipt", required=True)
+    release.add_argument("--bundle", required=True)
+    release.add_argument("--key", required=True)
+    release.add_argument("--output", required=True)
+    release.add_argument("--receipt-evidence-output", required=True)
+
+    evaluate = sub.add_parser("evaluate-final-holdout")
+    evaluate.add_argument("--contract", default="data/generation2/phase6/evaluation-contract.json")
+    evaluate.add_argument("--release", required=True)
+    evaluate.add_argument("--receipt", required=True)
+    evaluate.add_argument("--bundle", required=True)
+    evaluate.add_argument("--key", required=True)
+    evaluate.add_argument("--marker-directory", required=True)
+    evaluate.add_argument("--output", required=True)
+
     args = parser.parse_args(argv)
 
     if args.command == "select-final-holdout":
@@ -188,6 +208,33 @@ def main(argv: list[str] | None = None) -> int:
         )
         payload=json.loads(receipt.read_text(encoding="utf-8"))
         print(json.dumps({"status":payload["status"],"holdout_id":payload["holdout_id"],"bundle_sha256":payload["bundle_sha256"],"performance_computed":payload["performance_computed"],"performance_inspected":payload["performance_inspected"],"receipt":str(receipt)}, sort_keys=True,separators=(",",":")))
+        return 0
+
+    if args.command == "issue-final-holdout-release":
+        path = issue_release(
+            contract_path=Path(args.contract),
+            authorization_path=Path(args.authorization),
+            receipt_path=Path(args.receipt),
+            encrypted_bundle_path=Path(args.bundle),
+            key_path=Path(args.key),
+            output_path=Path(args.output),
+            receipt_evidence_path=Path(args.receipt_evidence_output),
+        )
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        print(json.dumps({"status": payload["status"], "release_id": payload["release_id"], "output": str(path)}, sort_keys=True, separators=(",", ":")))
+        return 0
+
+    if args.command == "evaluate-final-holdout":
+        result = evaluate_released_holdout(
+            release_path=Path(args.release),
+            contract_path=Path(args.contract),
+            receipt_path=Path(args.receipt),
+            encrypted_bundle_path=Path(args.bundle),
+            key_path=Path(args.key),
+            marker_directory=Path(args.marker_directory),
+            output_path=Path(args.output),
+        )
+        print(json.dumps({"status": result["status"], "release_id": result.get("release_id"), "holdout_id": result.get("holdout_id"), "one_time_consumed": result.get("one_time_consumed")}, sort_keys=True, separators=(",", ":")))
         return 0
 
     if args.command == "issue-acquisition-authorization":

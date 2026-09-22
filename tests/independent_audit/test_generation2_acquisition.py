@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from hashlib import sha256
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -207,3 +208,75 @@ def test_safe_preflight_never_creates_consumption_marker(monkeypatch, tmp_path: 
     assert result["historical_market_data_api_called"] is False
     assert result["historical_access_consumed"] is False
     assert not list(tmp_path.glob("*.acquisition-start.json"))
+
+
+def test_successful_acquisition_seals_and_reads_back_every_private_artifact(
+    monkeypatch, tmp_path: Path
+):
+    sessions = a.pd.DatetimeIndex(
+        ["2022-12-30", "2023-01-03", "2023-01-04"], tz="UTC"
+    )
+    contexts = []
+
+    class Context:
+        def get_history_kl_quota(self, get_detail=True):
+            return 0, (14, 286, [])
+
+        def request_history_kline(self, code, **kwargs):
+            frame = a.pd.DataFrame(
+                {
+                    "time_key": sessions.strftime("%Y-%m-%d"),
+                    "open": [100.0, 101.0, 102.0],
+                    "high": [101.0, 102.0, 103.0],
+                    "low": [99.0, 100.0, 101.0],
+                    "close": [100.5, 101.5, 102.5],
+                }
+            )
+            return 0, frame, None
+
+        def get_rehab(self, code):
+            return 0, a.pd.DataFrame(columns=["ex_div_date"])
+
+        def get_corporate_actions_dividends(self, code):
+            return 0, {"dividend_list": []}
+
+        def get_corporate_actions_stock_splits(self, code, next_key=None, num=50):
+            return 0, {"split_list": [], "next_key": "-1"}
+
+        def close(self):
+            pass
+
+    def make_context(*args, **kwargs):
+        context = Context()
+        contexts.append(context)
+        return context
+
+    sdk = SimpleNamespace(
+        OpenQuoteContext=make_context,
+        RET_OK=0,
+        AuType=SimpleNamespace(QFQ="QFQ", NONE="NONE"),
+        KLType=SimpleNamespace(K_DAY="K_DAY"),
+        __version__="test",
+    )
+    monkeypatch.setattr(a, "_load_sdk", lambda: (sdk, "fake"))
+    monkeypatch.setattr(a, "_verify_sdk_capabilities", lambda sdk: None)
+    monkeypatch.setattr(a, "expected_sessions", lambda contract: (sessions[:1], sessions[1:]))
+
+    receipt_path = a.acquire_and_seal(**_kwargs(tmp_path))
+    receipt_bytes = receipt_path.read_bytes()
+    receipt = json.loads(receipt_bytes)
+    private = tmp_path / "private"
+    bundle = private / f"{receipt['holdout_id']}.bundle.aesgcm"
+    key = private / f"{receipt['holdout_id']}.key"
+    marker = private / "gen2-phase6-acquire-484f902659d0dfc58f521ff5cd98b05c.acquisition-start.json"
+
+    assert receipt["bundle_sha256"] == sha256(bundle.read_bytes()).hexdigest()
+    assert receipt["key_sha256"] == sha256(bytes.fromhex(key.read_text(encoding="ascii"))).hexdigest()
+    assert receipt["artifact_readback_verified"] is True
+    assert receipt["receipt_sha256"] == sha256(
+        a._canonical_bytes({k: v for k, v in receipt.items() if k != "receipt_sha256"})
+    ).hexdigest()
+    marker_payload = json.loads(marker.read_text(encoding="utf-8"))
+    assert marker_payload["status"] == "FINAL_HOLDOUT_ACQUISITION_SEALED"
+    assert marker_payload["artifact_readback_verified"] is True
+    assert marker_payload["receipt_sha256"] == sha256(receipt_bytes).hexdigest()

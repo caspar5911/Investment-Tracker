@@ -30,6 +30,8 @@ jobs:
           tests/independent_audit/test_generation2_phase6_contract.py
           tests/independent_audit/test_generation2_authorization.py
           tests/independent_audit/test_generation2_acquisition.py
+          tests/independent_audit/test_generation2_release_evaluate.py
+          tests/independent_audit/test_generation2_cli_phase6.py
       - name: Verify survivor identity
         run: >-
           python -c "from investment_tracker.quant.generation2.survivor_identity import verify_survivor_identity;
@@ -44,7 +46,7 @@ jobs:
           ! grep -n -E 'request_history_kline|get_market_snapshot|get_cur_kline|get_rt_data|get_order_book|get_ticker|get_rehab|OpenSecTradeContext|place_order|unlock_trade|modify_order'             src/investment_tracker/independent_audit/generation2/holdout_selection.py             src/investment_tracker/independent_audit/generation2/virginity.py
       - name: Generation 2 acquisition remains quote-only and paper-only
         run: |
-          ! grep -R -nE 'OpenTradeContext|place_order|modify_order|cancel_order|TrdEnv|unlock_trade' src/investment_tracker/independent_audit/generation2/acquisition.py
+          ! grep -R -nE 'OpenTradeContext|OpenSecTradeContext|place_order|modify_order|cancel_order|TrdEnv|unlock_trade' src/investment_tracker/independent_audit/generation2
           grep -n 'OpenQuoteContext' src/investment_tracker/independent_audit/generation2/acquisition.py
           grep -n 'acquisition-start.json' src/investment_tracker/independent_audit/generation2/acquisition.py
 
