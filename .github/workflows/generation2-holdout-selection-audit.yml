@@ -42,6 +42,12 @@ jobs:
           grep -n 'get_history_kl_quota' src/investment_tracker/independent_audit/generation2/holdout_selection.py
           grep -n 'get_history_kl_quota' src/investment_tracker/independent_audit/generation2/virginity.py || true
           ! grep -n -E 'request_history_kline|get_market_snapshot|get_cur_kline|get_rt_data|get_order_book|get_ticker|get_rehab|OpenSecTradeContext|place_order|unlock_trade|modify_order'             src/investment_tracker/independent_audit/generation2/holdout_selection.py             src/investment_tracker/independent_audit/generation2/virginity.py
+      - name: Generation 2 acquisition remains quote-only and paper-only
+        run: |
+          ! grep -R -nE 'OpenTradeContext|place_order|modify_order|cancel_order|TrdEnv|unlock_trade' src/investment_tracker/independent_audit/generation2/acquisition.py
+          grep -n 'OpenQuoteContext' src/investment_tracker/independent_audit/generation2/acquisition.py
+          grep -n 'acquisition-start.json' src/investment_tracker/independent_audit/generation2/acquisition.py
+
       - name: Cache provenance path is network-free
         run: |
           ! grep -n -E 'OpenQuoteContext|request_history_kline|get_market_snapshot|get_cur_kline|get_rt_data|get_rehab|OpenSecTradeContext|place_order|unlock_trade|modify_order'             src/investment_tracker/independent_audit/generation2/research_provenance_cache.py
