@@ -7,6 +7,7 @@ from pathlib import Path
 from .holdout_selection import acquire_and_select
 from .virginity import capture_composite_virginity
 from .research_provenance_export import export_and_reconcile
+from .research_provenance_cache import build_from_phase3_cache
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -38,6 +39,11 @@ def main(argv: list[str] | None = None) -> int:
     provenance.add_argument("--reproduction-report", default="data/governance/generation2-campaign/reproduction-report.json")
     provenance.add_argument("--host", default="127.0.0.1")
     provenance.add_argument("--port", type=int, default=11111)
+
+    cache_provenance = sub.add_parser("build-cache-provenance")
+    cache_provenance.add_argument("--cache-root", default="data/cache")
+    cache_provenance.add_argument("--output-root", required=True)
+    cache_provenance.add_argument("--reproduction-report", default="data/governance/generation2-campaign/reproduction-report.json")
 
     args = parser.parse_args(argv)
 
@@ -96,6 +102,15 @@ def main(argv: list[str] | None = None) -> int:
             "evidence_output": str(evidence),
             "attestation_output": str(attestation),
         }, sort_keys=True, separators=(",", ":")))
+        return 0
+
+    if args.command == "build-cache-provenance":
+        result = build_from_phase3_cache(
+            cache_root=Path(args.cache_root),
+            output_root=Path(args.output_root),
+            reproduction_report_path=Path(args.reproduction_report),
+        )
+        print(json.dumps(result, sort_keys=True, separators=(",", ":")))
         return 0
 
     if args.command == "export-research-provenance":
