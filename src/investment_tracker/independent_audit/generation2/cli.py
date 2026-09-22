@@ -8,6 +8,7 @@ from .holdout_selection import acquire_and_select
 from .virginity import capture_composite_virginity
 from .research_provenance_export import export_and_reconcile
 from .research_provenance_cache import build_from_phase3_cache
+from .preaccess import evaluate_preaccess, write_preaccess_status
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -44,6 +45,15 @@ def main(argv: list[str] | None = None) -> int:
     cache_provenance.add_argument("--cache-root", default="data/cache")
     cache_provenance.add_argument("--output-root", required=True)
     cache_provenance.add_argument("--reproduction-report", default="data/governance/generation2-campaign/reproduction-report.json")
+
+    preaccess = sub.add_parser("evaluate-preaccess")
+    preaccess.add_argument("--attestation", required=True)
+    preaccess.add_argument("--evidence", required=True)
+    preaccess.add_argument("--selection", default="data/generation2/holdout-selection/selection.json")
+    preaccess.add_argument("--selection-contract", default="data/governance/generation2-holdout-selection-contract.json")
+    preaccess.add_argument("--reproduction-report", default="data/governance/generation2-campaign/reproduction-report.json")
+    preaccess.add_argument("--reconciliation", required=True)
+    preaccess.add_argument("--output", required=True)
 
     args = parser.parse_args(argv)
 
@@ -103,6 +113,19 @@ def main(argv: list[str] | None = None) -> int:
             "attestation_output": str(attestation),
         }, sort_keys=True, separators=(",", ":")))
         return 0
+
+    if args.command == "evaluate-preaccess":
+        result = evaluate_preaccess(
+            attestation_path=Path(args.attestation),
+            evidence_path=Path(args.evidence),
+            selection_path=Path(args.selection),
+            selection_contract_path=Path(args.selection_contract),
+            reproduction_report_path=Path(args.reproduction_report),
+            reconciliation_path=Path(args.reconciliation),
+        )
+        write_preaccess_status(result, Path(args.output))
+        print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+        return 0 if result["status"] == "GENERATION2_PHASE6_PREACCESS_READY" else 2
 
     if args.command == "build-cache-provenance":
         result = build_from_phase3_cache(
