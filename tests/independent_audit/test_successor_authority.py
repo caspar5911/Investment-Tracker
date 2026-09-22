@@ -22,6 +22,7 @@ REGISTRY = ROOT / "data/governance/holdout-exclusion-registry.json"
 CLOSURE = ROOT / "data/generation2/phase6/phase6-final-holdout-closure.json"
 TEMPLATE = ROOT / "data/governance/successor/successor-methodology-authorization.template.json"
 NORMALIZER = ROOT / "src/investment_tracker/quant/successor/corporate_actions_v2.py"
+EVALUATOR = ROOT / "src/investment_tracker/independent_audit/successor/evaluate.py"
 
 
 def _sha(path: Path) -> str:
@@ -44,6 +45,7 @@ def _authorization() -> dict:
         "implementation_sha256": "35a3ad8f92598021bbfbd2d5d9337036af525b71f978ab053827c4922da60f1b",
         "corporate_action_contract_sha256": _sha(CONTRACT),
         "successor_normalizer_sha256": _sha(NORMALIZER),
+        "successor_evaluator_sha256": _sha(EVALUATOR),
         "holdout_exclusion_registry_sha256": _sha(REGISTRY),
         "evaluation_calendar_start": "2023-01-01",
         "evaluation_calendar_end": "2025-12-31",
@@ -77,6 +79,7 @@ def _load(path: Path):
         holdout_exclusion_registry_path=REGISTRY,
         predecessor_closure_path=CLOSURE,
         successor_normalizer_path=NORMALIZER,
+        successor_evaluator_path=EVALUATOR,
     )
 
 
@@ -136,11 +139,13 @@ def test_selection_contract_requires_valid_audit_authority(tmp_path: Path) -> No
         holdout_exclusion_registry_path=REGISTRY,
         predecessor_closure_path=CLOSURE,
         successor_normalizer_path=NORMALIZER,
+        successor_evaluator_path=EVALUATOR,
     )
     assert contract["status"] == "FROZEN_AFTER_INDEPENDENT_AUDIT_BEFORE_CANDIDATE_QUERY"
     assert contract["successor_formal_name"] == "GENERATION_3_TEST_FIXTURE"
     assert contract["candidate_id"] == _authorization()["candidate_id"]
     assert contract["successor_normalizer_sha256"] == _sha(NORMALIZER)
+    assert contract["successor_evaluator_sha256"] == _sha(EVALUATOR)
     assert contract["governance"]["protected_history_access_authorized"] is False
     assert contract["governance"]["phase7_authorized"] is False
     assert contract["governance"]["recon009_status"] == "OPEN"
