@@ -18,7 +18,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install --upgrade pip
-      - run: python -m pip install -e '.[dev,quant]'
+      - run: python -m pip install -e '.[dev,quant,audit]'
       - run: python -m compileall -q src/investment_tracker/quant/phase4/gate3_runner
       - run: >-
           python -m pytest -q
@@ -41,10 +41,40 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install --upgrade pip
-      - run: python -m pip install -e '.[dev,quant]'
+      - run: python -m pip install -e '.[dev,quant,audit]'
       - run: python -m compileall -q src/investment_tracker/quant/phase4/finalization
       - run: python -m pytest -q tests/quant/test_phase4_finalization_audit.py::test_audit_uses_sealed_gate3_survivor_projection
       - run: python -m pytest -q tests/quant/test_phase4_finalization_*.py
+
+  generation2-synthetic-gate:
+    name: generation2 synthetic rehearsal gate
+    runs-on: ubuntu-latest
+    # Dedicated synthetic-only stage: no provider, no network, no real
+    # holdout data. The fail-closed governance gate runs first and reds this
+    # stage if any real-boundary flag is no longer exactly false, making it
+    # impossible to issue a real final-holdout authorization while green.
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e '.[dev,quant,audit]'
+      - run: python -m compileall -q src/investment_tracker/quant/generation2
+      - name: generation2 governance fail-closed gate
+        run: python -m investment_tracker.quant.generation2.ci_gate --repository-root .
+      - name: generation2 synthetic-only tests
+        run: >-
+          python -m pytest -q
+          tests/quant/test_generation2_rehearsal.py
+          tests/quant/test_generation2_ci_gate.py
+          tests/quant/test_generation2_recon009.py
+          tests/quant/test_generation2_metrics.py
+          tests/quant/test_generation2_accounting.py
+          tests/quant/test_generation2_provenance.py
+          tests/quant/test_generation2_holdout_exclusion.py
 
   test:
     runs-on: ubuntu-latest
@@ -56,5 +86,5 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install --upgrade pip
-      - run: python -m pip install -e '.[dev,quant]'
+      - run: python -m pip install -e '.[dev,quant,audit]'
       - run: python -m pytest -q
