@@ -30,6 +30,7 @@
     "phase7_authorized": false,
     "production_readiness_approved": false,
     "recon009_status": "OPEN",
-    "paper_only": true
+    "paper_only": true,
+    "one_time_evaluation_after_verified_release_authorized": true
   }
 }
