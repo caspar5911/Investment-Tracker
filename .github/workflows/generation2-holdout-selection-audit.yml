@@ -27,6 +27,7 @@ jobs:
           tests/independent_audit/test_generation2_preaccess.py
           tests/independent_audit/test_generation2_research_provenance_export.py
           tests/independent_audit/test_generation2_research_provenance_cache.py
+          tests/independent_audit/test_generation2_phase6_contract.py
       - name: Verify survivor identity
         run: >-
           python -c "from investment_tracker.quant.generation2.survivor_identity import verify_survivor_identity;
