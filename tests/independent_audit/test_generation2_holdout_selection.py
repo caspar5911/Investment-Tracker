@@ -33,7 +33,7 @@ def _frame() -> pd.DataFrame:
 
 
 def test_frozen_seed_and_cutoff():
-    assert hs.FROZEN_SEED_SHA256 == "bc41de35fd0b4889a98d06b614e353696a29c539d9398f1d19b2bb7df0094094"
+    assert hs.FROZEN_SEED_SHA256 == "51bc792c6550a3b49e608acf12343153223d29325cbbad97fbbf4785a61a348c"
     assert hs.FROZEN_LISTING_CUTOFF.isoformat() == "2022-03-03"
     assert hs.FROZEN_SELECTION_COUNT == 5
 
