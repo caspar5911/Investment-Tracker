@@ -10,6 +10,7 @@ from investment_tracker.independent_audit.generation2.virginity import (
     verify_attestation,
 )
 from investment_tracker.quant.generation2.reproduction import verify_reproduction_report
+from investment_tracker.independent_audit.generation2.research_provenance_cache import verify_cache_provenance
 
 STATUS_READY = "GENERATION2_PHASE6_PREACCESS_READY"
 STATUS_BLOCKED = "GENERATION2_PHASE6_PREACCESS_BLOCKED"
@@ -23,7 +24,7 @@ def evaluate_preaccess(
     selection_path: Path,
     selection_contract_path: Path,
     reproduction_report_path: Path,
-    reconciliation_path: Path,
+    provenance_root: Path,
 ) -> dict[str, Any]:
     attestation = verify_attestation(
         attestation_path=attestation_path,
@@ -37,15 +38,15 @@ def evaluate_preaccess(
         raise ValueError("GEN2_PREACCESS_SURVIVOR_MISMATCH")
 
     try:
-        reconciliation = json.loads(Path(reconciliation_path).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        reconciliation = None
+        provenance = verify_cache_provenance(Path(provenance_root))
+    except ValueError:
+        provenance = None
 
     independent = bool(
-        isinstance(reconciliation, dict)
-        and reconciliation.get("status") == "MATCHED"
-        and reconciliation.get("independent_source_established") is True
-        and reconciliation.get("decision_critical") is False
+        isinstance(provenance, dict)
+        and provenance.get("status") == "MATCHED"
+        and provenance.get("independent_source_established") is True
+        and provenance.get("decision_critical") is False
     )
     if not independent:
         return {
@@ -58,7 +59,7 @@ def evaluate_preaccess(
             "virginity_status": attestation["status"],
             "independent_source_established": False,
             "independent_reconciliation_status": (
-                reconciliation.get("status") if isinstance(reconciliation, dict) else "MISSING"
+                provenance.get("status") if isinstance(provenance, dict) else "MISSING"
             ),
             "historical_acquisition_authorized": False,
             "phase7_authorized": False,
@@ -74,7 +75,10 @@ def evaluate_preaccess(
         "virginity_attestation_id": attestation["attestation_id"],
         "virginity_status": attestation["status"],
         "independent_source_established": True,
-        "independent_reconciliation_status": reconciliation.get("status"),
+        "independent_reconciliation_status": provenance.get("status"),
+        "primary_snapshot_sha256": provenance.get("primary_snapshot_sha256"),
+        "provider_origin_snapshot_sha256": provenance.get("provider_origin_snapshot_sha256"),
+        "reconciliation_sha256": provenance.get("reconciliation_sha256"),
         "historical_acquisition_authorized": False,
         "phase7_authorized": False,
         "production_readiness_approved": False,
