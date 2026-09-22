@@ -519,6 +519,7 @@ def acquire_and_seal(
         "retry_allowed": False,
         "artifact_readback_verified": True,
     }
+    receipt["receipt_sha256"] = _sha_bytes(_canonical_bytes(receipt))
     receipt_bytes = _canonical_bytes(receipt)
     receipt_path.write_bytes(receipt_bytes)
     if receipt_path.read_bytes() != receipt_bytes:
