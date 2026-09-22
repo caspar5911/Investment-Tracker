@@ -276,6 +276,57 @@ def _verify_ci_classification(path: Path, authorization_commit_sha: str) -> dict
     return value
 
 
+def preflight_acquisition(
+    *,
+    repository_root: Path,
+    contract_path: Path,
+    authorization_path: Path,
+    preaccess_status_path: Path,
+    attestation_path: Path,
+    evidence_path: Path,
+    provenance_root: Path,
+    ci_classification_path: Path,
+    authorization_commit_sha: str,
+    host: str = "127.0.0.1",
+    port: int = 11111,
+) -> dict[str, Any]:
+    repository = Path(repository_root).resolve()
+    verify_contract(contract_path)
+    authorization = load_authorization(
+        authorization_path=authorization_path,
+        repository_root=repository,
+        contract_path=contract_path,
+        preaccess_status_path=preaccess_status_path,
+        attestation_path=attestation_path,
+        evidence_path=evidence_path,
+        provenance_root=provenance_root,
+    )
+    if authorization_commit_sha != "51f077cc5acddd02a231567088f70a3c7bdb7d36":
+        raise ValueError("GEN2_AUTHORIZATION_COMMIT_IDENTITY_MISMATCH")
+    _verify_ci_classification(ci_classification_path, authorization_commit_sha)
+
+    sdk, sdk_name = _load_sdk()
+    _verify_sdk_capabilities(sdk)
+    context = sdk.OpenQuoteContext(host=host, port=port)
+    try:
+        quota = _provider_quota_preflight(context, sdk)
+    finally:
+        context.close()
+    return {
+        "schema_version": "GENERATION2-PHASE6-ACQUISITION-PREFLIGHT-v1",
+        "status": "GEN2_ACQUISITION_PREFLIGHT_READY",
+        "authorization_id": authorization.authorization_id,
+        "authorization_commit_sha": authorization_commit_sha,
+        "sdk_module": sdk_name,
+        "sdk_version": str(getattr(sdk, "__version__", "UNKNOWN")),
+        "provider_used_quota": quota["used"],
+        "provider_remaining_quota": quota["remaining"],
+        "locked_symbol_matches": quota["locked_matches"],
+        "historical_market_data_api_called": False,
+        "historical_access_consumed": False,
+    }
+
+
 def acquire_and_seal(
     *,
     repository_root: Path,
