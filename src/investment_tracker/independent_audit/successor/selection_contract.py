@@ -22,6 +22,7 @@ def build_holdout_selection_contract(
     holdout_exclusion_registry_path: Path,
     predecessor_closure_path: Path,
     successor_normalizer_path: Path,
+    successor_evaluator_path: Path,
 ) -> dict[str, Any]:
     auth = load_methodology_authorization(
         authorization_path=authorization_path,
@@ -29,6 +30,7 @@ def build_holdout_selection_contract(
         holdout_exclusion_registry_path=holdout_exclusion_registry_path,
         predecessor_closure_path=predecessor_closure_path,
         successor_normalizer_path=successor_normalizer_path,
+        successor_evaluator_path=successor_evaluator_path,
     )
     return {
         "schema_version": SCHEMA,
@@ -42,6 +44,7 @@ def build_holdout_selection_contract(
         "implementation_sha256": auth.implementation_sha256,
         "corporate_action_contract_sha256": auth.corporate_action_contract_sha256,
         "successor_normalizer_sha256": auth.successor_normalizer_sha256,
+        "successor_evaluator_sha256": auth.successor_evaluator_sha256,
         "holdout_exclusion_registry_sha256": auth.holdout_exclusion_registry_sha256,
         "evaluation_window": {
             "start": auth.evaluation_calendar_start,
