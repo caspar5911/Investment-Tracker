@@ -53,7 +53,7 @@ def main(argv: list[str] | None = None) -> int:
     preaccess.add_argument("--selection", default="data/generation2/holdout-selection/selection.json")
     preaccess.add_argument("--selection-contract", default="data/governance/generation2-holdout-selection-contract.json")
     preaccess.add_argument("--reproduction-report", default="data/governance/generation2-campaign/reproduction-report.json")
-    preaccess.add_argument("--reconciliation", required=True)
+    preaccess.add_argument("--provenance-root", required=True)
     preaccess.add_argument("--output", required=True)
 
     contract = sub.add_parser("seal-phase6-contract")
@@ -133,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
             selection_contract_path=Path(args.selection_contract),
             virginity_attestation_path=Path(args.attestation),
             virginity_evidence_path=Path(args.evidence),
-            reconciliation_path=Path(args.reconciliation),
+            provenance_root=Path(args.provenance_root),
         )
         seal_contract(payload, Path(args.output))
         print(json.dumps({
