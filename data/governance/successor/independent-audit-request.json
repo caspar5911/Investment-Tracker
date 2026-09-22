@@ -1,0 +1,20 @@
+{
+  "schema_version": "SUCCESSOR-INDEPENDENT-AUDIT-REQUEST-v1",
+  "status": "DRAFT_NOT_APPROVED",
+  "authority_granted": false,
+  "predecessor_closure_commit": "f875167f3e758ab3391ff2f961aa740f231568e5",
+  "predecessor_phase6_status": "PHASE6_UNKNOWN_ABSTAIN",
+  "successor_contract": "CORPORATE-ACTION-NORMALIZATION-CONTRACT-v2",
+  "successor_contract_status": "PROPOSED_AWAITING_INDEPENDENT_AUDIT",
+  "decisions_requested": [
+    "APPROVE_OR_REJECT_SUCCESSOR_CORPORATE_ACTION_METHODOLOGY",
+    "DECIDE_GENERATION3_OR_OTHER_FORMAL_SUCCESSOR_NAME",
+    "AUTHORIZE_OR_REJECT_NEW_VIRGIN_HOLDOUT_SELECTION",
+    "DEFINE_ONE_TIME_ACQUISITION_AND_RETRY_RULES",
+    "AUTHORIZE_OR_REJECT_ONE_TIME_SUCCESSOR_EVALUATION"
+  ],
+  "protected_history_access_authorized": false,
+  "phase7_authorized": false,
+  "production_readiness_approved": false,
+  "recon009_status": "OPEN"
+}
