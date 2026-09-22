@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -47,46 +48,121 @@ def test_private_output_inside_repository_is_rejected(tmp_path: Path):
         )
 
 
-def test_start_marker_exists_before_provider_sdk_load(monkeypatch, tmp_path: Path):
-    def stop_after_marker():
-        marker = next((tmp_path / "private").glob("*.acquisition-start.json"))
-        payload = json.loads(marker.read_text(encoding="utf-8"))
-        assert payload["historical_access_started"] is False
-        raise RuntimeError("STOP_AFTER_MARKER")
-
-    monkeypatch.setattr(a, "_load_sdk", stop_after_marker)
-    with pytest.raises(RuntimeError, match="STOP_AFTER_MARKER"):
+def test_preflight_sdk_failure_does_not_consume_authorization(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(a, "_load_sdk", lambda: (_ for _ in ()).throw(RuntimeError("SDK_PREFLIGHT_STOP")))
+    with pytest.raises(RuntimeError, match="SDK_PREFLIGHT_STOP"):
         a.acquire_and_seal(**_kwargs(tmp_path))
-    marker = next((tmp_path / "private").glob("*.acquisition-start.json"))
-    assert json.loads(marker.read_text())["retry_allowed_after_historical_access"] is False
+    assert not list((tmp_path / "private").glob("*.acquisition-start.json"))
 
 
-def test_existing_start_marker_prevents_second_attempt_before_provider(monkeypatch, tmp_path: Path):
-    monkeypatch.setattr(a, "_load_sdk", lambda: (_ for _ in ()).throw(RuntimeError("FIRST")))
-    with pytest.raises(RuntimeError, match="FIRST"):
+def test_sdk_capability_check_is_fail_closed():
+    bad = SimpleNamespace(OpenQuoteContext=object, AuType=SimpleNamespace(QFQ=1), KLType=SimpleNamespace(K_DAY=1))
+    with pytest.raises(RuntimeError, match="GEN2_ACQUISITION_SDK_CAPABILITY_MISSING"):
+        a._verify_sdk_capabilities(bad)
+
+
+def test_quota_preflight_rejects_locked_symbol_access():
+    class Ctx:
+        def get_history_kl_quota(self, get_detail=True):
+            return 0, (1, 299, [{"code": "US.BNO", "name": "x", "request_time": "now"}])
+    sdk = SimpleNamespace(RET_OK=0)
+    with pytest.raises(RuntimeError, match="GEN2_ACQUISITION_VIRGINITY_RECHECK_FAILED"):
+        a._provider_quota_preflight(Ctx(), sdk)
+
+
+def test_quota_preflight_rejects_insufficient_capacity():
+    class Ctx:
+        def get_history_kl_quota(self, get_detail=True):
+            return 0, (299, 1, [])
+    sdk = SimpleNamespace(RET_OK=0)
+    with pytest.raises(RuntimeError, match="GEN2_ACQUISITION_QUOTA_INSUFFICIENT"):
+        a._provider_quota_preflight(Ctx(), sdk)
+
+
+def test_marker_is_sealed_before_first_historical_request(monkeypatch, tmp_path: Path):
+    contexts = []
+
+    class PreflightContext:
+        def close(self):
+            pass
+
+    class AcquisitionContext:
+        def request_history_kline(self, *args, **kwargs):
+            marker = next((tmp_path / "private").glob("*.acquisition-start.json"))
+            payload = json.loads(marker.read_text(encoding="utf-8"))
+            assert payload["historical_access_started"] is True
+            assert payload["retry_allowed_after_historical_access"] is False
+            raise RuntimeError("STOP_AT_FIRST_HISTORY")
+
+        def close(self):
+            pass
+
+    def make_context(*args, **kwargs):
+        ctx = PreflightContext() if not contexts else AcquisitionContext()
+        contexts.append(ctx)
+        return ctx
+
+    sdk = SimpleNamespace(
+        OpenQuoteContext=make_context,
+        RET_OK=0,
+        AuType=SimpleNamespace(QFQ="QFQ", NONE="NONE"),
+        KLType=SimpleNamespace(K_DAY="K_DAY"),
+        __version__="test",
+    )
+    monkeypatch.setattr(a, "_load_sdk", lambda: (sdk, "fake"))
+    monkeypatch.setattr(a, "_verify_sdk_capabilities", lambda sdk: None)
+    monkeypatch.setattr(a, "_provider_quota_preflight", lambda context, sdk: {"used": 0, "remaining": 300, "locked_matches": []})
+
+    with pytest.raises(RuntimeError, match="STOP_AT_FIRST_HISTORY"):
         a.acquire_and_seal(**_kwargs(tmp_path))
 
-    called = False
-    def forbidden():
-        nonlocal called
-        called = True
-        raise AssertionError("provider must not load on second attempt")
-    monkeypatch.setattr(a, "_load_sdk", forbidden)
+
+def test_existing_start_marker_prevents_second_historical_attempt(monkeypatch, tmp_path: Path):
+    contexts = []
+
+    class Ctx:
+        def request_history_kline(self, *args, **kwargs):
+            raise RuntimeError("FIRST_HISTORY_STOP")
+        def close(self):
+            pass
+
+    def make_context(*args, **kwargs):
+        ctx = Ctx()
+        contexts.append(ctx)
+        return ctx
+
+    sdk = SimpleNamespace(
+        OpenQuoteContext=make_context,
+        RET_OK=0,
+        AuType=SimpleNamespace(QFQ="QFQ", NONE="NONE"),
+        KLType=SimpleNamespace(K_DAY="K_DAY"),
+        __version__="test",
+    )
+    monkeypatch.setattr(a, "_load_sdk", lambda: (sdk, "fake"))
+    monkeypatch.setattr(a, "_verify_sdk_capabilities", lambda sdk: None)
+    monkeypatch.setattr(a, "_provider_quota_preflight", lambda context, sdk: {"used": 0, "remaining": 300, "locked_matches": []})
+
+    with pytest.raises(RuntimeError, match="FIRST_HISTORY_STOP"):
+        a.acquire_and_seal(**_kwargs(tmp_path))
+
+    calls_before = len(contexts)
     with pytest.raises(RuntimeError, match="GEN2_ACQUISITION_AUTHORIZATION_ALREADY_CONSUMED"):
         a.acquire_and_seal(**_kwargs(tmp_path))
-    assert called is False
+    assert len(contexts) == calls_before + 1  # harmless quota-preflight context only
 
 
-def test_tampered_ci_classification_stops_before_provider(monkeypatch, tmp_path: Path):
+def test_tampered_ci_classification_stops_before_sdk(monkeypatch, tmp_path: Path):
     value = json.loads(CLASSIFICATION.read_text(encoding="utf-8"))
     value["assessment"]["generation2_regression_detected"] = True
     bad = tmp_path / "bad-classification.json"
     bad.write_text(json.dumps(value), encoding="utf-8")
     called = False
+
     def forbidden():
         nonlocal called
         called = True
-        raise AssertionError("provider must not load")
+        raise AssertionError("SDK must not load")
+
     monkeypatch.setattr(a, "_load_sdk", forbidden)
     with pytest.raises(ValueError, match="GEN2_ACQUISITION_CI_CLASSIFICATION_INVALID"):
         a.acquire_and_seal(**{**_kwargs(tmp_path), "ci_classification_path": bad})
