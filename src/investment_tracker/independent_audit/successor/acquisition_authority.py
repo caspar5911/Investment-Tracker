@@ -46,6 +46,7 @@ class SuccessorAcquisitionAuthorization(BaseModel):
     symbol_substitution_after_access_allowed: Literal[False]
     historical_data_included_in_authorization_artifact: Literal[False]
     holdout_performance_inspected: Literal[False]
+    one_time_evaluation_after_verified_release_authorized: Literal[True]
     phase7_authorized: Literal[False]
     production_readiness_approved: Literal[False]
     recon009_status: Literal["OPEN"]
