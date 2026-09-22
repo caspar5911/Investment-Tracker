@@ -24,15 +24,18 @@ def test_preaccess_blocks_when_independent_source_not_established(monkeypatch, t
             "independent_source_established": False,
         },
     )
-    recon = tmp_path / "reconciliation.json"
-    recon.write_text('{"status":"UNKNOWN_ABSTAIN","independent_source_established":false,"decision_critical":false}', encoding="utf-8")
+    monkeypatch.setattr(preaccess, "verify_cache_provenance", lambda root: {
+        "status": "UNKNOWN_ABSTAIN",
+        "independent_source_established": False,
+        "decision_critical": False,
+    })
     result = preaccess.evaluate_preaccess(
         attestation_path=Path("a"),
         evidence_path=Path("b"),
         selection_path=Path("c"),
         selection_contract_path=Path("d"),
         reproduction_report_path=Path("e"),
-        reconciliation_path=recon,
+        provenance_root=tmp_path,
     )
     assert result["status"] == preaccess.STATUS_BLOCKED
     assert result["reason"] == preaccess.REASON_INDEPENDENT_SOURCE
@@ -57,15 +60,21 @@ def test_preaccess_ready_only_when_both_gates_verify(monkeypatch, tmp_path: Path
             "independent_source_established": True,
         },
     )
-    recon = tmp_path / "reconciliation.json"
-    recon.write_text('{"status":"MATCHED","independent_source_established":true,"decision_critical":false}', encoding="utf-8")
+    monkeypatch.setattr(preaccess, "verify_cache_provenance", lambda root: {
+        "status": "MATCHED",
+        "independent_source_established": True,
+        "decision_critical": False,
+        "primary_snapshot_sha256": "a" * 64,
+        "provider_origin_snapshot_sha256": "b" * 64,
+        "reconciliation_sha256": "c" * 64,
+    })
     result = preaccess.evaluate_preaccess(
         attestation_path=Path("a"),
         evidence_path=Path("b"),
         selection_path=Path("c"),
         selection_contract_path=Path("d"),
         reproduction_report_path=Path("e"),
-        reconciliation_path=recon,
+        provenance_root=tmp_path,
     )
     assert result["status"] == preaccess.STATUS_READY
     assert result["independent_source_established"] is True
@@ -89,8 +98,14 @@ def test_preaccess_rejects_survivor_mismatch(monkeypatch, tmp_path: Path):
             "independent_source_established": True,
         },
     )
-    recon = tmp_path / "reconciliation.json"
-    recon.write_text('{"status":"MATCHED","independent_source_established":true,"decision_critical":false}', encoding="utf-8")
+    monkeypatch.setattr(preaccess, "verify_cache_provenance", lambda root: {
+        "status": "MATCHED",
+        "independent_source_established": True,
+        "decision_critical": False,
+        "primary_snapshot_sha256": "a" * 64,
+        "provider_origin_snapshot_sha256": "b" * 64,
+        "reconciliation_sha256": "c" * 64,
+    })
     with pytest.raises(ValueError, match="GEN2_PREACCESS_SURVIVOR_MISMATCH"):
         preaccess.evaluate_preaccess(
             attestation_path=Path("a"),
@@ -98,7 +113,7 @@ def test_preaccess_rejects_survivor_mismatch(monkeypatch, tmp_path: Path):
             selection_path=Path("c"),
             selection_contract_path=Path("d"),
             reproduction_report_path=Path("e"),
-        reconciliation_path=recon,
+        provenance_root=tmp_path,
         )
 
 
