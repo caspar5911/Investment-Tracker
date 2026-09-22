@@ -24,6 +24,7 @@ jobs:
           python -m pytest -q
           tests/independent_audit/test_generation2_holdout_selection.py
           tests/independent_audit/test_generation2_virginity.py
+          tests/independent_audit/test_generation2_preaccess.py
       - name: Verify survivor identity
         run: >-
           python -c "from investment_tracker.quant.generation2.survivor_identity import verify_survivor_identity;
