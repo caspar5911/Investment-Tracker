@@ -9,6 +9,7 @@ from investment_tracker.quant.generation2.campaign import content_sha256
 from investment_tracker.quant.generation2.survivor_identity import verify_survivor_identity
 
 from .preaccess import STATUS_READY
+from .research_provenance_cache import verify_cache_provenance
 from .virginity import (
     FROZEN_BINDING_SHA256,
     FROZEN_CANDIDATE_ID,
@@ -34,7 +35,7 @@ def build_contract(
     selection_contract_path: Path,
     virginity_attestation_path: Path,
     virginity_evidence_path: Path,
-    reconciliation_path: Path,
+    provenance_root: Path,
 ) -> dict[str, Any]:
     repository_root = Path(repository_root)
     preaccess = json.loads(Path(preaccess_status_path).read_text(encoding="utf-8"))
@@ -51,13 +52,19 @@ def build_contract(
         selection_path=selection_path,
         selection_contract_path=selection_contract_path,
     )
-    reconciliation = json.loads(Path(reconciliation_path).read_text(encoding="utf-8"))
+    provenance = verify_cache_provenance(Path(provenance_root))
     if (
-        reconciliation.get("status") != "MATCHED"
-        or reconciliation.get("independent_source_established") is not True
-        or reconciliation.get("decision_critical") is not False
+        provenance.get("status") != "MATCHED"
+        or provenance.get("independent_source_established") is not True
+        or provenance.get("decision_critical") is not False
     ):
         raise ValueError("GEN2_PHASE6_CONTRACT_RECONCILIATION_NOT_MATCHED")
+    if preaccess.get("primary_snapshot_sha256") != provenance.get("primary_snapshot_sha256"):
+        raise ValueError("GEN2_PHASE6_CONTRACT_PREACCESS_PRIMARY_SNAPSHOT_MISMATCH")
+    if preaccess.get("provider_origin_snapshot_sha256") != provenance.get("provider_origin_snapshot_sha256"):
+        raise ValueError("GEN2_PHASE6_CONTRACT_PREACCESS_PROVIDER_SNAPSHOT_MISMATCH")
+    if preaccess.get("reconciliation_sha256") != provenance.get("reconciliation_sha256"):
+        raise ValueError("GEN2_PHASE6_CONTRACT_PREACCESS_RECONCILIATION_MISMATCH")
 
     identity = verify_survivor_identity(
         repository_root / "data" / "governance" / "generation2-campaign",
@@ -115,7 +122,9 @@ def build_contract(
             "selection_contract_sha256": _sha(selection_contract_path),
             "virginity_attestation_sha256": _sha(virginity_attestation_path),
             "virginity_evidence_sha256": _sha(virginity_evidence_path),
-            "independent_reconciliation_sha256": _sha(reconciliation_path),
+            "independent_reconciliation_sha256": provenance["reconciliation_sha256"],
+            "primary_research_snapshot_sha256": provenance["primary_snapshot_sha256"],
+            "provider_origin_research_snapshot_sha256": provenance["provider_origin_snapshot_sha256"],
             "preaccess_status_sha256": _sha(preaccess_status_path),
         },
         "methodology": {
