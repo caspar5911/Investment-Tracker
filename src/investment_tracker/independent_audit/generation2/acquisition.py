@@ -83,6 +83,43 @@ def _load_sdk() -> tuple[Any, str]:
     raise RuntimeError("GEN2_MOOMOO_OR_FUTU_PACKAGE_REQUIRED:" + "|".join(errors))
 
 
+def _verify_sdk_capabilities(sdk: Any) -> None:
+    context_type = getattr(sdk, "OpenQuoteContext", None)
+    required_methods = (
+        "request_history_kline",
+        "get_history_kl_quota",
+        "get_rehab",
+        "get_corporate_actions_dividends",
+        "get_corporate_actions_stock_splits",
+    )
+    if context_type is None or any(not hasattr(context_type, name) for name in required_methods):
+        raise RuntimeError("GEN2_ACQUISITION_SDK_CAPABILITY_MISSING")
+    if not hasattr(getattr(sdk, "AuType", object), "QFQ") or not hasattr(getattr(sdk, "AuType", object), "NONE"):
+        raise RuntimeError("GEN2_ACQUISITION_SDK_AUTYPE_MISSING")
+    if not hasattr(getattr(sdk, "KLType", object), "K_DAY"):
+        raise RuntimeError("GEN2_ACQUISITION_SDK_KLTYPE_MISSING")
+
+
+def _provider_quota_preflight(context: Any, sdk: Any) -> dict[str, Any]:
+    ret, data = context.get_history_kl_quota(get_detail=True)
+    if ret != sdk.RET_OK or not isinstance(data, tuple) or len(data) != 3:
+        raise RuntimeError(f"GEN2_ACQUISITION_QUOTA_FAILED:{data}")
+    used, remaining, details = data
+    if isinstance(remaining, bool) or not isinstance(remaining, int) or remaining < len(DATA_SYMBOLS):
+        raise RuntimeError(f"GEN2_ACQUISITION_QUOTA_INSUFFICIENT:{remaining}")
+    if not isinstance(details, list):
+        raise RuntimeError("GEN2_ACQUISITION_QUOTA_DETAIL_INVALID")
+    locked_codes = {f"US.{symbol}" for symbol in LOCKED_SYMBOLS}
+    matches = sorted({
+        str(item.get("code", "")).strip().upper()
+        for item in details
+        if isinstance(item, dict) and str(item.get("code", "")).strip().upper() in locked_codes
+    })
+    if matches:
+        raise RuntimeError("GEN2_ACQUISITION_VIRGINITY_RECHECK_FAILED:" + ",".join(matches))
+    return {"used": int(used), "remaining": remaining, "locked_matches": matches}
+
+
 def _utc_sessions(index: object) -> pd.DatetimeIndex:
     values = pd.DatetimeIndex(index)
     if values.tz is None:
@@ -277,6 +314,14 @@ def acquire_and_seal(
         raise ValueError("GEN2_AUTHORIZATION_COMMIT_IDENTITY_MISMATCH")
     _verify_ci_classification(ci_classification_path, authorization_commit_sha)
 
+    sdk, sdk_name = _load_sdk()
+    _verify_sdk_capabilities(sdk)
+    preflight_context = sdk.OpenQuoteContext(host=host, port=port)
+    try:
+        quota_preflight = _provider_quota_preflight(preflight_context, sdk)
+    finally:
+        preflight_context.close()
+
     output.mkdir(parents=True, exist_ok=True)
     auth_sha = _sha_file(authorization_path)
     marker = output / f"{authorization.authorization_id}.acquisition-start.json"
@@ -291,6 +336,9 @@ def acquire_and_seal(
         "benchmark_reference_symbol": BENCHMARK,
         "historical_access_started": False,
         "retry_allowed_after_historical_access": False,
+        "provider_quota_preflight": quota_preflight,
+        "sdk_module": sdk_name,
+        "sdk_version": str(getattr(sdk, "__version__", "UNKNOWN")),
     }
     _write_marker(marker, marker_payload, exclusive=True)
 
@@ -299,7 +347,6 @@ def acquire_and_seal(
     request_start = warmup[0].date().isoformat()
     request_end = contract["final_holdout"]["calendar_end"]
 
-    sdk, sdk_name = _load_sdk()
     context = sdk.OpenQuoteContext(host=host, port=port)
     entries: dict[str, bytes] = {}
     try:
