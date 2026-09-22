@@ -37,6 +37,40 @@ def _sha(path: Path) -> str:
     return sha256(Path(path).read_bytes()).hexdigest()
 
 
+
+def _authorization_seed(
+    *,
+    evaluation_contract_sha256: str,
+    evaluation_contract_file_sha256: str,
+    preaccess_status_sha256: str,
+    virginity_attestation_sha256: str,
+    virginity_evidence_sha256: str,
+    provenance_reconciliation_sha256: str,
+    evidence_commit_sha: str,
+    ci_run_id: int,
+    ci_conclusion: str,
+) -> dict[str, Any]:
+    return {
+        "schema_version": AUTH_SCHEMA,
+        "candidate_id": FROZEN_CANDIDATE_ID,
+        "locked_symbols": list(LOCKED_SYMBOLS),
+        "evaluation_contract_sha256": evaluation_contract_sha256,
+        "evaluation_contract_file_sha256": evaluation_contract_file_sha256,
+        "preaccess_status_sha256": preaccess_status_sha256,
+        "virginity_attestation_sha256": virginity_attestation_sha256,
+        "virginity_evidence_sha256": virginity_evidence_sha256,
+        "provenance_reconciliation_sha256": provenance_reconciliation_sha256,
+        "evidence_commit_sha": evidence_commit_sha,
+        "ci_workflow": "generation2-holdout-selection-audit",
+        "ci_run_id": ci_run_id,
+        "ci_conclusion": ci_conclusion,
+    }
+
+
+def _authorization_id(seed: dict[str, Any]) -> str:
+    return f"gen2-phase6-acquire-{sha256(_canonical_bytes(seed)).hexdigest()[:32]}"
+
+
 class AcquisitionAuthorization(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -146,22 +180,18 @@ def issue_authorization(
     if contract["final_holdout"]["independent_reconciliation_sha256"] != reconciliation_sha:
         raise ValueError("GEN2_AUTH_RECONCILIATION_HASH_MISMATCH")
 
-    seed = {
-        "schema_version": AUTH_SCHEMA,
-        "candidate_id": FROZEN_CANDIDATE_ID,
-        "locked_symbols": list(LOCKED_SYMBOLS),
-        "evaluation_contract_sha256": contract["contract_sha256"],
-        "evaluation_contract_file_sha256": contract_file_sha,
-        "preaccess_status_sha256": preaccess_sha,
-        "virginity_attestation_sha256": attestation_sha,
-        "virginity_evidence_sha256": evidence_sha,
-        "provenance_reconciliation_sha256": reconciliation_sha,
-        "evidence_commit_sha": evidence_commit_sha,
-        "ci_workflow": "generation2-holdout-selection-audit",
-        "ci_run_id": ci_run_id,
-        "ci_conclusion": ci_conclusion,
-    }
-    auth_id = f"gen2-phase6-acquire-{sha256(_canonical_bytes(seed)).hexdigest()[:32]}"
+    seed = _authorization_seed(
+        evaluation_contract_sha256=contract["contract_sha256"],
+        evaluation_contract_file_sha256=contract_file_sha,
+        preaccess_status_sha256=preaccess_sha,
+        virginity_attestation_sha256=attestation_sha,
+        virginity_evidence_sha256=evidence_sha,
+        provenance_reconciliation_sha256=reconciliation_sha,
+        evidence_commit_sha=evidence_commit_sha,
+        ci_run_id=ci_run_id,
+        ci_conclusion=ci_conclusion,
+    )
+    auth_id = _authorization_id(seed)
 
     authorization = AcquisitionAuthorization(
         schema_version=AUTH_SCHEMA,
@@ -228,6 +258,19 @@ def load_authorization(
     provenance = verify_cache_provenance(provenance_root)
     if authorization.provenance_reconciliation_sha256 != provenance["reconciliation_sha256"]:
         raise ValueError("GEN2_AUTHORIZATION_PROVENANCE_MISMATCH")
+    expected_id = _authorization_id(_authorization_seed(
+        evaluation_contract_sha256=authorization.evaluation_contract_sha256,
+        evaluation_contract_file_sha256=authorization.evaluation_contract_file_sha256,
+        preaccess_status_sha256=authorization.preaccess_status_sha256,
+        virginity_attestation_sha256=authorization.virginity_attestation_sha256,
+        virginity_evidence_sha256=authorization.virginity_evidence_sha256,
+        provenance_reconciliation_sha256=authorization.provenance_reconciliation_sha256,
+        evidence_commit_sha=authorization.evidence_commit_sha,
+        ci_run_id=authorization.ci_run_id,
+        ci_conclusion=authorization.ci_conclusion,
+    ))
+    if authorization.authorization_id != expected_id:
+        raise ValueError("GEN2_AUTHORIZATION_ID_MISMATCH")
     verify_attestation(
         attestation_path=attestation_path,
         evidence_path=evidence_path,
