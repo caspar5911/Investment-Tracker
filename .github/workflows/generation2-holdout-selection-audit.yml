@@ -19,8 +19,11 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e '.[dev,quant,audit]'
       - run: python -m compileall -q src/investment_tracker/independent_audit/generation2
-      - name: Generation 2 blind holdout selector tests
-        run: python -m pytest -q tests/independent_audit/test_generation2_holdout_selection.py
+      - name: Generation 2 blind holdout selector and virginity tests
+        run: >-
+          python -m pytest -q
+          tests/independent_audit/test_generation2_holdout_selection.py
+          tests/independent_audit/test_generation2_virginity.py
       - name: Verify survivor identity
         run: >-
           python -c "from investment_tracker.quant.generation2.survivor_identity import verify_survivor_identity;
@@ -31,7 +34,7 @@ jobs:
         run: |
           grep -n 'get_stock_basicinfo' src/investment_tracker/independent_audit/generation2/holdout_selection.py
           grep -n 'get_history_kl_quota' src/investment_tracker/independent_audit/generation2/holdout_selection.py
-          ! grep -n -E 'request_history_kline|get_market_snapshot|get_cur_kline|get_rt_data|get_order_book|get_ticker|get_rehab|OpenSecTradeContext|place_order|unlock_trade|modify_order'             src/investment_tracker/independent_audit/generation2/holdout_selection.py
+          ! grep -R -n -E 'request_history_kline|get_market_snapshot|get_cur_kline|get_rt_data|get_order_book|get_ticker|get_rehab|OpenSecTradeContext|place_order|unlock_trade|modify_order'             src/investment_tracker/independent_audit/generation2
       - name: Selection contract remains pre-access
         run: |
           python - <<'PY'
