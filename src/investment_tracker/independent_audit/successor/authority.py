@@ -39,6 +39,7 @@ class SuccessorMethodologyAuthorization(BaseModel):
     implementation_sha256: Literal["35a3ad8f92598021bbfbd2d5d9337036af525b71f978ab053827c4922da60f1b"]
     corporate_action_contract_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     successor_normalizer_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    successor_evaluator_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     holdout_exclusion_registry_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
     evaluation_calendar_start: str = Field(min_length=10, max_length=10)
@@ -89,6 +90,7 @@ def load_methodology_authorization(
     holdout_exclusion_registry_path: Path,
     predecessor_closure_path: Path,
     successor_normalizer_path: Path,
+    successor_evaluator_path: Path,
 ) -> SuccessorMethodologyAuthorization:
     path = Path(authorization_path)
     if not path.is_file():
@@ -109,9 +111,9 @@ def load_methodology_authorization(
             "SUCCESSOR_CORPORATE_ACTION_CONTRACT_IDENTITY_MISMATCH"
         )
     if authorization.successor_normalizer_sha256 != _sha(successor_normalizer_path):
-        raise SuccessorAuthorityError(
-            "SUCCESSOR_NORMALIZER_IDENTITY_MISMATCH"
-        )
+        raise SuccessorAuthorityError("SUCCESSOR_NORMALIZER_IDENTITY_MISMATCH")
+    if authorization.successor_evaluator_sha256 != _sha(successor_evaluator_path):
+        raise SuccessorAuthorityError("SUCCESSOR_EVALUATOR_IDENTITY_MISMATCH")
     if authorization.holdout_exclusion_registry_sha256 != _sha(
         holdout_exclusion_registry_path
     ):
@@ -146,6 +148,7 @@ def authorization_summary(
         "binding_sha256": authorization.binding_sha256,
         "implementation_sha256": authorization.implementation_sha256,
         "successor_normalizer_sha256": authorization.successor_normalizer_sha256,
+        "successor_evaluator_sha256": authorization.successor_evaluator_sha256,
         "new_virgin_holdout_selection_authorized": True,
         "protected_history_access_authorized": False,
         "one_time_acquisition_required": True,
