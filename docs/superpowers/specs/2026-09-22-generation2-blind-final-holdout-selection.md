@@ -6,6 +6,10 @@ Status: **FROZEN BEFORE CANDIDATE-UNIVERSE QUERY**
 
 Authority: **INDEPENDENT_AUDIT**
 
+## Pre-query correction
+
+The first local selector invocation failed closed with `GEN2_HOLDOUT_SELECTION_REGISTRY_MISMATCH` while verifying frozen inputs. The failure occurred before `_load_sdk()` / `OpenQuoteContext`, so no OpenD context was opened, no static candidate universe was queried, and no provider access ledger was queried. The registry identity was recomputed using the repository's canonical `registry_content_sha256()` semantics and corrected before the first candidate-universe query. Because the deterministic seed binds the registry SHA-256, the seed was correspondingly recomputed before any eligible symbol or rank was observed. This correction does not consume or retry a holdout selection.
+
 ## Purpose
 
 Select exactly five previously unused US-listed ETFs for the Generation-2
@@ -26,7 +30,7 @@ Frozen identities:
 - implementation SHA-256:
   `35a3ad8f92598021bbfbd2d5d9337036af525b71f978ab053827c4922da60f1b`
 - permanent exclusion-registry SHA-256:
-  `1c7965d2b6250aab9f521dd2c9605e5beb277785a08f846c3ba35447b4e16651`
+  `de8abace734cd6b1550d68d79166c806203435e1e7f7b48a236f497c32b9bf61`
 
 ## Evaluation chronology
 
@@ -127,11 +131,11 @@ filter is permitted.
 
 Seed material is frozen as:
 
-`GENERATION2-BLIND-FINAL-HOLDOUT-v1|96580b61ddb617f54157cc2ce12f5dc5316dc143321f1aaf214e7a563b5aff87|fd482e62e81d6813132f3aef747aecbcb07b5e4960b559dc1253510c95f49c8b|35a3ad8f92598021bbfbd2d5d9337036af525b71f978ab053827c4922da60f1b|1c7965d2b6250aab9f521dd2c9605e5beb277785a08f846c3ba35447b4e16651|2023-01-01|2025-12-31|2022-03-03`
+`GENERATION2-BLIND-FINAL-HOLDOUT-v1|96580b61ddb617f54157cc2ce12f5dc5316dc143321f1aaf214e7a563b5aff87|fd482e62e81d6813132f3aef747aecbcb07b5e4960b559dc1253510c95f49c8b|35a3ad8f92598021bbfbd2d5d9337036af525b71f978ab053827c4922da60f1b|de8abace734cd6b1550d68d79166c806203435e1e7f7b48a236f497c32b9bf61|2023-01-01|2025-12-31|2022-03-03`
 
 Its SHA-256 is:
 
-`bc41de35fd0b4889a98d06b614e353696a29c539d9398f1d19b2bb7df0094094`
+`51bc792c6550a3b49e608acf12343153223d29325cbbad97fbbf4785a61a348c`
 
 For each eligible symbol `S`:
 
