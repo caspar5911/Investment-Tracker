@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from hashlib import sha256
 import json
 from pathlib import Path
 
@@ -34,6 +35,14 @@ def _common_methodology_args(parser: argparse.ArgumentParser) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="investment-tracker-successor-audit")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    bindings = sub.add_parser("print-audit-code-bindings")
+    bindings.add_argument("--corporate-action-contract", default=DEFAULT_CA_CONTRACT)
+    bindings.add_argument("--registry", default=DEFAULT_REGISTRY)
+    bindings.add_argument("--normalizer", default=DEFAULT_NORMALIZER)
+    bindings.add_argument("--evaluator", default=DEFAULT_EVALUATOR)
+    bindings.add_argument("--acquisition", default="src/investment_tracker/independent_audit/successor/acquisition.py")
+    bindings.add_argument("--release", default="src/investment_tracker/independent_audit/successor/release.py")
 
     verify_method = sub.add_parser("verify-methodology-authorization")
     _common_methodology_args(verify_method)
@@ -129,6 +138,26 @@ def main(argv: list[str] | None = None) -> int:
     close.add_argument("--output", required=True)
 
     args = parser.parse_args(argv)
+
+    if args.command == "print-audit-code-bindings":
+        def digest(value: str) -> str:
+            return sha256(Path(value).read_bytes()).hexdigest()
+        print(json.dumps({
+            "predecessor_closure_commit": "f875167f3e758ab3391ff2f961aa740f231568e5",
+            "candidate_id": "G2-A|lookback=189|skip=21|top_k=1|rebalance=21",
+            "binding_sha256": "fd482e62e81d6813132f3aef747aecbcb07b5e4960b559dc1253510c95f49c8b",
+            "implementation_sha256": "35a3ad8f92598021bbfbd2d5d9337036af525b71f978ab053827c4922da60f1b",
+            "corporate_action_contract_sha256": digest(args.corporate_action_contract),
+            "holdout_exclusion_registry_sha256": digest(args.registry),
+            "successor_normalizer_sha256": digest(args.normalizer),
+            "successor_evaluator_sha256": digest(args.evaluator),
+            "acquisition_implementation_sha256": digest(args.acquisition),
+            "release_implementation_sha256": digest(args.release),
+            "authority_granted": False,
+            "protected_history_access_authorized": False,
+            "phase7_authorized": False,
+        }, sort_keys=True, separators=(",", ":")))
+        return 0
 
     if args.command == "verify-methodology-authorization":
         auth = load_methodology_authorization(
