@@ -43,5 +43,5 @@ jobs:
           assert p['phase6_authorized'] is False
           assert p['phase7_authorized'] is False
           assert p['production_readiness_approved'] is False
-          assert p['ranking']['seed_sha256']=='bc41de35fd0b4889a98d06b614e353696a29c539d9398f1d19b2bb7df0094094'
+          assert p['ranking']['seed_sha256']=='51bc792c6550a3b49e608acf12343153223d29325cbbad97fbbf4785a61a348c'
           PY
