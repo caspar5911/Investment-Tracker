@@ -21,6 +21,7 @@ CONTRACT = ROOT / "data/governance/successor/corporate-action-normalization-v2.j
 REGISTRY = ROOT / "data/governance/holdout-exclusion-registry.json"
 CLOSURE = ROOT / "data/generation2/phase6/phase6-final-holdout-closure.json"
 TEMPLATE = ROOT / "data/governance/successor/successor-methodology-authorization.template.json"
+NORMALIZER = ROOT / "src/investment_tracker/quant/successor/corporate_actions_v2.py"
 
 
 def _sha(path: Path) -> str:
@@ -38,7 +39,11 @@ def _authorization() -> dict:
         "predecessor_closure_commit": "f875167f3e758ab3391ff2f961aa740f231568e5",
         "predecessor_phase6_status": "PHASE6_UNKNOWN_ABSTAIN",
         "successor_formal_name": "GENERATION_3_TEST_FIXTURE",
+        "candidate_id": "G2-A|lookback=189|skip=21|top_k=1|rebalance=21",
+        "binding_sha256": "fd482e62e81d6813132f3aef747aecbcb07b5e4960b559dc1253510c95f49c8b",
+        "implementation_sha256": "35a3ad8f92598021bbfbd2d5d9337036af525b71f978ab053827c4922da60f1b",
         "corporate_action_contract_sha256": _sha(CONTRACT),
+        "successor_normalizer_sha256": _sha(NORMALIZER),
         "holdout_exclusion_registry_sha256": _sha(REGISTRY),
         "evaluation_calendar_start": "2023-01-01",
         "evaluation_calendar_end": "2025-12-31",
@@ -75,6 +80,8 @@ def test_missing_real_audit_authorization_fails_closed(tmp_path: Path) -> None:
             corporate_action_contract_path=CONTRACT,
             holdout_exclusion_registry_path=REGISTRY,
             predecessor_closure_path=CLOSURE,
+        successor_normalizer_path=NORMALIZER,
+            successor_normalizer_path=NORMALIZER,
         )
 
 
@@ -88,6 +95,8 @@ def test_non_authorizing_template_cannot_be_used_as_approval() -> None:
             corporate_action_contract_path=CONTRACT,
             holdout_exclusion_registry_path=REGISTRY,
             predecessor_closure_path=CLOSURE,
+        successor_normalizer_path=NORMALIZER,
+            successor_normalizer_path=NORMALIZER,
         )
 
 
@@ -98,6 +107,7 @@ def test_valid_synthetic_authority_fixture_binds_exact_governance(tmp_path: Path
         corporate_action_contract_path=CONTRACT,
         holdout_exclusion_registry_path=REGISTRY,
         predecessor_closure_path=CLOSURE,
+        successor_normalizer_path=NORMALIZER,
     )
     assert auth.successor_methodology_authorized is True
     assert auth.new_virgin_holdout_selection_authorized is True
@@ -119,6 +129,8 @@ def test_tampered_contract_identity_fails_closed(tmp_path: Path) -> None:
             corporate_action_contract_path=CONTRACT,
             holdout_exclusion_registry_path=REGISTRY,
             predecessor_closure_path=CLOSURE,
+        successor_normalizer_path=NORMALIZER,
+            successor_normalizer_path=NORMALIZER,
         )
 
 
@@ -129,6 +141,7 @@ def test_selection_contract_requires_valid_audit_authority(tmp_path: Path) -> No
         corporate_action_contract_path=CONTRACT,
         holdout_exclusion_registry_path=REGISTRY,
         predecessor_closure_path=CLOSURE,
+        successor_normalizer_path=NORMALIZER,
     )
     assert contract["status"] == "FROZEN_AFTER_INDEPENDENT_AUDIT_BEFORE_CANDIDATE_QUERY"
     assert contract["successor_formal_name"] == "GENERATION_3_TEST_FIXTURE"
