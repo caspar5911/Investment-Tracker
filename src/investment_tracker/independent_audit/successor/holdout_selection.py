@@ -203,6 +203,7 @@ def acquire_and_select(
     selection_contract_path: Path,
     corporate_action_contract_path: Path,
     successor_normalizer_path: Path,
+    successor_evaluator_path: Path,
     holdout_exclusion_registry_path: Path,
     predecessor_closure_path: Path,
     log_paths: tuple[Path, ...],
@@ -222,6 +223,7 @@ def acquire_and_select(
         holdout_exclusion_registry_path=holdout_exclusion_registry_path,
         predecessor_closure_path=predecessor_closure_path,
         successor_normalizer_path=successor_normalizer_path,
+        successor_evaluator_path=successor_evaluator_path,
     )
     contract = _load_selection_contract(selection_contract_path)
     if (
@@ -231,6 +233,7 @@ def acquire_and_select(
         or contract.get("binding_sha256") != auth.binding_sha256
         or contract.get("implementation_sha256") != auth.implementation_sha256
         or contract.get("successor_normalizer_sha256") != auth.successor_normalizer_sha256
+        or contract.get("successor_evaluator_sha256") != auth.successor_evaluator_sha256
         or contract.get("holdout_exclusion_registry_sha256") != _sha(holdout_exclusion_registry_path)
     ):
         raise ValueError("SUCCESSOR_SELECTION_CONTRACT_IDENTITY_MISMATCH")
@@ -286,6 +289,7 @@ def acquire_and_select(
         "binding_sha256": auth.binding_sha256,
         "implementation_sha256": auth.implementation_sha256,
         "successor_normalizer_sha256": auth.successor_normalizer_sha256,
+        "successor_evaluator_sha256": auth.successor_evaluator_sha256,
         "holdout_exclusion_registry_sha256": _sha(holdout_exclusion_registry_path),
         "selection_seed_sha256": seed,
         "evaluation_window": contract["evaluation_window"],
