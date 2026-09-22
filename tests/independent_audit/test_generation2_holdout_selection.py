@@ -145,10 +145,11 @@ def test_full_selector_uses_only_static_and_quota_interfaces(monkeypatch, tmp_pa
         ETF = object()
     class FakeSdk:
         RET_OK = 0
-        Market = Market
-        SecurityType = SecurityType
         def __init__(self, ctx): self.ctx = ctx
         def OpenQuoteContext(self, host, port): return self.ctx
+
+    FakeSdk.Market = Market
+    FakeSdk.SecurityType = SecurityType
 
     ctx = FakeContext()
     monkeypatch.setattr(hs.legacy_helpers, "_load_sdk", lambda: (FakeSdk(ctx), "fake"))
