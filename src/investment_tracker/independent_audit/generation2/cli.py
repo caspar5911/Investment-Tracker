@@ -10,6 +10,7 @@ from .research_provenance_export import export_and_reconcile
 from .research_provenance_cache import build_from_phase3_cache
 from .preaccess import evaluate_preaccess, write_preaccess_status
 from .phase6_contract import build_contract, seal_contract
+from .authorization import issue_authorization
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -65,6 +66,18 @@ def main(argv: list[str] | None = None) -> int:
     contract.add_argument("--evidence", required=True)
     contract.add_argument("--provenance-root", required=True)
     contract.add_argument("--output", required=True)
+
+    auth = sub.add_parser("issue-acquisition-authorization")
+    auth.add_argument("--repository-root", default=".")
+    auth.add_argument("--contract", required=True)
+    auth.add_argument("--preaccess-status", required=True)
+    auth.add_argument("--attestation", required=True)
+    auth.add_argument("--evidence", required=True)
+    auth.add_argument("--provenance-root", required=True)
+    auth.add_argument("--evidence-commit-sha", required=True)
+    auth.add_argument("--ci-run-id", required=True, type=int)
+    auth.add_argument("--ci-conclusion", required=True)
+    auth.add_argument("--output", required=True)
 
     args = parser.parse_args(argv)
 
@@ -123,6 +136,18 @@ def main(argv: list[str] | None = None) -> int:
             "evidence_output": str(evidence),
             "attestation_output": str(attestation),
         }, sort_keys=True, separators=(",", ":")))
+        return 0
+
+    if args.command == "issue-acquisition-authorization":
+        path = issue_authorization(
+            repository_root=Path(args.repository_root), contract_path=Path(args.contract),
+            preaccess_status_path=Path(args.preaccess_status), attestation_path=Path(args.attestation),
+            evidence_path=Path(args.evidence), provenance_root=Path(args.provenance_root),
+            evidence_commit_sha=args.evidence_commit_sha, ci_run_id=args.ci_run_id,
+            ci_conclusion=args.ci_conclusion, output_path=Path(args.output),
+        )
+        payload=json.loads(path.read_text(encoding="utf-8"))
+        print(json.dumps({"status":payload["status"],"authorization_id":payload["authorization_id"],"one_time":payload["one_time"],"output":str(path)}, sort_keys=True,separators=(",",":")))
         return 0
 
     if args.command == "seal-phase6-contract":
