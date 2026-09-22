@@ -7,7 +7,7 @@ import pytest
 from investment_tracker.independent_audit.generation2 import preaccess
 
 
-def test_preaccess_blocks_when_independent_source_not_established(monkeypatch):
+def test_preaccess_blocks_when_independent_source_not_established(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(
         preaccess,
         "verify_attestation",
@@ -24,12 +24,15 @@ def test_preaccess_blocks_when_independent_source_not_established(monkeypatch):
             "independent_source_established": False,
         },
     )
+    recon = tmp_path / "reconciliation.json"
+    recon.write_text('{"status":"UNKNOWN_ABSTAIN","independent_source_established":false,"decision_critical":false}', encoding="utf-8")
     result = preaccess.evaluate_preaccess(
         attestation_path=Path("a"),
         evidence_path=Path("b"),
         selection_path=Path("c"),
         selection_contract_path=Path("d"),
         reproduction_report_path=Path("e"),
+        reconciliation_path=recon,
     )
     assert result["status"] == preaccess.STATUS_BLOCKED
     assert result["reason"] == preaccess.REASON_INDEPENDENT_SOURCE
@@ -37,7 +40,7 @@ def test_preaccess_blocks_when_independent_source_not_established(monkeypatch):
     assert result["phase7_authorized"] is False
 
 
-def test_preaccess_ready_only_when_both_gates_verify(monkeypatch):
+def test_preaccess_ready_only_when_both_gates_verify(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(
         preaccess,
         "verify_attestation",
@@ -54,19 +57,22 @@ def test_preaccess_ready_only_when_both_gates_verify(monkeypatch):
             "independent_source_established": True,
         },
     )
+    recon = tmp_path / "reconciliation.json"
+    recon.write_text('{"status":"MATCHED","independent_source_established":true,"decision_critical":false}', encoding="utf-8")
     result = preaccess.evaluate_preaccess(
         attestation_path=Path("a"),
         evidence_path=Path("b"),
         selection_path=Path("c"),
         selection_contract_path=Path("d"),
         reproduction_report_path=Path("e"),
+        reconciliation_path=recon,
     )
     assert result["status"] == preaccess.STATUS_READY
     assert result["independent_source_established"] is True
     assert result["historical_acquisition_authorized"] is False
 
 
-def test_preaccess_rejects_survivor_mismatch(monkeypatch):
+def test_preaccess_rejects_survivor_mismatch(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(
         preaccess,
         "verify_attestation",
@@ -83,6 +89,8 @@ def test_preaccess_rejects_survivor_mismatch(monkeypatch):
             "independent_source_established": True,
         },
     )
+    recon = tmp_path / "reconciliation.json"
+    recon.write_text('{"status":"MATCHED","independent_source_established":true,"decision_critical":false}', encoding="utf-8")
     with pytest.raises(ValueError, match="GEN2_PREACCESS_SURVIVOR_MISMATCH"):
         preaccess.evaluate_preaccess(
             attestation_path=Path("a"),
@@ -90,6 +98,7 @@ def test_preaccess_rejects_survivor_mismatch(monkeypatch):
             selection_path=Path("c"),
             selection_contract_path=Path("d"),
             reproduction_report_path=Path("e"),
+        reconciliation_path=recon,
         )
 
 
