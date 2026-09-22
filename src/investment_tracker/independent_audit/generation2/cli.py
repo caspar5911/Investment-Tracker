@@ -11,6 +11,7 @@ from .research_provenance_cache import build_from_phase3_cache
 from .preaccess import evaluate_preaccess, write_preaccess_status
 from .phase6_contract import build_contract, seal_contract
 from .authorization import issue_authorization
+from .acquisition import acquire_and_seal
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -79,6 +80,20 @@ def main(argv: list[str] | None = None) -> int:
     auth.add_argument("--ci-conclusion", required=True)
     auth.add_argument("--output", required=True)
 
+    acquire = sub.add_parser("acquire-final-holdout")
+    acquire.add_argument("--repository-root", default=".")
+    acquire.add_argument("--contract", default="data/generation2/phase6/evaluation-contract.json")
+    acquire.add_argument("--authorization", default="data/generation2/phase6/acquisition-authorization.json")
+    acquire.add_argument("--preaccess-status", default="data/generation2/preaccess/preaccess-status.json")
+    acquire.add_argument("--attestation", default="data/generation2/preaccess/virginity-attestation.json")
+    acquire.add_argument("--evidence", default="data/generation2/preaccess/virginity-evidence.json")
+    acquire.add_argument("--provenance-root", default="data/generation2/preaccess/provenance")
+    acquire.add_argument("--ci-classification", default="data/generation2/phase6/ci-classification.json")
+    acquire.add_argument("--authorization-commit-sha", required=True)
+    acquire.add_argument("--private-output-dir", required=True)
+    acquire.add_argument("--host", default="127.0.0.1")
+    acquire.add_argument("--port", type=int, default=11111)
+
     args = parser.parse_args(argv)
 
     if args.command == "select-final-holdout":
@@ -136,6 +151,19 @@ def main(argv: list[str] | None = None) -> int:
             "evidence_output": str(evidence),
             "attestation_output": str(attestation),
         }, sort_keys=True, separators=(",", ":")))
+        return 0
+
+    if args.command == "acquire-final-holdout":
+        receipt = acquire_and_seal(
+            repository_root=Path(args.repository_root), contract_path=Path(args.contract),
+            authorization_path=Path(args.authorization), preaccess_status_path=Path(args.preaccess_status),
+            attestation_path=Path(args.attestation), evidence_path=Path(args.evidence),
+            provenance_root=Path(args.provenance_root), ci_classification_path=Path(args.ci_classification),
+            authorization_commit_sha=args.authorization_commit_sha,
+            private_output_dir=Path(args.private_output_dir), host=args.host, port=args.port,
+        )
+        payload=json.loads(receipt.read_text(encoding="utf-8"))
+        print(json.dumps({"status":payload["status"],"holdout_id":payload["holdout_id"],"bundle_sha256":payload["bundle_sha256"],"performance_computed":payload["performance_computed"],"performance_inspected":payload["performance_inspected"],"receipt":str(receipt)}, sort_keys=True,separators=(",",":")))
         return 0
 
     if args.command == "issue-acquisition-authorization":
