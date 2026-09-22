@@ -222,3 +222,63 @@ def identity_dict(*, kind: str, sha256_value: str) -> dict[str, str]:
         "sha256": sha256_value,
         "path": f"phase3/normalized/sha256/{sha256_value}",
     }
+
+
+def verify_cache_provenance(output_root: Path) -> dict[str, Any]:
+    root = Path(output_root)
+    try:
+        primary_payload = json.loads((root / "primary-snapshot.json").read_text(encoding="utf-8"))
+        independent_payload = json.loads((root / "provider-origin-snapshot.json").read_text(encoding="utf-8"))
+        recorded = json.loads((root / "reconciliation.json").read_text(encoding="utf-8"))
+        result = json.loads((root / "result.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("GEN2_CACHE_PROVENANCE_BUNDLE_INVALID") from exc
+
+    def _snapshot(payload: dict[str, Any]) -> SourceSnapshot:
+        fields = {name: payload[name] for name in SourceSnapshot.model_fields}
+        return SourceSnapshot.model_validate(fields)
+
+    primary = _snapshot(primary_payload)
+    independent = _snapshot(independent_payload)
+
+    if primary_payload.get("snapshot_sha256") != snapshot_content_sha256(primary):
+        raise ValueError("GEN2_CACHE_PROVENANCE_PRIMARY_SNAPSHOT_HASH_MISMATCH")
+    if independent_payload.get("snapshot_sha256") != snapshot_content_sha256(independent):
+        raise ValueError("GEN2_CACHE_PROVENANCE_PROVIDER_SNAPSHOT_HASH_MISMATCH")
+    if independent.independence != "PROVIDER_ORIGIN_EXPORT":
+        raise ValueError("GEN2_CACHE_PROVENANCE_INDEPENDENCE_KIND_MISMATCH")
+    if independent.provider != "MOOMOO_PHASE3_IMMUTABLE_RAW_EVIDENCE":
+        raise ValueError("GEN2_CACHE_PROVENANCE_PROVIDER_IDENTITY_MISMATCH")
+    if independent.normalized_symbols != frozenset(RESEARCH_SYMBOLS):
+        raise ValueError("GEN2_CACHE_PROVENANCE_SYMBOL_SET_MISMATCH")
+
+    recomputed = reconcile(primary, independent).model_dump(mode="json")
+    for key in (
+        "status",
+        "mismatches",
+        "decision_critical",
+        "independent_source_established",
+        "primary_hash",
+        "independent_hash",
+    ):
+        if recorded.get(key) != recomputed.get(key):
+            raise ValueError(f"GEN2_CACHE_PROVENANCE_RECONCILIATION_MISMATCH:{key}")
+
+    if result.get("status") != recomputed["status"]:
+        raise ValueError("GEN2_CACHE_PROVENANCE_RESULT_STATUS_MISMATCH")
+    if result.get("independent_source_established") != recomputed["independent_source_established"]:
+        raise ValueError("GEN2_CACHE_PROVENANCE_RESULT_INDEPENDENCE_MISMATCH")
+    if result.get("provider_history_requested") is not False:
+        raise ValueError("GEN2_CACHE_PROVENANCE_NETWORK_POLICY_MISMATCH")
+    if result.get("holdout_symbols_accessed") != []:
+        raise ValueError("GEN2_CACHE_PROVENANCE_HOLDOUT_ACCESS_MISMATCH")
+
+    return {
+        "status": recomputed["status"],
+        "independent_source_established": recomputed["independent_source_established"],
+        "decision_critical": recomputed["decision_critical"],
+        "primary_snapshot_sha256": primary_payload["snapshot_sha256"],
+        "provider_origin_snapshot_sha256": independent_payload["snapshot_sha256"],
+        "reconciliation_sha256": sha256((root / "reconciliation.json").read_bytes()).hexdigest(),
+        "result_sha256": sha256((root / "result.json").read_bytes()).hexdigest(),
+    }
