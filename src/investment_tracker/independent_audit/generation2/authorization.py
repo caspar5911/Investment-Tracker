@@ -3,9 +3,9 @@ from __future__ import annotations
 from hashlib import sha256
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, Literal
+from pydantic import BaseModel, ConfigDict, Field
 
 from .phase6_contract import verify_contract
 from .preaccess import STATUS_READY
