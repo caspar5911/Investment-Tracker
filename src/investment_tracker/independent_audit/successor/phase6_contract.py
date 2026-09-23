@@ -191,13 +191,34 @@ def verify_phase6_contract(path: Path) -> dict[str, Any]:
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError("SUCCESSOR_PHASE6_CONTRACT_INVALID") from exc
+
+    governance = payload.get("governance", {})
+    schema = payload.get("schema_version")
     if (
-        payload.get("schema_version") != SCHEMA
+        schema not in {SCHEMA, "SUCCESSOR-PHASE6-EVALUATION-CONTRACT-v2"}
         or payload.get("status") != STATUS
         or payload.get("authority") != "INDEPENDENT_AUDIT"
-        or payload.get("governance", {}).get("protected_history_access_authorized") is not False
-        or payload.get("governance", {}).get("phase7_authorized") is not False
-        or payload.get("governance", {}).get("paper_only") is not True
+        or governance.get("protected_history_access_authorized") is not False
+        or governance.get("phase7_authorized") is not False
+        or governance.get("paper_only") is not True
     ):
         raise ValueError("SUCCESSOR_PHASE6_CONTRACT_INVALID")
+
+    if schema == "SUCCESSOR-PHASE6-EVALUATION-CONTRACT-v2":
+        if (
+            payload.get("successor_formal_name") != "GENERATION_4"
+            or governance.get("acquisition_authorization_required") is not True
+            or governance.get("retry_after_historical_access_allowed") is not False
+            or governance.get("symbol_substitution_after_access_allowed") is not False
+            or payload.get("methodology", {}).get("endpoint_statement_numeric_authority") is not False
+        ):
+            raise ValueError("SUCCESSOR_PHASE6_CONTRACT_INVALID")
+        # Compatibility alias for the already-audited evaluator/acquisition stack.
+        # The returned object only is adapted; the frozen on-disk v2 contract is
+        # never rewritten or re-hashed.
+        payload = json.loads(json.dumps(payload))
+        methodology = payload["methodology"]
+        methodology["successor_normalizer_sha256"] = methodology[
+            "split_normalizer_sha256"
+        ]
     return payload
