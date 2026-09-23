@@ -7,7 +7,9 @@ from pathlib import Path
 import pytest
 
 import investment_tracker.independent_audit.successor.acquisition_authority as acquisition_authority_module
+from investment_tracker.independent_audit.successor import acquisition as acquisition_module
 from investment_tracker.independent_audit.successor.acquisition_authority import (
+    SCHEMA as SCHEMA_V1,
     SCHEMA_V2,
     STATUS,
     SuccessorAcquisitionAuthorityError,
@@ -87,6 +89,22 @@ def _payload() -> dict:
     }
 
 
+def _legacy_v1_payload() -> dict:
+    payload = _payload()
+    payload["schema_version"] = SCHEMA_V1
+    payload["successor_normalizer_sha256"] = payload.pop("split_normalizer_sha256")
+    for field in (
+        "dividend_reconciliation_sha256",
+        "phase6_verifier_implementation_sha256",
+        "acquisition_authority_implementation_sha256",
+        "closure_implementation_sha256",
+        "virginity_verifier_implementation_sha256",
+        "stage_b_cli_implementation_sha256",
+    ):
+        payload.pop(field)
+    return payload
+
+
 def _write(path: Path, value: dict) -> Path:
     path.write_text(json.dumps(value), encoding="utf-8")
     return path
@@ -125,9 +143,56 @@ def test_audited_generation4_evaluator_identity_is_unchanged() -> None:
 def test_non_authorizing_stage_b_template_cannot_grant_access() -> None:
     with pytest.raises(
         SuccessorAcquisitionAuthorityError,
-        match="SUCCESSOR_ACQUISITION_AUTHORIZATION_INVALID",
+        match="SUCCESSOR_GENERATION4_REQUIRES_ACQUISITION_AUTHORIZATION_V2",
     ):
         _load(TEMPLATE)
+
+
+def test_generation4_rejects_legacy_v1_authorization(tmp_path: Path) -> None:
+    with pytest.raises(
+        SuccessorAcquisitionAuthorityError,
+        match="SUCCESSOR_GENERATION4_REQUIRES_ACQUISITION_AUTHORIZATION_V2",
+    ):
+        _load(_write(tmp_path / "auth-v1.json", _legacy_v1_payload()))
+
+
+def test_generation4_contract_controls_schema_gate_not_authorization_claim(
+    tmp_path: Path,
+) -> None:
+    payload = _legacy_v1_payload()
+    payload["successor_formal_name"] = "GENERATION_3_TEST_FIXTURE"
+    with pytest.raises(
+        SuccessorAcquisitionAuthorityError,
+        match="SUCCESSOR_GENERATION4_REQUIRES_ACQUISITION_AUTHORIZATION_V2",
+    ):
+        _load(_write(tmp_path / "auth-v1-spoof.json", payload))
+
+
+def test_generation4_v1_rejected_before_sdk_or_provider_access(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authorization = _write(tmp_path / "auth-v1.json", _legacy_v1_payload())
+    sdk_loaded = False
+
+    def fail_if_sdk_loaded():
+        nonlocal sdk_loaded
+        sdk_loaded = True
+        raise AssertionError("SDK must not load for a rejected Generation-4 v1 authorization")
+
+    monkeypatch.setattr(acquisition_module, "_load_sdk", fail_if_sdk_loaded)
+    with pytest.raises(
+        SuccessorAcquisitionAuthorityError,
+        match="SUCCESSOR_GENERATION4_REQUIRES_ACQUISITION_AUTHORIZATION_V2",
+    ):
+        acquisition_module.preflight_acquisition(
+            authorization_path=authorization,
+            phase6_contract_path=CONTRACT,
+            selection_path=SELECTION,
+            virginity_attestation_path=ATTESTATION,
+            virginity_evidence_path=EVIDENCE,
+        )
+    assert sdk_loaded is False
 
 
 def test_valid_synthetic_generation4_stage_b_authorization_binds_full_runtime(
@@ -141,6 +206,7 @@ def test_valid_synthetic_generation4_stage_b_authorization_binds_full_runtime(
     assert auth.retry_after_historical_access_allowed is False
     assert auth.symbol_substitution_after_access_allowed is False
     assert auth.phase7_authorized is False
+    assert auth.production_readiness_approved is False
 
 
 @pytest.mark.parametrize(

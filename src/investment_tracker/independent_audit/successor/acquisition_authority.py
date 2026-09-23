@@ -124,19 +124,28 @@ def load_acquisition_authorization(
         raise SuccessorAcquisitionAuthorityError(
             "SUCCESSOR_ACQUISITION_AUTHORIZATION_MISSING"
         )
+    contract = verify_phase6_contract(phase6_contract_path)
     try:
         raw = json.loads(Path(authorization_path).read_text(encoding="utf-8"))
         schema = raw.get("schema_version") if isinstance(raw, dict) else None
+        if (
+            contract.get("successor_formal_name") == "GENERATION_4"
+            and schema != SCHEMA_V2
+        ):
+            raise SuccessorAcquisitionAuthorityError(
+                "SUCCESSOR_GENERATION4_REQUIRES_ACQUISITION_AUTHORIZATION_V2"
+            )
         if schema == SCHEMA_V2:
             auth = SuccessorAcquisitionAuthorizationV2.model_validate(raw)
         else:
             auth = SuccessorAcquisitionAuthorization.model_validate(raw)
+    except SuccessorAcquisitionAuthorityError:
+        raise
     except Exception as exc:
         raise SuccessorAcquisitionAuthorityError(
             "SUCCESSOR_ACQUISITION_AUTHORIZATION_INVALID"
         ) from exc
 
-    contract = verify_phase6_contract(phase6_contract_path)
     acquisition_impl = Path(__file__).with_name("acquisition.py")
     release_impl = Path(__file__).with_name("release.py")
 
