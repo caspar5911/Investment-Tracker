@@ -132,6 +132,7 @@ def test_valid_synthetic_generation4_stage_b_authorization_binds_full_runtime(
     assert auth.schema_version == SCHEMA_V2
     assert auth.successor_formal_name == "GENERATION_4"
     assert auth.one_time is True
+    assert auth.successor_normalizer_sha256 == auth.split_normalizer_sha256
     assert auth.retry_after_historical_access_allowed is False
     assert auth.symbol_substitution_after_access_allowed is False
     assert auth.phase7_authorized is False
