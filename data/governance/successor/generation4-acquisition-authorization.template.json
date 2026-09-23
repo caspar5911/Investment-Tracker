@@ -37,6 +37,8 @@
     "phase7_authorized": false,
     "production_readiness_approved": false,
     "recon009_status": "OPEN",
-    "paper_only": true
+    "paper_only": true,
+    "virginity_verifier_implementation_sha256": "<sha256>",
+    "stage_b_cli_implementation_sha256": "<sha256>"
   }
 }
