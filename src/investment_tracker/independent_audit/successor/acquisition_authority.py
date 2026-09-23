@@ -81,6 +81,8 @@ class SuccessorAcquisitionAuthorizationV2(BaseModel):
     acquisition_implementation_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     release_implementation_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     closure_implementation_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    virginity_verifier_implementation_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    stage_b_cli_implementation_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
     phase6_contract_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     selection_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -151,6 +153,10 @@ def load_acquisition_authorization(
         verifier_impl = Path(__file__).with_name("phase6_contract.py")
         authority_impl = Path(__file__)
         closure_impl = Path(__file__).with_name("closure.py")
+        virginity_impl = Path(__file__).with_name("virginity.py")
+        stage_b_cli_impl = (
+            Path(__file__).resolve().parents[1] / "post_generation3" / "stage_b_cli.py"
+        )
         if auth.phase6_verifier_implementation_sha256 != _sha(verifier_impl):
             raise SuccessorAcquisitionAuthorityError(
                 "SUCCESSOR_PHASE6_VERIFIER_IMPLEMENTATION_IDENTITY_MISMATCH"
@@ -162,6 +168,14 @@ def load_acquisition_authorization(
         if auth.closure_implementation_sha256 != _sha(closure_impl):
             raise SuccessorAcquisitionAuthorityError(
                 "SUCCESSOR_CLOSURE_IMPLEMENTATION_IDENTITY_MISMATCH"
+            )
+        if auth.virginity_verifier_implementation_sha256 != _sha(virginity_impl):
+            raise SuccessorAcquisitionAuthorityError(
+                "SUCCESSOR_VIRGINITY_VERIFIER_IMPLEMENTATION_IDENTITY_MISMATCH"
+            )
+        if auth.stage_b_cli_implementation_sha256 != _sha(stage_b_cli_impl):
+            raise SuccessorAcquisitionAuthorityError(
+                "SUCCESSOR_STAGE_B_CLI_IMPLEMENTATION_IDENTITY_MISMATCH"
             )
 
     attestation = verify_attestation(
