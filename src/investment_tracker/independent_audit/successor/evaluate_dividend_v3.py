@@ -28,6 +28,7 @@ from investment_tracker.quant.successor.corporate_actions_v2 import (
 )
 from investment_tracker.quant.successor.dividend_reconciliation_v3 import (
     reconcile_structured_dividend_amounts,
+    validate_structured_dividend_components,
 )
 
 from .acquisition import MAGIC, _canonical_bytes, expected_sessions
@@ -373,15 +374,17 @@ def _corporate_actions(
                     f"SUCCESSOR_PHASE6_UNSUPPORTED_CORPORATE_ACTION:{symbol}:{unsupported}"
                 )
 
+        ordinary_amount, special_amount = validate_structured_dividend_components(
+            rehab_ordinary_amount=_number(
+                row.get("per_cash_div"), f"{symbol}:per_cash_div"
+            ),
+            rehab_special_amount=_number(
+                row.get("special_dividend"), f"{symbol}:special_dividend"
+            ),
+        )
         components = (
-            (
-                "ORDINARY_CASH",
-                _number(row.get("per_cash_div"), f"{symbol}:per_cash_div"),
-            ),
-            (
-                "SPECIAL_CASH",
-                _number(row.get("special_dividend"), f"{symbol}:special_dividend"),
-            ),
+            ("ORDINARY_CASH", ordinary_amount),
+            ("SPECIAL_CASH", special_amount),
         )
         cash_components = [
             (name, amount) for name, amount in components if amount > 0.0
@@ -419,22 +422,8 @@ def _corporate_actions(
                 )
             reconcile_structured_dividend_amounts(
                 endpoint,
-                rehab_ordinary_amount=next(
-                    (
-                        amount
-                        for component, amount in cash_components
-                        if component == "ORDINARY_CASH"
-                    ),
-                    0.0,
-                ),
-                rehab_special_amount=next(
-                    (
-                        amount
-                        for component, amount in cash_components
-                        if component == "SPECIAL_CASH"
-                    ),
-                    0.0,
-                ),
+                rehab_ordinary_amount=ordinary_amount,
+                rehab_special_amount=special_amount,
             )
             endpoint_hashes = sorted(identities)
             for component, amount in cash_components:
