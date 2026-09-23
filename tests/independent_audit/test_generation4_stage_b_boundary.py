@@ -195,6 +195,33 @@ def test_generation4_v1_rejected_before_sdk_or_provider_access(
     assert sdk_loaded is False
 
 
+def test_legacy_v1_remains_supported_for_pre_generation4_contract(
+    tmp_path: Path,
+) -> None:
+    legacy_contract = verify_phase6_contract(CONTRACT)
+    legacy_contract["schema_version"] = "SUCCESSOR-PHASE6-EVALUATION-CONTRACT-v1"
+    legacy_contract["successor_formal_name"] = "GENERATION_3_TEST_FIXTURE"
+    legacy_contract_path = _write(tmp_path / "legacy-contract.json", legacy_contract)
+
+    payload = _legacy_v1_payload()
+    payload["successor_formal_name"] = "GENERATION_3_TEST_FIXTURE"
+    payload["phase6_contract_sha256"] = _sha(legacy_contract_path)
+    authorization = _write(tmp_path / "legacy-auth-v1.json", payload)
+
+    auth = load_acquisition_authorization(
+        authorization_path=authorization,
+        phase6_contract_path=legacy_contract_path,
+        selection_path=SELECTION,
+        virginity_attestation_path=ATTESTATION,
+        virginity_evidence_path=EVIDENCE,
+    )
+
+    assert auth.schema_version == SCHEMA_V1
+    assert auth.successor_formal_name == "GENERATION_3_TEST_FIXTURE"
+    assert auth.phase7_authorized is False
+    assert auth.production_readiness_approved is False
+
+
 def test_valid_synthetic_generation4_stage_b_authorization_binds_full_runtime(
     tmp_path: Path,
 ) -> None:
