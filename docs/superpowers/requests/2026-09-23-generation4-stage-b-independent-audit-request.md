@@ -81,6 +81,8 @@ Tests:
    - acquisition implementation;
    - release implementation;
    - closure implementation;
+   - virginity verifier implementation;
+   - Generation-4 Stage-B CLI implementation;
    - frozen Phase-6 contract;
    - frozen selection;
    - virginity attestation;
