@@ -19,6 +19,25 @@ class DividendAmountAuthority:
     endpoint_statement_count: int
 
 
+def validate_structured_dividend_components(
+    *,
+    rehab_ordinary_amount: float,
+    rehab_special_amount: float,
+) -> tuple[float, float]:
+    ordinary = float(rehab_ordinary_amount)
+    special = float(rehab_special_amount)
+    if (
+        not math.isfinite(ordinary)
+        or not math.isfinite(special)
+        or ordinary < 0.0
+        or special < 0.0
+    ):
+        raise DividendReconciliationError(
+            "SUCCESSOR_DIVIDEND_STRUCTURED_AMOUNT_INVALID"
+        )
+    return ordinary, special
+
+
 def reconcile_structured_dividend_amounts(
     endpoint_rows: Sequence[Mapping[str, object]],
     *,
@@ -31,15 +50,11 @@ def reconcile_structured_dividend_amounts(
     evidence. It corroborates the event but is not parsed as a numeric amount
     source.
     """
-    ordinary = float(rehab_ordinary_amount)
-    special = float(rehab_special_amount)
-    if (
-        not math.isfinite(ordinary)
-        or not math.isfinite(special)
-        or ordinary < 0.0
-        or special < 0.0
-        or ordinary + special <= 0.0
-    ):
+    ordinary, special = validate_structured_dividend_components(
+        rehab_ordinary_amount=rehab_ordinary_amount,
+        rehab_special_amount=rehab_special_amount,
+    )
+    if ordinary + special <= 0.0:
         raise DividendReconciliationError(
             "SUCCESSOR_DIVIDEND_STRUCTURED_AMOUNT_INVALID"
         )
