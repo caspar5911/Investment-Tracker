@@ -78,10 +78,10 @@ def _write(path: Path, value: dict) -> Path:
     return path
 
 
-def _load(path: Path):
+def _load(path: Path, *, closure_path: Path = CLOSURE):
     return load_methodology_authorization(
         authorization_path=path,
-        predecessor_closure_path=CLOSURE,
+        predecessor_closure_path=closure_path,
         split_contract_path=SPLIT_CONTRACT,
         dividend_contract_path=DIVIDEND_CONTRACT,
         split_normalizer_path=SPLIT_NORMALIZER,
@@ -153,3 +153,19 @@ def test_registry_contains_28_permanently_excluded_symbols() -> None:
         for symbol in group["symbols"]
     }
     assert len(symbols) == 28
+
+
+def test_predecessor_symbol_substitution_authority_fails_closed(
+    tmp_path: Path,
+) -> None:
+    closure = json.loads(CLOSURE.read_text(encoding="utf-8"))
+    closure["one_time_semantics"]["symbol_substitution_authorized"] = True
+    closure_path = tmp_path / "tampered-closure.json"
+    closure_path.write_text(json.dumps(closure), encoding="utf-8")
+    auth_path = _write(tmp_path / "auth.json", _payload())
+
+    with pytest.raises(
+        PostGeneration3AuthorityError,
+        match="POST_GEN3_PREDECESSOR_CLOSURE_MISMATCH",
+    ):
+        _load(auth_path, closure_path=closure_path)
