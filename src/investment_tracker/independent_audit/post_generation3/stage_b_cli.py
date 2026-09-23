@@ -85,16 +85,17 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
 
-    common = dict(
-        authorization_path=Path(args.acquisition_authorization),
-        phase6_contract_path=Path(args.phase6_contract),
-        selection_path=Path(args.selection),
-        virginity_attestation_path=Path(args.virginity_attestation),
-        virginity_evidence_path=Path(args.virginity_evidence),
-    )
+    def common() -> dict[str, Path]:
+        return {
+            "authorization_path": Path(args.acquisition_authorization),
+            "phase6_contract_path": Path(args.phase6_contract),
+            "selection_path": Path(args.selection),
+            "virginity_attestation_path": Path(args.virginity_attestation),
+            "virginity_evidence_path": Path(args.virginity_evidence),
+        }
 
     if args.command == "verify-acquisition-authorization":
-        auth = load_acquisition_authorization(**common)
+        auth = load_acquisition_authorization(**common())
         print(json.dumps({
             "status": auth.status,
             "authorization_id": auth.authorization_id,
@@ -105,7 +106,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "preflight-final-holdout":
-        result = preflight_acquisition(host=args.host, port=args.port, **common)
+        result = preflight_acquisition(host=args.host, port=args.port, **common())
         print(json.dumps(result, sort_keys=True, separators=(",", ":")))
         return 0
 
@@ -115,7 +116,7 @@ def main(argv: list[str] | None = None) -> int:
             private_output_dir=Path(args.private_output_dir),
             host=args.host,
             port=args.port,
-            **common,
+            **common(),
         )
         value = json.loads(receipt.read_text(encoding="utf-8"))
         print(json.dumps({
