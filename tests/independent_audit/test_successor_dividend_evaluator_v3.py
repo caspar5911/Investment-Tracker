@@ -3,19 +3,30 @@ from __future__ import annotations
 import json
 
 import pandas as pd
+import pytest
+
+from investment_tracker.quant.successor.dividend_reconciliation_v3 import (
+    DividendReconciliationError,
+)
 
 from investment_tracker.independent_audit.successor.evaluate_dividend_v3 import (
     _corporate_actions,
 )
 
 
-def _entries(statement: str) -> dict[str, bytes]:
+def _entries(
+    statement: str,
+    *,
+    ordinary: float = 0.25,
+    special: float = 0.10,
+    include_endpoint: bool = True,
+) -> dict[str, bytes]:
     rehab = pd.DataFrame(
         [
             {
                 "ex_div_date": "2024-06-03",
-                "per_cash_div": 0.25,
-                "special_dividend": 0.10,
+                "per_cash_div": ordinary,
+                "special_dividend": special,
                 "split_ratio": 1.0,
                 "per_share_div_ratio": 0.0,
                 "per_share_trans_ratio": 0.0,
@@ -31,13 +42,17 @@ def _entries(statement: str) -> dict[str, bytes]:
         ).encode("utf-8"),
         "corporate_actions/dividends/SYN.json": json.dumps(
             {
-                "dividend_list": [
-                    {
-                        "ex_date": "2024-06-03",
-                        "dividend_payable_date": "2024-06-10",
-                        "statement": statement,
-                    }
-                ]
+                "dividend_list": (
+                    [
+                        {
+                            "ex_date": "2024-06-03",
+                            "dividend_payable_date": "2024-06-10",
+                            "statement": statement,
+                        }
+                    ]
+                    if include_endpoint
+                    else []
+                )
             },
             sort_keys=True,
             separators=(",", ":"),
@@ -73,3 +88,32 @@ def test_free_text_numbers_are_not_treated_as_amount_authority() -> None:
         scored,
     )
     assert [event.amount_per_unit for event in dividends] == [0.25, 0.10]
+
+
+@pytest.mark.parametrize(
+    ("ordinary", "special", "include_endpoint"),
+    [
+        (-1.0, 2.0, True),
+        (-1.0, 0.0, False),
+    ],
+)
+def test_negative_rehab_cash_fails_before_positive_component_filtering(
+    ordinary: float,
+    special: float,
+    include_endpoint: bool,
+) -> None:
+    scored = pd.DatetimeIndex([pd.Timestamp("2024-06-03", tz="UTC")])
+    with pytest.raises(
+        DividendReconciliationError,
+        match="SUCCESSOR_DIVIDEND_STRUCTURED_AMOUNT_INVALID",
+    ):
+        _corporate_actions(
+            _entries(
+                "Synthetic distribution plan",
+                ordinary=ordinary,
+                special=special,
+                include_endpoint=include_endpoint,
+            ),
+            "SYN",
+            scored,
+        )
