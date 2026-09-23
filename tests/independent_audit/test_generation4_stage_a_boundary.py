@@ -28,6 +28,7 @@ SPLIT_NORMALIZER = ROOT / "src/investment_tracker/quant/successor/corporate_acti
 DIVIDEND_RECONCILIATION = ROOT / "src/investment_tracker/quant/successor/dividend_reconciliation_v3.py"
 EVALUATOR = ROOT / "src/investment_tracker/independent_audit/successor/evaluate_dividend_v3.py"
 REGISTRY = ROOT / "data/governance/holdout-exclusion-registry.json"
+FROZEN_SELECTION_CONTRACT = ROOT / "data/generation4/preaccess/holdout-selection-contract.json"
 
 
 def _sha(path: Path) -> str:
@@ -83,6 +84,21 @@ def test_generation4_selection_contract_binds_dividend_v3() -> None:
     assert contract["successor_evaluator_sha256"] == auth.successor_evaluator_sha256
     assert contract["governance"]["protected_history_access_authorized"] is False
     assert contract["selection_rules"]["manual_substitution_allowed"] is False
+
+
+def test_frozen_generation4_selection_contract_equals_derived_contract() -> None:
+    derived = build_holdout_selection_contract(
+        authorization_path=AUTH,
+        predecessor_closure_path=CLOSURE,
+        split_contract_path=SPLIT_CONTRACT,
+        dividend_contract_path=DIVIDEND_CONTRACT,
+        split_normalizer_path=SPLIT_NORMALIZER,
+        dividend_reconciliation_path=DIVIDEND_RECONCILIATION,
+        successor_evaluator_path=EVALUATOR,
+        holdout_exclusion_registry_path=REGISTRY,
+    )
+    frozen = json.loads(FROZEN_SELECTION_CONTRACT.read_text(encoding="utf-8"))
+    assert frozen == derived
 
 
 def test_generation4_stage_a_cli_exposes_no_acquisition_commands() -> None:
