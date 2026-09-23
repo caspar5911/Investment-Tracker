@@ -39,8 +39,18 @@
     "ordinary_cash_nonnegative_finite": true,
     "special_cash_nonnegative_finite": true,
     "total_cash_must_be_positive_for_cash_event": true,
-    "sdk_special_dividend_mapping_must_be_independently_validated_before_authorization": true,
-    "missing_required_structured_amount_result": "UNKNOWN_ABSTAIN"
+    "sdk_special_dividend_mapping_must_be_independently_validated_before_authorization": false,
+    "missing_required_structured_amount_result": "UNKNOWN_ABSTAIN",
+    "sdk_mapping_verified": true,
+    "sdk_mapping_evidence": {
+      "repository": "MoomooOpen/py-moomoo-api",
+      "source_path": "moomoo/quote/quote_query.py",
+      "source_commit": "dfb09498bdd34bdeb37c12b3cfec6d55908450d9",
+      "mapping": {
+        "per_cash_div": "rehab.dividend",
+        "special_dividend": "rehab.spDividend"
+      }
+    }
   },
   "endpoint_reconciliation": {
     "matching_key": "EX_DATE",
@@ -85,7 +95,8 @@
     "provider_docs": [
       "https://openapi.moomoo.com/moomoo-api-doc/en/quote/get-corporate-actions-dividends.html",
       "https://openapi.moomoo.com/moomoo-api-doc/en/quote/get-rehab.html",
-      "https://openapi.moomoo.com/moomoo-api-doc/en/quote/quote.html"
+      "https://openapi.moomoo.com/moomoo-api-doc/en/quote/quote.html",
+      "https://github.com/MoomooOpen/py-moomoo-api/blob/dfb09498bdd34bdeb37c12b3cfec6d55908450d9/moomoo/quote/quote_query.py"
     ]
   }
 }
