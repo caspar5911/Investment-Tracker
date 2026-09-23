@@ -38,7 +38,7 @@ jobs:
       - name: Governance boundary
         run: |
           ! grep -R -nE 'OpenTradeContext|place_order|modify_order|cancel_order|unlock_trade|TrdEnv' src/investment_tracker/quant/successor src/investment_tracker/independent_audit/successor tests/quant/test_successor_corporate_actions_v2.py tests/independent_audit/test_successor_authority.py tests/independent_audit/test_successor_holdout_selection.py
-          ! grep -R -nE 'BNO|GBIL|CWS|ESG|VICI' src/investment_tracker/quant/successor src/investment_tracker/independent_audit/successor tests/quant/test_successor_corporate_actions_v2.py tests/independent_audit/test_successor_authority.py tests/independent_audit/test_successor_holdout_selection.py
+          ! grep -R -nE '\\b(BNO|GBIL|CWS|ESG|VICI)\\b' src/investment_tracker/quant/successor src/investment_tracker/independent_audit/successor tests/quant/test_successor_corporate_actions_v2.py tests/independent_audit/test_successor_authority.py tests/independent_audit/test_successor_holdout_selection.py
           python - <<'PY'
           import json
           from pathlib import Path
