@@ -132,6 +132,7 @@ def load_methodology_authorization(
         closure.get("status") != PREDECESSOR_STATUS
         or closure.get("one_time_semantics", {}).get("holdout_consumed") is not True
         or closure.get("one_time_semantics", {}).get("retry_authorized") is not False
+        or closure.get("one_time_semantics", {}).get("symbol_substitution_authorized") is not False
         or closure.get("phase7", {}).get("authorized") is not False
         or closure.get("recon009_status") != "OPEN"
     ):
