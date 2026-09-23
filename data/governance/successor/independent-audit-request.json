@@ -1,0 +1,36 @@
+{
+  "schema_version": "SUCCESSOR-INDEPENDENT-AUDIT-REQUEST-v2",
+  "status": "DRAFT_NOT_APPROVED",
+  "authority_granted": false,
+  "predecessor_closure_commit": "f875167f3e758ab3391ff2f961aa740f231568e5",
+  "predecessor_phase6_status": "PHASE6_UNKNOWN_ABSTAIN",
+  "successor_contract": "CORPORATE-ACTION-NORMALIZATION-CONTRACT-v2",
+  "successor_contract_status": "PROPOSED_AWAITING_INDEPENDENT_AUDIT",
+  "decisions_requested": [
+    "APPROVE_OR_REJECT_SUCCESSOR_CORPORATE_ACTION_METHODOLOGY",
+    "DECIDE_GENERATION3_OR_OTHER_FORMAL_SUCCESSOR_NAME",
+    "ISSUE_OR_REJECT_STAGE_A_METHODOLOGY_AND_BLIND_SELECTION_AUTHORIZATION",
+    "ISSUE_OR_REJECT_STAGE_B_ONE_TIME_ACQUISITION_AND_EVALUATION_AUTHORIZATION"
+  ],
+  "protected_history_access_authorized": false,
+  "phase7_authorized": false,
+  "production_readiness_approved": false,
+  "recon009_status": "OPEN",
+  "authorization_model": {
+    "stage_a": {
+      "artifact_schema": "SUCCESSOR-PHASE6-METHODOLOGY-AUTHORIZATION-v1",
+      "template": "data/governance/successor/successor-methodology-authorization.template.json",
+      "protected_history_access_authorized": false
+    },
+    "stage_b": {
+      "artifact_schema": "SUCCESSOR-PHASE6-ACQUISITION-AUTHORIZATION-v1",
+      "template": "data/governance/successor/successor-acquisition-authorization.template.json",
+      "prerequisite": "STAGE_A_SELECTION_VIRGINITY_AND_PHASE6_CONTRACT_FROZEN",
+      "one_time_acquisition": true,
+      "one_time_evaluation_after_verified_release": true,
+      "retry_after_historical_access_allowed": false
+    }
+  },
+  "real_methodology_authorization_present": false,
+  "real_acquisition_authorization_present": false
+}

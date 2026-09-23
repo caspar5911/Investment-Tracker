@@ -185,7 +185,7 @@ def test_current_frozen_inputs_verify_against_registry_and_survivor_identity():
     contract, contract_sha, exclusions = hs._verify_frozen_inputs(
         contract_path=Path("data/governance/generation2-holdout-selection-contract.json"),
         identity_root=Path("data/governance/generation2-campaign"),
-        registry_path=Path("data/governance/holdout-exclusion-registry.json"),
+        registry_path=Path("data/governance/generation2-holdout-exclusion-registry-frozen.json"),
     )
     assert contract["holdout_exclusion_registry_sha256"] == hs.FROZEN_REGISTRY_SHA256
     assert len(exclusions) == 18
