@@ -32,6 +32,8 @@ ACQUISITION_AUTHORITY = ROOT / "src/investment_tracker/independent_audit/success
 ACQUISITION = ROOT / "src/investment_tracker/independent_audit/successor/acquisition.py"
 RELEASE = ROOT / "src/investment_tracker/independent_audit/successor/release.py"
 CLOSURE = ROOT / "src/investment_tracker/independent_audit/successor/closure.py"
+VIRGINITY = ROOT / "src/investment_tracker/independent_audit/successor/virginity.py"
+STAGE_B_CLI = ROOT / "src/investment_tracker/independent_audit/post_generation3/stage_b_cli.py"
 
 
 def _sha(path: Path) -> str:
@@ -63,6 +65,8 @@ def _payload() -> dict:
         "acquisition_implementation_sha256": _sha(ACQUISITION),
         "release_implementation_sha256": _sha(RELEASE),
         "closure_implementation_sha256": _sha(CLOSURE),
+        "virginity_verifier_implementation_sha256": _sha(VIRGINITY),
+        "stage_b_cli_implementation_sha256": _sha(STAGE_B_CLI),
         "phase6_contract_sha256": _sha(CONTRACT),
         "selection_sha256": _sha(SELECTION),
         "virginity_attestation_sha256": _sha(ATTESTATION),
@@ -146,6 +150,8 @@ def test_valid_synthetic_generation4_stage_b_authorization_binds_full_runtime(
         "acquisition_implementation_sha256",
         "release_implementation_sha256",
         "closure_implementation_sha256",
+        "virginity_verifier_implementation_sha256",
+        "stage_b_cli_implementation_sha256",
         "dividend_reconciliation_sha256",
         "successor_evaluator_sha256",
         "phase6_contract_sha256",
