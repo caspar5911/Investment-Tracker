@@ -18,7 +18,7 @@ from investment_tracker.independent_audit.successor.selection_contract import (
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACT = ROOT / "data/governance/successor/corporate-action-normalization-v2.json"
-REGISTRY = ROOT / "data/governance/holdout-exclusion-registry.json"
+REGISTRY = ROOT / "data/governance/generation3-holdout-exclusion-registry-frozen.json"
 CLOSURE = ROOT / "data/generation2/phase6/phase6-final-holdout-closure.json"
 TEMPLATE = ROOT / "data/governance/successor/successor-methodology-authorization.template.json"
 NORMALIZER = ROOT / "src/investment_tracker/quant/successor/corporate_actions_v2.py"
