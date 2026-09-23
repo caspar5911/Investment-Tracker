@@ -8,6 +8,7 @@ from investment_tracker.quant.successor.dividend_reconciliation_v3 import (
     DIVIDEND_RECONCILIATION_SCHEMA,
     DividendReconciliationError,
     reconcile_structured_dividend_amounts,
+    validate_structured_dividend_components,
 )
 
 
@@ -97,4 +98,20 @@ def test_blank_statement_fails_closed() -> None:
             [{"statement": "   "}],
             rehab_ordinary_amount=0.2,
             rehab_special_amount=0.0,
+        )
+
+
+def test_raw_component_validation_allows_zero_zero_but_rejects_negative() -> None:
+    assert validate_structured_dividend_components(
+        rehab_ordinary_amount=0.0,
+        rehab_special_amount=0.0,
+    ) == (0.0, 0.0)
+
+    with pytest.raises(
+        DividendReconciliationError,
+        match="SUCCESSOR_DIVIDEND_STRUCTURED_AMOUNT_INVALID",
+    ):
+        validate_structured_dividend_components(
+            rehab_ordinary_amount=-1.0,
+            rehab_special_amount=2.0,
         )
