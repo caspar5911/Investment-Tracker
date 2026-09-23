@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import investment_tracker.independent_audit.successor.acquisition_authority as acquisition_authority_module
 from investment_tracker.independent_audit.successor.acquisition_authority import (
     SCHEMA_V2,
     STATUS,
@@ -165,6 +166,42 @@ def test_generation4_stage_b_tamper_fails_closed(tmp_path: Path, field: str) -> 
     payload[field] = "0" * 64
     with pytest.raises(SuccessorAcquisitionAuthorityError):
         _load(_write(tmp_path / "auth.json", payload))
+
+
+@pytest.mark.parametrize(
+    ("filename", "error"),
+    [
+        (
+            "corporate_actions_v2.py",
+            "SUCCESSOR_SPLIT_NORMALIZER_SOURCE_IDENTITY_MISMATCH",
+        ),
+        (
+            "dividend_reconciliation_v3.py",
+            "SUCCESSOR_DIVIDEND_RECONCILIATION_SOURCE_IDENTITY_MISMATCH",
+        ),
+        (
+            "evaluate_dividend_v3.py",
+            "SUCCESSOR_EVALUATOR_SOURCE_IDENTITY_MISMATCH",
+        ),
+    ],
+)
+def test_generation4_stage_b_methodology_source_drift_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    filename: str,
+    error: str,
+) -> None:
+    authorization = _write(tmp_path / "auth.json", _payload())
+    original_sha = acquisition_authority_module._sha
+
+    def drifted_sha(path: Path) -> str:
+        if Path(path).name == filename:
+            return "0" * 64
+        return original_sha(path)
+
+    monkeypatch.setattr(acquisition_authority_module, "_sha", drifted_sha)
+    with pytest.raises(SuccessorAcquisitionAuthorityError, match=error):
+        _load(authorization)
 
 
 def test_stage_b_cli_uses_corrected_evaluator_not_legacy_evaluator() -> None:

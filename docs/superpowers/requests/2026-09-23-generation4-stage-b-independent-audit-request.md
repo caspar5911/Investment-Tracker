@@ -88,6 +88,7 @@ Tests:
    - virginity attestation;
    - virginity evidence;
    - exact locked symbols.
+   - Verify the loader recomputes the current repository SHA-256 for the split normalizer, dividend reconciliation, and corrected evaluator and fails closed on any drift before acquisition.
 10. Verify preflight calls only non-consuming SDK capability/quota checks and selected-symbol virginity recheck.
 11. Verify the durable acquisition-start marker is created before first historical provider read and read back successfully.
 12. Verify historical access is marked true before the first history/corporate-action read.

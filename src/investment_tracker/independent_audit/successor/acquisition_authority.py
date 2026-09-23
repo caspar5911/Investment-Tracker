@@ -157,6 +157,30 @@ def load_acquisition_authorization(
         stage_b_cli_impl = (
             Path(__file__).resolve().parents[1] / "post_generation3" / "stage_b_cli.py"
         )
+        investment_tracker_root = Path(__file__).resolve().parents[2]
+        split_normalizer_impl = (
+            investment_tracker_root / "quant" / "successor" / "corporate_actions_v2.py"
+        )
+        dividend_reconciliation_impl = (
+            investment_tracker_root
+            / "quant"
+            / "successor"
+            / "dividend_reconciliation_v3.py"
+        )
+        evaluator_impl = Path(__file__).with_name("evaluate_dividend_v3.py")
+
+        if auth.split_normalizer_sha256 != _sha(split_normalizer_impl):
+            raise SuccessorAcquisitionAuthorityError(
+                "SUCCESSOR_SPLIT_NORMALIZER_SOURCE_IDENTITY_MISMATCH"
+            )
+        if auth.dividend_reconciliation_sha256 != _sha(dividend_reconciliation_impl):
+            raise SuccessorAcquisitionAuthorityError(
+                "SUCCESSOR_DIVIDEND_RECONCILIATION_SOURCE_IDENTITY_MISMATCH"
+            )
+        if auth.successor_evaluator_sha256 != _sha(evaluator_impl):
+            raise SuccessorAcquisitionAuthorityError(
+                "SUCCESSOR_EVALUATOR_SOURCE_IDENTITY_MISMATCH"
+            )
         if auth.phase6_verifier_implementation_sha256 != _sha(verifier_impl):
             raise SuccessorAcquisitionAuthorityError(
                 "SUCCESSOR_PHASE6_VERIFIER_IMPLEMENTATION_IDENTITY_MISMATCH"
