@@ -13,6 +13,9 @@ on:
       - "tests/independent_audit/test_successor_dividend_evaluator_v3.py"
       - "data/governance/successor/dividend-reconciliation-v3.json"
       - "data/governance/holdout-exclusion-registry.json"
+      - "src/investment_tracker/independent_audit/post_generation3/**"
+      - "tests/independent_audit/test_post_generation3_authority.py"
+      - "data/governance/successor/post-generation3-methodology-authorization.template.json"
       - ".github/workflows/successor-dividend-normalization-v3.yml"
   pull_request:
     paths:
@@ -22,6 +25,9 @@ on:
       - "tests/independent_audit/test_successor_dividend_evaluator_v3.py"
       - "data/governance/successor/dividend-reconciliation-v3.json"
       - "data/governance/holdout-exclusion-registry.json"
+      - "src/investment_tracker/independent_audit/post_generation3/**"
+      - "tests/independent_audit/test_post_generation3_authority.py"
+      - "data/governance/successor/post-generation3-methodology-authorization.template.json"
       - ".github/workflows/successor-dividend-normalization-v3.yml"
 
 jobs:
@@ -37,11 +43,13 @@ jobs:
 
       - name: Compile successor dividend code
         run: |
-          python -m compileall -q             src/investment_tracker/quant/successor/dividend_reconciliation_v3.py             src/investment_tracker/independent_audit/successor/evaluate_dividend_v3.py
+          python -m compileall -q             src/investment_tracker/quant/successor/dividend_reconciliation_v3.py             src/investment_tracker/independent_audit/successor/evaluate_dividend_v3.py \
+            src/investment_tracker/independent_audit/post_generation3/authority.py
 
       - name: Focused successor dividend regression tests
         run: |
-          python -m pytest -q             tests/quant/test_successor_corporate_actions_v2.py             tests/quant/test_successor_dividend_reconciliation_v3.py             tests/independent_audit/test_successor_dividend_evaluator_v3.py
+          python -m pytest -q             tests/quant/test_successor_corporate_actions_v2.py             tests/quant/test_successor_dividend_reconciliation_v3.py             tests/independent_audit/test_successor_dividend_evaluator_v3.py \
+            tests/independent_audit/test_post_generation3_authority.py
 
       - name: Governance boundary
         shell: bash
