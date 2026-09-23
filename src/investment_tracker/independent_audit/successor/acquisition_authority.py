@@ -100,6 +100,11 @@ class SuccessorAcquisitionAuthorizationV2(BaseModel):
     recon009_status: Literal["OPEN"]
     paper_only: Literal[True]
 
+    @property
+    def successor_normalizer_sha256(self) -> str:
+        """Legacy runtime alias for the Stage-A audited split normalizer."""
+        return self.split_normalizer_sha256
+
 
 def _sha(path: Path) -> str:
     return sha256(Path(path).read_bytes()).hexdigest()
