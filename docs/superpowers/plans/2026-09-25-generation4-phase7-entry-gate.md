@@ -21,6 +21,8 @@
 - Candidate, binding, implementation, holdout ID, release ID, and ordered symbols must match the frozen Generation-4 contract and every downstream field that carries them.
 - `paper_only=true` is authoritative only through the frozen Phase-6 contract and Generation-4 acquisition authorization; do not demand that field from downstream schemas that do not define it.
 - `dividend_reconciliation_sha256` is authoritative through the exact Phase-6 contract/acquisition-authorization binding; downstream artifacts are checked only for `successor_normalizer_sha256` and `successor_evaluator_sha256` where present.
+- Readiness must calculate `acquisition_authorization_sha256` from the validated acquisition-authorization file bytes and report it with the other six evidence hashes.
+- Before authorization, closure bytes are terminal and unbound: readiness validates closure schema, identities, governance, and internal hashes, then reports the actual closure SHA-256. After request/authorization binding, any closure byte drift is an authorization mismatch.
 - Missing or malformed evidence fails closed; Phase 7 must remain not started, production readiness false, live trading unauthorized, and `RECON-009=OPEN`.
 - Coordinator code may load an Independent Audit authorization but must expose no function or command that creates, seals, signs, or writes one.
 - No real Phase-7 authorization artifact may be created during implementation or audit-request preparation.
@@ -37,7 +39,9 @@
 | Pre-audit Phase-7 authority false | `test_readiness_rejects_preexisting_phase7_authority` across applicable layers |
 | Candidate/binding/implementation exact | `test_readiness_rejects_strategy_identity_drift` parameterized by field and artifact |
 | Ordered locked symbols exact | `test_readiness_rejects_locked_symbol_drift` including order-only drift |
-| Receipt → release → result → marker → closure hash chain | `test_readiness_rejects_hash_chain_tamper` parameterized by each link |
+| Receipt → release → result → marker downstream hash chain | `test_readiness_rejects_hash_chain_tamper` parameterized by receipt, release, result, and marker |
+| Terminal closure semantic integrity before authorization | `test_readiness_rejects_closure_semantic_mutation` and `test_readiness_reports_semantically_equivalent_closure_bytes` |
+| Seven exact evidence hashes in later authorization | `test_authorization_rejects_binding_drift`, `test_authorization_rejects_acquisition_authorization_byte_drift`, and `test_authorization_rejects_closure_byte_drift` |
 | Retry forbidden | `test_readiness_rejects_retry_authority` across contract, authorization, receipt, marker, and closure |
 | Symbol substitution forbidden | `test_readiness_rejects_symbol_substitution` across contract, authorization, result, and closure |
 | Holdout-dependent methodology/parameter changes forbidden | `test_readiness_rejects_result_dependent_change_authority` across result and closure |
@@ -52,7 +56,7 @@
 ## Review Focus
 
 - A downstream artifact omits an upstream-only governance field: accept the omission only where the frozen schema does not define the field, while still proving the property upstream.
-- A JSON file is valid but a byte changes: recompute hashes from bytes and reject every broken chain link.
+- A JSON byte representation changes: reject a broken downstream receipt/release/result/marker binding, but accept a semantically unchanged terminal closure during readiness, report its new digest, and reject it once a request/authorization binds the prior digest.
 - Symbols are equal as a set but reordered: reject because locked order is part of identity.
 - The authorization binds valid-looking hashes from a different readiness request or implementation commit: reject exact-binding drift.
 - A CLI error includes a nested result object: ensure performance keys and values are never serialized in success or failure output.
@@ -130,6 +134,13 @@ def test_readiness_accepts_dividend_binding_without_downstream_field(tmp_path: P
     for name in ("receipt", "release", "result"):
         assert "dividend_reconciliation_sha256" not in json.loads(paths[name].read_text(encoding="utf-8"))
 
+def test_readiness_reports_validated_acquisition_authorization_hash(tmp_path: Path):
+    paths = _valid_chain(tmp_path)
+    report = _readiness(paths)
+    assert report["acquisition_authorization_sha256"] == _sha(
+        paths["acquisition_authorization"]
+    )
+
 def test_readiness_rejects_dividend_contract_authorization_mismatch(tmp_path: Path):
     paths = _valid_chain(tmp_path)
     contract = json.loads(paths["contract"].read_text(encoding="utf-8"))
@@ -172,23 +183,24 @@ Implementation order inside the function:
 
 1. verify the v2 Generation-4 contract and exact frozen candidate, strategy, ordered symbols, governance booleans, and all three methodology identities;
 2. load the v2 acquisition authorization against that contract and assert `paper_only is True` and exact three-way methodology equality;
-3. call the existing receipt and release loaders;
-4. load result, marker, and closure as dictionaries;
-5. verify only `successor_normalizer_sha256` and `successor_evaluator_sha256` in downstream schemas that contain them;
-6. verify the marker through contract/release/result identities rather than methodology fields;
-7. return only identities, file hashes, and governance state—never metrics.
+3. only after the strict loader succeeds, calculate `acquisition_authorization_sha256` from the actual authorization file bytes and retain it for the readiness report;
+4. call the existing receipt and release loaders;
+5. load result, marker, and closure as dictionaries;
+6. verify only `successor_normalizer_sha256` and `successor_evaluator_sha256` in downstream schemas that contain them;
+7. verify the marker through contract/release/result identities rather than methodology fields;
+8. return only identities, all seven artifact hashes, and governance state—never metrics.
 
 Catch `OSError`, `json.JSONDecodeError`, `ValueError`, and `SuccessorAcquisitionAuthorityError` at the appropriate boundary and map them to the stable Generation-4 error codes without treating any exception as readiness.
 
-- [ ] **Step 4: Run the three tests and confirm GREEN**
+- [ ] **Step 4: Run the four tests and confirm GREEN**
 
 Run:
 
 ```powershell
-python -m pytest -q tests/independent_audit/test_generation4_phase7_entry.py -k "upstream_paper_only or dividend_binding or dividend_contract_authorization_mismatch"
+python -m pytest -q tests/independent_audit/test_generation4_phase7_entry.py -k "upstream_paper_only or dividend_binding or validated_acquisition_authorization_hash or dividend_contract_authorization_mismatch"
 ```
 
-Expected: 3 passed.
+Expected: 4 passed.
 
 - [ ] **Step 5: Commit the first readiness slice**
 
@@ -206,7 +218,7 @@ git commit -m "feat: verify Generation 4 Phase 7 readiness evidence"
 
 **Interfaces:**
 - Consumes: `_valid_chain`, `_readiness`, and `verify_generation4_phase7_readiness` from Task 1.
-- Produces: complete readiness enforcement for all 14 user requirements and the full receipt → release → result → marker → closure chain.
+- Produces: complete readiness enforcement for all 14 user requirements, the receipt → release → result → marker downstream hash chain, and terminal closure semantic/internal-hash validation plus reported closure SHA-256.
 
 - [ ] **Step 1: Write the complete RED governance matrix**
 
@@ -222,7 +234,9 @@ Add individually named or parameterized tests using this exact case matrix:
 | `test_readiness_rejects_preexisting_phase7_authority` | contract, acquisition authorization, release, result, and closure authority `false→true` | governance or upstream identity failure |
 | `test_readiness_rejects_strategy_identity_drift` | candidate, binding, and implementation fields, one artifact at a time | `GEN4_PHASE7_IDENTITY_MISMATCH` |
 | `test_readiness_rejects_locked_symbol_drift` | replacement and order-only swap | `GEN4_PHASE7_IDENTITY_MISMATCH` |
-| `test_readiness_rejects_hash_chain_tamper` | one byte in receipt, release, result, marker, and closure | `GEN4_PHASE7_CHAIN_MISMATCH` |
+| `test_readiness_rejects_hash_chain_tamper` | irrelevant byte representation change in receipt, release, result, and marker | `GEN4_PHASE7_CHAIN_MISMATCH` |
+| `test_readiness_rejects_closure_semantic_mutation` | closure schema, candidate, governance flag, and internal evidence hash | evidence, identity, governance, or chain failure matching the mutated field |
+| `test_readiness_reports_semantically_equivalent_closure_bytes` | rewrite closure with indentation but unchanged parsed content | readiness succeeds and reports the new actual `phase6_closure_sha256` |
 | `test_readiness_rejects_retry_authority` | contract, acquisition authorization, receipt, marker, and closure retry field | governance or upstream identity failure |
 | `test_readiness_rejects_symbol_substitution` | contract, acquisition authorization, result, and closure substitution field | governance or upstream identity failure |
 | `test_readiness_rejects_result_dependent_change_authority` | result candidate-search/parameter flags; closure methodology/parameter flags | `GEN4_PHASE7_GOVERNANCE_MISMATCH` |
@@ -243,7 +257,18 @@ def test_readiness_rejects_unconsumed_result(tmp_path: Path):
     assert excinfo.value.code == GEN4_PHASE7_GOVERNANCE_MISMATCH
 ```
 
-Mutation helpers must repair upstream hashes only when the test is targeting a semantic mismatch rather than a hash mismatch. Hash-chain tests must change raw bytes without repairing downstream hashes so the expected failure is specifically `GEN4_PHASE7_CHAIN_MISMATCH`.
+Mutation helpers must repair upstream hashes only when the test is targeting a
+semantic mismatch rather than a hash mismatch. Receipt, release, result, and
+marker byte-chain tests must change irrelevant raw JSON representation without
+repairing downstream hashes so the expected failure is specifically
+`GEN4_PHASE7_CHAIN_MISMATCH`. Do not include closure in that parameterization:
+no earlier Phase-6 artifact stores the closure file hash.
+
+For `test_readiness_reports_semantically_equivalent_closure_bytes`, record the
+original closure digest, rewrite the same parsed dictionary with indentation,
+run readiness successfully, and assert the reported closure digest equals the
+new file hash and differs from the original. Closure semantic mutations remain
+fail-closed readiness tests.
 
 - [ ] **Step 2: Run the matrix and confirm RED**
 
@@ -277,7 +302,14 @@ the verified dictionary/model it owns, compares every field listed in the
 specification, and calls `_require_equal`, `_require_false`, or `_require_true`
 so errors cannot silently fall through.
 
-Use exact identity equality and list equality. Never convert locked symbols to sets. Require closure hash fields to equal hashes recomputed from actual files. Require result and closure pre-audit authority/start state to remain false, and require all retry/substitution/change flags in the schemas that carry them.
+Use exact identity equality and list equality. Never convert locked symbols to
+sets. Require the closure's internal hash fields to equal hashes recomputed from
+the contract, receipt, release, result, and marker. Fully validate closure
+schema, identity, governance, and internal hashes, then compute the terminal
+closure file SHA-256 for the readiness report without requiring a nonexistent
+pre-authorization upstream closure binding. Require result and closure
+pre-audit authority/start state to remain false, and require all
+retry/substitution/change flags in the schemas that carry them.
 
 - [ ] **Step 4: Run focused and adjacent suites and confirm GREEN**
 
@@ -311,8 +343,11 @@ git commit -m "test: enforce Generation 4 Phase 7 governance chain"
 
 Add helpers named `_audit_request` and `_authorization`; they accept the
 temporary directory and readiness report, while `_authorization` also accepts
-the request path and an optional overrides dictionary. Add this concrete first
-test:
+the request path and an optional overrides dictionary. Both helpers copy the
+same seven evidence hashes from readiness, including
+`acquisition_authorization_sha256` and `phase6_closure_sha256`, so drift tests
+can change either the bound field or the underlying file independently. Add
+this concrete first test:
 
 ```python
 def test_entry_rejects_missing_authorization(tmp_path: Path):
@@ -326,6 +361,8 @@ def test_entry_rejects_missing_authorization(tmp_path: Path):
 Complete the RED set with `test_entry_rejects_template`,
 `test_authorization_rejects_unknown_field`,
 `test_authorization_rejects_binding_drift`,
+`test_authorization_rejects_acquisition_authorization_byte_drift`,
+`test_authorization_rejects_closure_byte_drift`,
 `test_authorization_rejects_production_or_live_trading_authority`,
 `test_entry_accepts_exact_independent_authorization`,
 `test_allowed_report_remains_nonproduction`, and
@@ -333,10 +370,19 @@ Complete the RED set with `test_entry_rejects_template`,
 
 Parameterize binding drift over implementation commit, request hash, gate hash,
 CLI hash, candidate, binding, strategy implementation, all three methodology
-hashes, ordered symbols, holdout/release IDs, and all six evidence hashes.
+hashes, ordered symbols, holdout/release IDs, and these seven evidence hashes:
+Phase-6 contract, Generation-4 acquisition authorization, acquisition receipt,
+release, evaluation result, consumption marker, and Phase-6 closure.
 Every case must assert `GEN4_PHASE7_AUTHORIZATION_INVALID` for schema/literal
 violations or `GEN4_PHASE7_AUTHORIZATION_MISMATCH` for valid-shaped but
 incorrect bindings.
+
+For the two byte-drift tests, first build readiness, request, and authorization
+from the original files. Then rewrite either the acquisition authorization or
+closure with indentation but identical parsed content. The fresh readiness
+must still validate the artifact semantics and report its new digest; entry
+evaluation must fail with `GEN4_PHASE7_AUTHORIZATION_MISMATCH` because the
+Independent Audit binding retains the original digest.
 
 The synthetic authorization may be built in test memory and written to `tmp_path`; it is not repository governance evidence. The template rejection test uses a synthetic `DRAFT_TEMPLATE_NOT_AUTHORIZATION` payload until the real non-authorizing template is added after the implementation freeze.
 
@@ -379,6 +425,7 @@ class Generation4Phase7Authorization(BaseModel):
     holdout_id: str = Field(min_length=1)
     release_id: str = Field(min_length=1)
     phase6_contract_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    acquisition_authorization_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     acquisition_receipt_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     release_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     evaluation_result_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -407,7 +454,16 @@ Implement `load_generation4_phase7_authorization` with keyword-only
 optional source paths defaulting to the module and sibling CLI, and the same
 ten explicit readiness paths used by the readiness verifier.
 
-The loader must parse an exact audit-request schema with `authority_granted=false` and `phase7_authorized=false`, recompute its file hash, recompute the gate and CLI source hashes, and compare every authorization binding to the fresh readiness report. It must never write the authorization. The final report must keep `phase7_started=false`, production/live trading false, `RECON-009=OPEN`, and paper-only true.
+The loader must parse an exact audit-request schema with
+`authority_granted=false` and `phase7_authorized=false`, recompute its file
+hash, recompute the gate and CLI source hashes, and compare every authorization
+binding to the fresh readiness report. Its evidence comparison must include
+all seven hashes and therefore explicitly compare
+`acquisition_authorization_sha256` and `phase6_closure_sha256`. It must never
+write the authorization. The final allowed-entry report must emit all seven
+evidence hashes, including `acquisition_authorization_sha256`, while keeping
+`phase7_started=false`, production/live trading false, `RECON-009=OPEN`, and
+paper-only true.
 
 - [ ] **Step 4: Run the complete test module and confirm GREEN**
 
@@ -558,7 +614,11 @@ Use only the contract, acquisition authorization, selection/virginity JSON, rece
 python -m investment_tracker.independent_audit.post_generation3.phase7_entry_cli verify-readiness --phase6-contract data/generation4/phase6/evaluation-contract.json --acquisition-authorization data/governance/successor/generation4-acquisition-authorization.json --selection data/generation4/preaccess/holdout-selection.json --virginity-attestation data/generation4/preaccess/virginity-attestation.json --virginity-evidence data/generation4/preaccess/virginity-evidence.json --acquisition-receipt "C:\Users\Caspar\Desktop\Investment-Tracker-Private\generation4\successor-phase6-holdout-e6aa1f4e9f04b2e905df7cc828c65669.receipt.json" --release "C:\Users\Caspar\Desktop\Investment-Tracker-Private\generation4\successor-phase6-holdout-e6aa1f4e9f04b2e905df7cc828c65669.release.json" --phase6-result "C:\Users\Caspar\Desktop\Investment-Tracker-Private\generation4\successor-phase6-holdout-e6aa1f4e9f04b2e905df7cc828c65669.phase6-result.json" --consumption-marker "C:\Users\Caspar\Desktop\Investment-Tracker-Private\generation4\evaluation-markers\successor-phase6-release-934966d25eef0b2bfb4b5de289539a05.consumed.json" --phase6-closure "C:\Users\Caspar\Desktop\Investment-Tracker-Private\generation4\successor-phase6-holdout-e6aa1f4e9f04b2e905df7cc828c65669.phase6-closure.json"
 ```
 
-Expected: `GENERATION4_PHASE7_READY_FOR_INDEPENDENT_AUDIT`, `authority_granted=false`, `phase7_authorized=false`, production/live trading false, `RECON-009=OPEN`, and no metrics in output.
+Expected: `GENERATION4_PHASE7_READY_FOR_INDEPENDENT_AUDIT`, all seven
+artifact hashes including the actual SHA-256 of
+`data/governance/successor/generation4-acquisition-authorization.json`,
+`authority_granted=false`, `phase7_authorized=false`, production/live trading
+false, `RECON-009=OPEN`, and no metrics in output.
 
 - [ ] **Step 4: Prove the real repository remains forbidden without authorization**
 
@@ -590,6 +650,9 @@ The request assertion core is:
 request = json.loads(REQUEST.read_text(encoding="utf-8"))
 assert request["schema_version"] == "GENERATION4-PHASE7-ENTRY-INDEPENDENT-AUDIT-REQUEST-v1"
 assert request["status"] == "READY_FOR_INDEPENDENT_AUDIT"
+assert request["acquisition_authorization_sha256"] == _sha(
+    ACQUISITION_AUTHORIZATION
+)
 assert request["authority_granted"] is False
 assert request["phase7_authorized"] is False
 assert request["production_readiness_approved"] is False
@@ -598,7 +661,11 @@ assert request["recon009_status"] == "OPEN"
 assert request["paper_only"] is True
 ```
 
-The request test must assert the exact implementation commit from Task 4, actual gate/CLI hashes, actual evidence hashes from Task 5, `authority_granted=false`, `phase7_authorized=false`, `production_readiness_approved=false`, `live_trading_authorized=false`, `recon009_status="OPEN"`, and `paper_only=true`.
+The request test must assert the exact implementation commit from Task 4,
+actual gate/CLI hashes, all seven actual evidence hashes from Task 5,
+`authority_granted=false`, `phase7_authorized=false`,
+`production_readiness_approved=false`, `live_trading_authorized=false`,
+`recon009_status="OPEN"`, and `paper_only=true`.
 
 - [ ] **Step 2: Run the three tests and confirm RED**
 
@@ -622,11 +689,26 @@ Use `apply_patch`. The template must have:
 }
 ```
 
-The request must use schema `GENERATION4-PHASE7-ENTRY-INDEPENDENT-AUDIT-REQUEST-v1`, status `READY_FOR_INDEPENDENT_AUDIT`, and exact computed values—never placeholder strings—for the implementation commit, gate/CLI hashes, all three methodology hashes, ordered symbols, holdout/release IDs, and six evidence-file hashes. It must remain non-authorizing.
+The request must use schema
+`GENERATION4-PHASE7-ENTRY-INDEPENDENT-AUDIT-REQUEST-v1`, status
+`READY_FOR_INDEPENDENT_AUDIT`, and exact computed values—never placeholder
+strings—for the implementation commit, gate/CLI hashes, all three methodology
+hashes, ordered symbols, holdout/release IDs, and these seven evidence-file
+hashes: `phase6_contract_sha256`, `acquisition_authorization_sha256`,
+`acquisition_receipt_sha256`, `release_sha256`,
+`evaluation_result_sha256`, `evaluation_consumption_marker_sha256`, and
+`phase6_closure_sha256`. It must remain non-authorizing.
 
 - [ ] **Step 4: Create the Markdown audit request and exact auditor prompt**
 
-The Markdown request must state the reviewed implementation commit and source hashes; enumerate every evidence-chain and governance check from the specification; state that downstream schemas do not carry `paper_only` or direct dividend-v3 identity unless frozen fields exist; forbid bundle/key reads and all reruns; and instruct the auditor to either reject with exact blockers or create a separate authorization artifact matching the strict schema.
+The Markdown request must state the reviewed implementation commit and source
+hashes; enumerate all seven evidence hashes and every evidence-chain and
+governance check from the specification; distinguish terminal closure semantic
+validation during readiness from closure byte identity after authorization;
+state that downstream schemas do not carry `paper_only` or direct dividend-v3
+identity unless frozen fields exist; forbid bundle/key reads and all reruns;
+and instruct the auditor to either reject with exact blockers or create a
+separate authorization artifact matching the strict schema.
 
 End the document with a fenced prompt that can be copied verbatim. The prompt must identify the repository, branch, implementation commit, request path, template path, private JSON evidence paths, audit scope, forbidden actions, required tests, and exact authorized output path. It must explicitly say that the auditor—not the coordinator—owns any real authorization decision.
 
