@@ -529,6 +529,15 @@ def test_readiness_reports_semantically_equivalent_closure_bytes(tmp_path: Path)
     assert report["phase6_closure_sha256"] != original
 
 
+@pytest.mark.parametrize("artifact", ["receipt", "release", "result", "marker", "closure"])
+def test_readiness_rejects_missing_downstream_evidence(
+    tmp_path: Path, artifact: str
+):
+    paths = _valid_chain(tmp_path)
+    paths[artifact].unlink()
+    _expect_readiness_error(paths, GEN4_PHASE7_EVIDENCE_INVALID)
+
+
 @pytest.mark.parametrize(
     ("artifact", "mutation"),
     [

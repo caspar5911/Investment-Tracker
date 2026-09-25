@@ -690,10 +690,15 @@ def verify_generation4_phase7_readiness(
         )
     acquisition_authorization_sha256 = _sha(acquisition_authorization_path)
     contract_sha256 = _sha(phase6_contract_path)
-    receipt_sha256 = _sha(acquisition_receipt_path)
-    release_sha256 = _sha(release_path)
-    result_sha256 = _sha(phase6_result_path)
-    marker_sha256 = _sha(consumption_marker_path)
+    try:
+        receipt_sha256 = _sha(acquisition_receipt_path)
+        release_sha256 = _sha(release_path)
+        result_sha256 = _sha(phase6_result_path)
+        marker_sha256 = _sha(consumption_marker_path)
+    except OSError as exc:
+        raise Generation4Phase7EntryError(
+            GEN4_PHASE7_EVIDENCE_INVALID, "downstream_evidence"
+        ) from exc
 
     raw_receipt = _load_object(acquisition_receipt_path, detail="receipt")
     _verify_receipt(
