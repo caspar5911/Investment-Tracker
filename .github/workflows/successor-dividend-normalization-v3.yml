@@ -26,6 +26,7 @@ on:
       - "data/governance/successor/generation4-stage-b-independent-audit-request.json"
       - "docs/superpowers/requests/2026-09-23-generation4-stage-b-independent-audit-request.md"
       - "tests/independent_audit/test_generation4_stage_b_boundary.py"
+      - "tests/independent_audit/test_generation4_phase7_entry.py"
       - "data/generation4/preaccess/holdout-selection-contract.json"
       - "data/governance/successor/post-generation3-methodology-authorization.template.json"
       - "docs/superpowers/reports/2026-09-23-post-generation3-audit-rejection-remediation.md"
@@ -51,6 +52,7 @@ on:
       - "data/governance/successor/generation4-stage-b-independent-audit-request.json"
       - "docs/superpowers/requests/2026-09-23-generation4-stage-b-independent-audit-request.md"
       - "tests/independent_audit/test_generation4_stage_b_boundary.py"
+      - "tests/independent_audit/test_generation4_phase7_entry.py"
       - "data/generation4/preaccess/holdout-selection-contract.json"
       - "data/governance/successor/post-generation3-methodology-authorization.template.json"
       - "docs/superpowers/reports/2026-09-23-post-generation3-audit-rejection-remediation.md"
@@ -79,7 +81,8 @@ jobs:
             tests/independent_audit/test_successor_dividend_evaluator_v3.py \
             tests/independent_audit/test_post_generation3_authority.py \
             tests/independent_audit/test_generation4_stage_a_boundary.py \
-            tests/independent_audit/test_generation4_stage_b_boundary.py
+            tests/independent_audit/test_generation4_stage_b_boundary.py \
+            tests/independent_audit/test_generation4_phase7_entry.py
 
       - name: Governance boundary
         shell: bash
@@ -97,7 +100,8 @@ jobs:
             src/investment_tracker/independent_audit/post_generation3 \
             tests/quant/test_successor_dividend_reconciliation_v3.py \
             tests/independent_audit/test_successor_dividend_evaluator_v3.py \
-            tests/independent_audit/test_generation4_stage_a_boundary.py
+            tests/independent_audit/test_generation4_stage_a_boundary.py \
+            tests/independent_audit/test_generation4_phase7_entry.py
           ! grep -R -nE '\b(QQQM|FALN|IIPR|PSTL|EFAS)\b' \
             src/investment_tracker/quant/successor/dividend_reconciliation_v3.py \
             src/investment_tracker/independent_audit/successor/evaluate_dividend_v3.py \
@@ -105,7 +109,8 @@ jobs:
             tests/quant/test_successor_dividend_reconciliation_v3.py \
             tests/independent_audit/test_successor_dividend_evaluator_v3.py \
             tests/independent_audit/test_generation4_stage_a_boundary.py \
-            tests/independent_audit/test_generation4_stage_b_boundary.py
+            tests/independent_audit/test_generation4_stage_b_boundary.py \
+            tests/independent_audit/test_generation4_phase7_entry.py
           python - <<'PY'
           from hashlib import sha256
           import json

@@ -9,6 +9,7 @@ import pytest
 
 from investment_tracker.independent_audit.post_generation3 import (
     phase7_entry as phase7_entry_module,
+    phase7_entry_cli,
 )
 from investment_tracker.independent_audit.post_generation3.phase7_entry import (
     GEN4_PHASE7_AUTHORIZATION_INVALID,
@@ -1024,3 +1025,121 @@ def test_actual_repository_without_real_authorization_is_forbidden(tmp_path: Pat
     with pytest.raises(Generation4Phase7EntryError) as excinfo:
         _entry(paths, request, ROOT / "data/governance/successor/missing.json")
     assert excinfo.value.code == GEN4_PHASE7_AUTHORIZATION_MISSING
+
+
+def _cli_evidence_args(paths: dict[str, Path]) -> list[str]:
+    return [
+        "--phase6-contract",
+        str(paths["contract"]),
+        "--acquisition-authorization",
+        str(paths["acquisition_authorization"]),
+        "--selection",
+        str(paths["selection"]),
+        "--virginity-attestation",
+        str(paths["virginity_attestation"]),
+        "--virginity-evidence",
+        str(paths["virginity_evidence"]),
+        "--acquisition-receipt",
+        str(paths["receipt"]),
+        "--release",
+        str(paths["release"]),
+        "--phase6-result",
+        str(paths["result"]),
+        "--consumption-marker",
+        str(paths["marker"]),
+        "--phase6-closure",
+        str(paths["closure"]),
+    ]
+
+
+def test_cli_verify_readiness_emits_non_authorizing_report(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+):
+    paths = _valid_chain(tmp_path)
+    assert phase7_entry_cli.main(["verify-readiness", *_cli_evidence_args(paths)]) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "GENERATION4_PHASE7_READY_FOR_INDEPENDENT_AUDIT"
+    assert output["authority_granted"] is False
+    assert output["phase7_authorized"] is False
+    assert output["phase7_started"] is False
+    assert "metrics" not in output
+
+
+def test_cli_evaluate_entry_requires_authorization(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+):
+    paths = _valid_chain(tmp_path)
+    request = _audit_request(tmp_path, _readiness(paths))
+    result = phase7_entry_cli.main(
+        [
+            "evaluate-entry",
+            *_cli_evidence_args(paths),
+            "--audit-request",
+            str(request),
+            "--authorization",
+            str(tmp_path / "missing-authorization.json"),
+        ]
+    )
+    assert result == 1
+    output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "FORBIDDEN"
+    assert output["code"] == GEN4_PHASE7_AUTHORIZATION_MISSING
+
+
+def test_cli_forbidden_output_omits_metrics(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+):
+    paths = _valid_chain(tmp_path)
+    _mutate(paths, "result", lambda value: value.__setitem__("status", "WRONG"))
+    assert phase7_entry_cli.main(["verify-readiness", *_cli_evidence_args(paths)]) == 1
+    output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "FORBIDDEN"
+    assert "metrics" not in output
+    assert "ignored_for_authorization" not in json.dumps(output)
+
+
+def test_cli_source_exposes_no_mutating_command():
+    source = Path(phase7_entry_cli.__file__).read_text(encoding="utf-8")
+    for forbidden in (
+        "acquire-final-holdout",
+        "issue-final-holdout-release",
+        "evaluate-final-holdout",
+        "close-phase6",
+        "OpenTradeContext",
+        "place_order",
+        "modify_order",
+        "cancel_order",
+        "unlock_trade",
+    ):
+        assert forbidden not in source
+    verifier_source = Path(phase7_entry_module.__file__).read_text(encoding="utf-8")
+    for writer in (
+        "seal_generation4_phase7_authorization",
+        "write_generation4_phase7_authorization",
+    ):
+        assert writer not in source
+        assert writer not in verifier_source
+
+
+def test_stage_b_bound_source_hashes_remain_frozen():
+    authorization = json.loads(ACQUISITION_AUTHORIZATION.read_text(encoding="utf-8"))
+    package = ROOT / "src/investment_tracker/independent_audit"
+    successor = package / "successor"
+    post_generation3 = package / "post_generation3"
+    quant_successor = ROOT / "src/investment_tracker/quant/successor"
+    sources = {
+        "phase6_verifier_implementation_sha256": successor / "phase6_contract.py",
+        "acquisition_authority_implementation_sha256": successor
+        / "acquisition_authority.py",
+        "acquisition_implementation_sha256": successor / "acquisition.py",
+        "release_implementation_sha256": successor / "release.py",
+        "closure_implementation_sha256": successor / "closure.py",
+        "virginity_verifier_implementation_sha256": successor / "virginity.py",
+        "stage_b_cli_implementation_sha256": post_generation3 / "stage_b_cli.py",
+        "split_normalizer_sha256": quant_successor / "corporate_actions_v2.py",
+        "dividend_reconciliation_sha256": quant_successor
+        / "dividend_reconciliation_v3.py",
+        "successor_evaluator_sha256": successor / "evaluate_dividend_v3.py",
+    }
+    for field, source in sources.items():
+        assert authorization[field] == _sha(source)
