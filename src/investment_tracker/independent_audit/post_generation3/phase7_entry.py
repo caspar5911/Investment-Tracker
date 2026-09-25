@@ -3,7 +3,9 @@ from __future__ import annotations
 from hashlib import sha256
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from investment_tracker.independent_audit.successor.acquisition_authority import (
     SCHEMA_V2 as ACQUISITION_AUTHORIZATION_SCHEMA,
@@ -64,6 +66,99 @@ _STRATEGY = {
     "signal_on_completed_session": True,
     "earliest_fill": "NEXT_ELIGIBLE_SESSION_OPEN",
 }
+
+
+class _Generation4Phase7AuditRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal[
+        "GENERATION4-PHASE7-ENTRY-INDEPENDENT-AUDIT-REQUEST-v1"
+    ]
+    status: Literal["READY_FOR_INDEPENDENT_AUDIT"]
+    authority: Literal["NONE"]
+    generation: Literal["GENERATION_4"]
+    implementation_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
+    phase7_gate_implementation_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    phase7_cli_implementation_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    candidate_id: str = Field(min_length=1)
+    binding_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    implementation_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    split_normalizer_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    dividend_reconciliation_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    successor_evaluator_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    locked_symbols: tuple[str, ...]
+    holdout_id: str = Field(min_length=1)
+    release_id: str = Field(min_length=1)
+    phase6_contract_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    acquisition_authorization_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    acquisition_receipt_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    release_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    evaluation_result_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    evaluation_consumption_marker_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    phase6_closure_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    phase6_status: Literal[
+        "PHASE6_COMPLETE_NON_DECISION_GRADE_RESEARCH_EVIDENCE"
+    ]
+    one_time_consumed: Literal[True]
+    authority_granted: Literal[False]
+    phase7_authorized: Literal[False]
+    phase7_started: Literal[False]
+    production_readiness_approved: Literal[False]
+    live_trading_authorized: Literal[False]
+    recon009_status: Literal["OPEN"]
+    paper_only: Literal[True]
+
+
+class Generation4Phase7Authorization(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["GENERATION4-PHASE7-ENTRY-AUTHORIZATION-v1"]
+    authority: Literal["INDEPENDENT_AUDIT"]
+    status: Literal["GENERATION4_PHASE7_ENTRY_AUTHORIZED"]
+    authorization_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+    signed_by: str = Field(min_length=1, max_length=256)
+    approved_at_utc: str = Field(min_length=1)
+    generation: Literal["GENERATION_4"]
+    implementation_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
+    audit_request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    phase7_gate_implementation_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    phase7_cli_implementation_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    candidate_id: Literal["G2-A|lookback=189|skip=21|top_k=1|rebalance=21"]
+    binding_sha256: Literal[
+        "fd482e62e81d6813132f3aef747aecbcb07b5e4960b559dc1253510c95f49c8b"
+    ]
+    implementation_sha256: Literal[
+        "35a3ad8f92598021bbfbd2d5d9337036af525b71f978ab053827c4922da60f1b"
+    ]
+    split_normalizer_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    dividend_reconciliation_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    successor_evaluator_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    locked_symbols: tuple[str, ...]
+    holdout_id: str = Field(min_length=1)
+    release_id: str = Field(min_length=1)
+    phase6_contract_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    acquisition_authorization_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    acquisition_receipt_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    release_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    evaluation_result_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    evaluation_consumption_marker_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    phase6_closure_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    phase6_status: Literal[
+        "PHASE6_COMPLETE_NON_DECISION_GRADE_RESEARCH_EVIDENCE"
+    ]
+    one_time_consumed: Literal[True]
+    phase7_entry_authorized: Literal[True]
+    phase7_started: Literal[False]
+    retry_authorized: Literal[False]
+    holdout_reuse_authorized: Literal[False]
+    candidate_search_authorized: Literal[False]
+    symbol_substitution_authorized: Literal[False]
+    result_dependent_methodology_change_allowed: Literal[False]
+    result_dependent_parameter_change_allowed: Literal[False]
+    production_readiness_approved: Literal[False]
+    live_trading_authorized: Literal[False]
+    recon009_status: Literal["OPEN"]
+    paper_only: Literal[True]
 
 
 class Generation4Phase7EntryError(RuntimeError):
@@ -696,3 +791,205 @@ def verify_generation4_phase7_readiness(
         "recon009_status": "OPEN",
         "paper_only": True,
     }
+
+
+_READINESS_BINDING_FIELDS = (
+    "candidate_id",
+    "binding_sha256",
+    "implementation_sha256",
+    "split_normalizer_sha256",
+    "dividend_reconciliation_sha256",
+    "successor_evaluator_sha256",
+    "locked_symbols",
+    "holdout_id",
+    "release_id",
+    "phase6_contract_sha256",
+    "acquisition_authorization_sha256",
+    "acquisition_receipt_sha256",
+    "release_sha256",
+    "evaluation_result_sha256",
+    "evaluation_consumption_marker_sha256",
+    "phase6_closure_sha256",
+    "phase6_status",
+    "one_time_consumed",
+)
+
+
+def _load_audit_request(path: Path) -> _Generation4Phase7AuditRequest:
+    try:
+        raw = json.loads(Path(path).read_text(encoding="utf-8"))
+        return _Generation4Phase7AuditRequest.model_validate(raw)
+    except Exception as exc:
+        raise Generation4Phase7EntryError(
+            GEN4_PHASE7_AUTHORIZATION_INVALID, "audit_request"
+        ) from exc
+
+
+def load_generation4_phase7_authorization(
+    *,
+    authorization_path: Path,
+    audit_request_path: Path,
+    phase7_entry_path: Path,
+    phase7_cli_path: Path,
+    readiness: dict[str, Any],
+) -> Generation4Phase7Authorization:
+    if not Path(authorization_path).is_file():
+        raise Generation4Phase7EntryError(
+            GEN4_PHASE7_AUTHORIZATION_MISSING, "authorization"
+        )
+    request = _load_audit_request(audit_request_path)
+    try:
+        request_sha256 = _sha(audit_request_path)
+        gate_sha256 = _sha(phase7_entry_path)
+        cli_sha256 = _sha(phase7_cli_path)
+    except OSError as exc:
+        raise Generation4Phase7EntryError(
+            GEN4_PHASE7_AUTHORIZATION_INVALID, "authorization_binding_source"
+        ) from exc
+
+    for field in _READINESS_BINDING_FIELDS:
+        actual = getattr(request, field)
+        if field == "locked_symbols":
+            actual = list(actual)
+        _require_equal(
+            actual,
+            readiness.get(field),
+            code=GEN4_PHASE7_AUTHORIZATION_MISMATCH,
+            field=f"audit_request.{field}",
+        )
+    for field, actual, expected in (
+        (
+            "phase7_gate_implementation_sha256",
+            request.phase7_gate_implementation_sha256,
+            gate_sha256,
+        ),
+        (
+            "phase7_cli_implementation_sha256",
+            request.phase7_cli_implementation_sha256,
+            cli_sha256,
+        ),
+    ):
+        _require_equal(
+            actual,
+            expected,
+            code=GEN4_PHASE7_AUTHORIZATION_MISMATCH,
+            field=f"audit_request.{field}",
+        )
+
+    try:
+        raw_authorization = json.loads(
+            Path(authorization_path).read_text(encoding="utf-8")
+        )
+        authorization = Generation4Phase7Authorization.model_validate(
+            raw_authorization
+        )
+    except Exception as exc:
+        raise Generation4Phase7EntryError(
+            GEN4_PHASE7_AUTHORIZATION_INVALID, "authorization"
+        ) from exc
+
+    for field in _READINESS_BINDING_FIELDS:
+        actual = getattr(authorization, field)
+        if field == "locked_symbols":
+            actual = list(actual)
+        _require_equal(
+            actual,
+            readiness.get(field),
+            code=GEN4_PHASE7_AUTHORIZATION_MISMATCH,
+            field=f"authorization.{field}",
+        )
+    for field, actual, expected in (
+        (
+            "implementation_commit",
+            authorization.implementation_commit,
+            request.implementation_commit,
+        ),
+        (
+            "audit_request_sha256",
+            authorization.audit_request_sha256,
+            request_sha256,
+        ),
+        (
+            "phase7_gate_implementation_sha256",
+            authorization.phase7_gate_implementation_sha256,
+            gate_sha256,
+        ),
+        (
+            "phase7_cli_implementation_sha256",
+            authorization.phase7_cli_implementation_sha256,
+            cli_sha256,
+        ),
+    ):
+        _require_equal(
+            actual,
+            expected,
+            code=GEN4_PHASE7_AUTHORIZATION_MISMATCH,
+            field=f"authorization.{field}",
+        )
+    return authorization
+
+
+def evaluate_generation4_phase7_entry(
+    *,
+    audit_request_path: Path,
+    authorization_path: Path,
+    phase6_contract_path: Path,
+    acquisition_authorization_path: Path,
+    selection_path: Path,
+    virginity_attestation_path: Path,
+    virginity_evidence_path: Path,
+    acquisition_receipt_path: Path,
+    release_path: Path,
+    phase6_result_path: Path,
+    consumption_marker_path: Path,
+    phase6_closure_path: Path,
+    phase7_entry_path: Path | None = None,
+    phase7_cli_path: Path | None = None,
+) -> dict[str, Any]:
+    readiness = verify_generation4_phase7_readiness(
+        phase6_contract_path=phase6_contract_path,
+        acquisition_authorization_path=acquisition_authorization_path,
+        selection_path=selection_path,
+        virginity_attestation_path=virginity_attestation_path,
+        virginity_evidence_path=virginity_evidence_path,
+        acquisition_receipt_path=acquisition_receipt_path,
+        release_path=release_path,
+        phase6_result_path=phase6_result_path,
+        consumption_marker_path=consumption_marker_path,
+        phase6_closure_path=phase6_closure_path,
+    )
+    entry_source = (
+        Path(phase7_entry_path) if phase7_entry_path is not None else Path(__file__)
+    )
+    cli_source = (
+        Path(phase7_cli_path)
+        if phase7_cli_path is not None
+        else Path(__file__).with_name("phase7_entry_cli.py")
+    )
+    authorization = load_generation4_phase7_authorization(
+        authorization_path=authorization_path,
+        audit_request_path=audit_request_path,
+        phase7_entry_path=entry_source,
+        phase7_cli_path=cli_source,
+        readiness=readiness,
+    )
+    report = {
+        "schema_version": "GENERATION4-PHASE7-ENTRY-DECISION-v1",
+        "status": "GENERATION4_PHASE7_ENTRY_ALLOWED",
+        "authorization_id": authorization.authorization_id,
+        "implementation_commit": authorization.implementation_commit,
+        "audit_request_sha256": authorization.audit_request_sha256,
+        "candidate_id": readiness["candidate_id"],
+        "holdout_id": readiness["holdout_id"],
+        "release_id": readiness["release_id"],
+        "phase7_entry_authorized": True,
+        "phase7_started": False,
+        "production_readiness_approved": False,
+        "live_trading_authorized": False,
+        "recon009_status": "OPEN",
+        "paper_only": True,
+    }
+    report.update(
+        {field: readiness[field] for field in _READINESS_BINDING_FIELDS if field.endswith("_sha256")}
+    )
+    return report

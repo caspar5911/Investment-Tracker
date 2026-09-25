@@ -7,12 +7,20 @@ import shutil
 
 import pytest
 
+from investment_tracker.independent_audit.post_generation3 import (
+    phase7_entry as phase7_entry_module,
+)
 from investment_tracker.independent_audit.post_generation3.phase7_entry import (
+    GEN4_PHASE7_AUTHORIZATION_INVALID,
+    GEN4_PHASE7_AUTHORIZATION_MISSING,
+    GEN4_PHASE7_AUTHORIZATION_MISMATCH,
     GEN4_PHASE7_CHAIN_MISMATCH,
     GEN4_PHASE7_EVIDENCE_INVALID,
     GEN4_PHASE7_GOVERNANCE_MISMATCH,
     GEN4_PHASE7_IDENTITY_MISMATCH,
     Generation4Phase7EntryError,
+    evaluate_generation4_phase7_entry,
+    load_generation4_phase7_authorization,
     verify_generation4_phase7_readiness,
 )
 
@@ -664,3 +672,355 @@ def test_readiness_rejects_upstream_paper_only_change(
         paths,
         (GEN4_PHASE7_GOVERNANCE_MISMATCH, GEN4_PHASE7_IDENTITY_MISMATCH),
     )
+
+
+_EVIDENCE_HASH_FIELDS = (
+    "phase6_contract_sha256",
+    "acquisition_authorization_sha256",
+    "acquisition_receipt_sha256",
+    "release_sha256",
+    "evaluation_result_sha256",
+    "evaluation_consumption_marker_sha256",
+    "phase6_closure_sha256",
+)
+
+
+def _audit_request(tmp_path: Path, readiness: dict[str, object]) -> Path:
+    cli_path = tmp_path / "phase7_entry_cli.py"
+    cli_path.write_text("# synthetic CLI identity\n", encoding="utf-8")
+    request = {
+        "schema_version": "GENERATION4-PHASE7-ENTRY-INDEPENDENT-AUDIT-REQUEST-v1",
+        "status": "READY_FOR_INDEPENDENT_AUDIT",
+        "authority": "NONE",
+        "generation": "GENERATION_4",
+        "implementation_commit": "1" * 40,
+        "phase7_gate_implementation_sha256": _sha(
+            Path(phase7_entry_module.__file__)
+        ),
+        "phase7_cli_implementation_sha256": _sha(cli_path),
+        "candidate_id": readiness["candidate_id"],
+        "binding_sha256": readiness["binding_sha256"],
+        "implementation_sha256": readiness["implementation_sha256"],
+        "split_normalizer_sha256": readiness["split_normalizer_sha256"],
+        "dividend_reconciliation_sha256": readiness[
+            "dividend_reconciliation_sha256"
+        ],
+        "successor_evaluator_sha256": readiness["successor_evaluator_sha256"],
+        "locked_symbols": readiness["locked_symbols"],
+        "holdout_id": readiness["holdout_id"],
+        "release_id": readiness["release_id"],
+        "phase6_status": readiness["phase6_status"],
+        "one_time_consumed": True,
+        "authority_granted": False,
+        "phase7_authorized": False,
+        "phase7_started": False,
+        "production_readiness_approved": False,
+        "live_trading_authorized": False,
+        "recon009_status": "OPEN",
+        "paper_only": True,
+    }
+    request.update({field: readiness[field] for field in _EVIDENCE_HASH_FIELDS})
+    return _write(tmp_path / "audit-request.json", request)
+
+
+def _authorization(
+    tmp_path: Path,
+    readiness: dict[str, object],
+    request_path: Path,
+    overrides: dict[str, object] | None = None,
+) -> Path:
+    request = json.loads(request_path.read_text(encoding="utf-8"))
+    payload = {
+        "schema_version": "GENERATION4-PHASE7-ENTRY-AUTHORIZATION-v1",
+        "authority": "INDEPENDENT_AUDIT",
+        "status": "GENERATION4_PHASE7_ENTRY_AUTHORIZED",
+        "authorization_id": "SYNTHETIC-GEN4-PHASE7-AUTHORIZATION",
+        "signed_by": "Synthetic Independent Auditor",
+        "approved_at_utc": "2026-09-25T00:00:00Z",
+        "generation": "GENERATION_4",
+        "implementation_commit": request["implementation_commit"],
+        "audit_request_sha256": _sha(request_path),
+        "phase7_gate_implementation_sha256": request[
+            "phase7_gate_implementation_sha256"
+        ],
+        "phase7_cli_implementation_sha256": request[
+            "phase7_cli_implementation_sha256"
+        ],
+        "candidate_id": readiness["candidate_id"],
+        "binding_sha256": readiness["binding_sha256"],
+        "implementation_sha256": readiness["implementation_sha256"],
+        "split_normalizer_sha256": readiness["split_normalizer_sha256"],
+        "dividend_reconciliation_sha256": readiness[
+            "dividend_reconciliation_sha256"
+        ],
+        "successor_evaluator_sha256": readiness["successor_evaluator_sha256"],
+        "locked_symbols": readiness["locked_symbols"],
+        "holdout_id": readiness["holdout_id"],
+        "release_id": readiness["release_id"],
+        "phase6_status": readiness["phase6_status"],
+        "one_time_consumed": True,
+        "phase7_entry_authorized": True,
+        "phase7_started": False,
+        "retry_authorized": False,
+        "holdout_reuse_authorized": False,
+        "candidate_search_authorized": False,
+        "symbol_substitution_authorized": False,
+        "result_dependent_methodology_change_allowed": False,
+        "result_dependent_parameter_change_allowed": False,
+        "production_readiness_approved": False,
+        "live_trading_authorized": False,
+        "recon009_status": "OPEN",
+        "paper_only": True,
+    }
+    payload.update({field: readiness[field] for field in _EVIDENCE_HASH_FIELDS})
+    payload.update(overrides or {})
+    return _write(tmp_path / "authorization.json", payload)
+
+
+def _entry(
+    paths: dict[str, Path], request_path: Path, authorization_path: Path
+) -> dict[str, object]:
+    return evaluate_generation4_phase7_entry(
+        audit_request_path=request_path,
+        authorization_path=authorization_path,
+        phase7_entry_path=Path(phase7_entry_module.__file__),
+        phase7_cli_path=request_path.parent / "phase7_entry_cli.py",
+        phase6_contract_path=paths["contract"],
+        acquisition_authorization_path=paths["acquisition_authorization"],
+        selection_path=paths["selection"],
+        virginity_attestation_path=paths["virginity_attestation"],
+        virginity_evidence_path=paths["virginity_evidence"],
+        acquisition_receipt_path=paths["receipt"],
+        release_path=paths["release"],
+        phase6_result_path=paths["result"],
+        consumption_marker_path=paths["marker"],
+        phase6_closure_path=paths["closure"],
+    )
+
+
+def _rebind_after_acquisition_authorization_change(paths: dict[str, Path]) -> None:
+    receipt = json.loads(paths["receipt"].read_text(encoding="utf-8"))
+    receipt["acquisition_authorization_sha256"] = _sha(
+        paths["acquisition_authorization"]
+    )
+    receipt_without_self = {
+        key: value for key, value in receipt.items() if key != "receipt_sha256"
+    }
+    receipt["receipt_sha256"] = sha256(_canonical(receipt_without_self)).hexdigest()
+    _write(paths["receipt"], receipt)
+
+    release = json.loads(paths["release"].read_text(encoding="utf-8"))
+    release["acquisition_receipt_file_sha256"] = _sha(paths["receipt"])
+    release_seed = {
+        "holdout_id": release["holdout_id"],
+        "candidate_id": release["candidate_id"],
+        "contract_sha256": release["phase6_contract_sha256"],
+        "bundle_sha256": release["holdout_bundle_sha256"],
+        "receipt_sha256": release["acquisition_receipt_file_sha256"],
+    }
+    release["release_id"] = (
+        "successor-phase6-release-"
+        + sha256(_canonical(release_seed)).hexdigest()[:32]
+    )
+    _write(paths["release"], release)
+
+    result = json.loads(paths["result"].read_text(encoding="utf-8"))
+    result["release_id"] = release["release_id"]
+    _write(paths["result"], result)
+
+    marker = json.loads(paths["marker"].read_text(encoding="utf-8"))
+    marker["release_id"] = release["release_id"]
+    marker["evaluation_result_sha256"] = _sha(paths["result"])
+    _write(paths["marker"], marker)
+
+    closure = json.loads(paths["closure"].read_text(encoding="utf-8"))
+    closure["release_id"] = release["release_id"]
+    closure["acquisition_receipt_sha256"] = _sha(paths["receipt"])
+    closure["release_sha256"] = _sha(paths["release"])
+    closure["evaluation_result_sha256"] = _sha(paths["result"])
+    closure["evaluation_consumption_marker_sha256"] = _sha(paths["marker"])
+    _write(paths["closure"], closure)
+
+
+def test_entry_rejects_missing_authorization(tmp_path: Path):
+    paths = _valid_chain(tmp_path)
+    request = _audit_request(tmp_path, _readiness(paths))
+    with pytest.raises(Generation4Phase7EntryError) as excinfo:
+        _entry(paths, request, tmp_path / "missing-authorization.json")
+    assert excinfo.value.code == GEN4_PHASE7_AUTHORIZATION_MISSING
+
+
+def test_entry_rejects_template(tmp_path: Path):
+    paths = _valid_chain(tmp_path)
+    request = _audit_request(tmp_path, _readiness(paths))
+    template = _write(
+        tmp_path / "template.json",
+        {
+            "schema_version": "GENERATION4-PHASE7-ENTRY-AUTHORIZATION-TEMPLATE-v1",
+            "authority": "NONE",
+            "status": "DRAFT_TEMPLATE_NOT_AUTHORIZATION",
+            "required_schema": "GENERATION4-PHASE7-ENTRY-AUTHORIZATION-v1",
+        },
+    )
+    with pytest.raises(Generation4Phase7EntryError) as excinfo:
+        _entry(paths, request, template)
+    assert excinfo.value.code == GEN4_PHASE7_AUTHORIZATION_INVALID
+
+
+def test_authorization_rejects_unknown_field(tmp_path: Path):
+    paths = _valid_chain(tmp_path)
+    readiness = _readiness(paths)
+    request = _audit_request(tmp_path, readiness)
+    authorization = _authorization(
+        tmp_path, readiness, request, {"unexpected_authority": True}
+    )
+    with pytest.raises(Generation4Phase7EntryError) as excinfo:
+        _entry(paths, request, authorization)
+    assert excinfo.value.code == GEN4_PHASE7_AUTHORIZATION_INVALID
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected"),
+    [
+        ("implementation_commit", "2" * 40, GEN4_PHASE7_AUTHORIZATION_MISMATCH),
+        ("audit_request_sha256", "2" * 64, GEN4_PHASE7_AUTHORIZATION_MISMATCH),
+        (
+            "phase7_gate_implementation_sha256",
+            "2" * 64,
+            GEN4_PHASE7_AUTHORIZATION_MISMATCH,
+        ),
+        (
+            "phase7_cli_implementation_sha256",
+            "2" * 64,
+            GEN4_PHASE7_AUTHORIZATION_MISMATCH,
+        ),
+        ("candidate_id", "WRONG", GEN4_PHASE7_AUTHORIZATION_INVALID),
+        ("binding_sha256", "2" * 64, GEN4_PHASE7_AUTHORIZATION_INVALID),
+        ("implementation_sha256", "2" * 64, GEN4_PHASE7_AUTHORIZATION_INVALID),
+        ("split_normalizer_sha256", "2" * 64, GEN4_PHASE7_AUTHORIZATION_MISMATCH),
+        (
+            "dividend_reconciliation_sha256",
+            "2" * 64,
+            GEN4_PHASE7_AUTHORIZATION_MISMATCH,
+        ),
+        ("successor_evaluator_sha256", "2" * 64, GEN4_PHASE7_AUTHORIZATION_MISMATCH),
+        ("locked_symbols", ["SPY"], GEN4_PHASE7_AUTHORIZATION_MISMATCH),
+        ("holdout_id", "wrong-holdout", GEN4_PHASE7_AUTHORIZATION_MISMATCH),
+        ("release_id", "wrong-release", GEN4_PHASE7_AUTHORIZATION_MISMATCH),
+        ("phase6_contract_sha256", "2" * 64, GEN4_PHASE7_AUTHORIZATION_MISMATCH),
+        (
+            "acquisition_authorization_sha256",
+            "2" * 64,
+            GEN4_PHASE7_AUTHORIZATION_MISMATCH,
+        ),
+        (
+            "acquisition_receipt_sha256",
+            "2" * 64,
+            GEN4_PHASE7_AUTHORIZATION_MISMATCH,
+        ),
+        ("release_sha256", "2" * 64, GEN4_PHASE7_AUTHORIZATION_MISMATCH),
+        ("evaluation_result_sha256", "2" * 64, GEN4_PHASE7_AUTHORIZATION_MISMATCH),
+        (
+            "evaluation_consumption_marker_sha256",
+            "2" * 64,
+            GEN4_PHASE7_AUTHORIZATION_MISMATCH,
+        ),
+        ("phase6_closure_sha256", "2" * 64, GEN4_PHASE7_AUTHORIZATION_MISMATCH),
+    ],
+)
+def test_authorization_rejects_binding_drift(
+    tmp_path: Path, field: str, value: object, expected: str
+):
+    paths = _valid_chain(tmp_path)
+    readiness = _readiness(paths)
+    request = _audit_request(tmp_path, readiness)
+    authorization = _authorization(tmp_path, readiness, request, {field: value})
+    with pytest.raises(Generation4Phase7EntryError) as excinfo:
+        _entry(paths, request, authorization)
+    assert excinfo.value.code == expected
+
+
+def test_authorization_rejects_acquisition_authorization_byte_drift(
+    tmp_path: Path,
+):
+    paths = _valid_chain(tmp_path)
+    readiness = _readiness(paths)
+    request = _audit_request(tmp_path, readiness)
+    authorization = _authorization(tmp_path, readiness, request)
+    value = json.loads(paths["acquisition_authorization"].read_text(encoding="utf-8"))
+    paths["acquisition_authorization"].write_text(
+        json.dumps(value, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    _rebind_after_acquisition_authorization_change(paths)
+    assert (
+        _readiness(paths)["acquisition_authorization_sha256"]
+        != readiness["acquisition_authorization_sha256"]
+    )
+    with pytest.raises(Generation4Phase7EntryError) as excinfo:
+        _entry(paths, request, authorization)
+    assert excinfo.value.code == GEN4_PHASE7_AUTHORIZATION_MISMATCH
+
+
+def test_authorization_rejects_closure_byte_drift(tmp_path: Path):
+    paths = _valid_chain(tmp_path)
+    readiness = _readiness(paths)
+    request = _audit_request(tmp_path, readiness)
+    authorization = _authorization(tmp_path, readiness, request)
+    value = json.loads(paths["closure"].read_text(encoding="utf-8"))
+    paths["closure"].write_text(
+        json.dumps(value, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    assert (
+        _readiness(paths)["phase6_closure_sha256"]
+        != readiness["phase6_closure_sha256"]
+    )
+    with pytest.raises(Generation4Phase7EntryError) as excinfo:
+        _entry(paths, request, authorization)
+    assert excinfo.value.code == GEN4_PHASE7_AUTHORIZATION_MISMATCH
+
+
+@pytest.mark.parametrize(
+    "field", ["production_readiness_approved", "live_trading_authorized"]
+)
+def test_authorization_rejects_production_or_live_trading_authority(
+    tmp_path: Path, field: str
+):
+    paths = _valid_chain(tmp_path)
+    readiness = _readiness(paths)
+    request = _audit_request(tmp_path, readiness)
+    authorization = _authorization(tmp_path, readiness, request, {field: True})
+    with pytest.raises(Generation4Phase7EntryError) as excinfo:
+        _entry(paths, request, authorization)
+    assert excinfo.value.code == GEN4_PHASE7_AUTHORIZATION_INVALID
+
+
+def test_entry_accepts_exact_independent_authorization(tmp_path: Path):
+    paths = _valid_chain(tmp_path)
+    readiness = _readiness(paths)
+    request = _audit_request(tmp_path, readiness)
+    authorization = _authorization(tmp_path, readiness, request)
+    report = _entry(paths, request, authorization)
+    assert report["status"] == "GENERATION4_PHASE7_ENTRY_ALLOWED"
+    assert report["authorization_id"] == "SYNTHETIC-GEN4-PHASE7-AUTHORIZATION"
+    for field in _EVIDENCE_HASH_FIELDS:
+        assert report[field] == readiness[field]
+
+
+def test_allowed_report_remains_nonproduction(tmp_path: Path):
+    paths = _valid_chain(tmp_path)
+    readiness = _readiness(paths)
+    request = _audit_request(tmp_path, readiness)
+    report = _entry(paths, request, _authorization(tmp_path, readiness, request))
+    assert report["phase7_started"] is False
+    assert report["production_readiness_approved"] is False
+    assert report["live_trading_authorized"] is False
+    assert report["recon009_status"] == "OPEN"
+    assert report["paper_only"] is True
+
+
+def test_actual_repository_without_real_authorization_is_forbidden(tmp_path: Path):
+    paths = _valid_chain(tmp_path)
+    request = _audit_request(tmp_path, _readiness(paths))
+    with pytest.raises(Generation4Phase7EntryError) as excinfo:
+        _entry(paths, request, ROOT / "data/governance/successor/missing.json")
+    assert excinfo.value.code == GEN4_PHASE7_AUTHORIZATION_MISSING
