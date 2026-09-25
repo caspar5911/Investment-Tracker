@@ -187,13 +187,18 @@ and must retain:
 
 The existing Generation-4 acquisition-authorization loader must accept the
 committed v2 authorization against the frozen contract, selection, and
-virginity evidence. This revalidates all Stage-B implementation and methodology
-identities without making a provider call.
+virginity evidence. This revalidates all Stage-B implementation identities and
+the split/corporate-action normalizer, dividend-reconciliation-v3, and corrected
+evaluator-v3 identities without making a provider call. The acquisition
+authorization must match the frozen contract's three methodology identities and
+must retain `paper_only=true`.
 
 The receipt must satisfy the existing receipt verifier and must match the
 contract and acquisition authorization for candidate, binding,
-implementation, methodology identities, ordered protected symbols, contract
-hash, and holdout ID. It must state:
+implementation, ordered protected symbols, contract hash, and holdout ID. For
+methodology identity propagation, it must match
+`successor_normalizer_sha256` and `successor_evaluator_sha256`, which are the
+methodology fields the frozen receipt schema actually contains. It must state:
 
 - sealed bundle created;
 - final holdout accessed;
@@ -210,16 +215,26 @@ The release must satisfy the existing release verifier and match the contract
 and receipt for:
 
 - holdout and release IDs;
-- candidate, binding, implementation, and methodology identities;
+- candidate, binding, and implementation identities;
+- `successor_normalizer_sha256` and `successor_evaluator_sha256`, the
+  methodology identities present in the frozen release schema;
 - exact ordered locked symbols;
 - contract SHA-256;
 - acquisition receipt file SHA-256;
 - sealed bundle and key hashes recorded by the receipt;
 - one-time evaluation authority;
-- Phase 7 false, production readiness false, `RECON-009` open, and paper-only
-  true.
+- `phase7_authorized=false`;
+- `production_readiness_approved=false`;
+- `recon009_status=OPEN`.
 
 This verification does not consume or reopen the release.
+
+The release is not required to contain a `paper_only` field. The paper-only
+condition is established authoritatively by matching
+`paper_only=true` in both the frozen Phase-6 contract and the Generation-4
+acquisition authorization. Receipt, release, result, consumption-marker, and
+closure schemas are not required to contain `paper_only` when their existing
+frozen schemas do not define it.
 
 ### 6.4 Evaluation result
 
@@ -230,7 +245,10 @@ The result must be a JSON object with:
 - status exactly
   `PHASE6_COMPLETE_NON_DECISION_GRADE_RESEARCH_EVIDENCE`;
 - the same Generation-4, contract, candidate, binding, implementation,
-  methodology, holdout, release, and ordered-symbol identities;
+  holdout, release, and ordered-symbol identities;
+- `successor_normalizer_sha256` and `successor_evaluator_sha256`, the
+  methodology identities present in the frozen result schema, matching the
+  contract and acquisition authorization;
 - `one_time_consumed=true`;
 - `candidate_search_executed=false`;
 - `candidate_parameters_changed=false`;
@@ -262,8 +280,11 @@ The closure must retain:
 - schema `SUCCESSOR-PHASE6-FINAL-HOLDOUT-CLOSURE-v1`;
 - authority `COORDINATOR_UNDER_INDEPENDENT_AUDIT_RELEASE`;
 - the required successful Phase-6 status;
-- the same Generation-4, candidate, binding, implementation, methodology,
-  ordered-symbol, holdout, and release identities;
+- the same Generation-4, candidate, binding, implementation, ordered-symbol,
+  holdout, and release identities;
+- `successor_normalizer_sha256` and `successor_evaluator_sha256`, the
+  methodology identities present in the frozen closure schema, matching the
+  contract and acquisition authorization;
 - exact file hashes for the Phase-6 contract, acquisition receipt, release,
   evaluation result, and consumption marker;
 - `holdout_consumed=true`;
@@ -277,6 +298,15 @@ The closure must retain:
 - `started=false`;
 - production readiness false;
 - `RECON-009` open.
+
+The receipt, release, result, and closure are not required to contain a direct
+`dividend_reconciliation_sha256` field because their frozen schemas do not
+define one. The dividend-v3 identity is proven by exact equality between the
+frozen Phase-6 contract and the Generation-4 acquisition authorization. Each
+downstream artifact is checked only for the methodology fields its frozen
+schema actually carries. The consumption marker carries no methodology
+identity and is linked through its contract, release, and evaluation-result
+hash bindings.
 
 ### 6.7 Readiness result
 
@@ -405,7 +435,15 @@ new API is absent, then cover at least:
 13. the actual repository without a real authorization remains forbidden;
 14. source-bound Stage-B acquisition files remain unchanged;
 15. static governance checks find no trading/order API and no provider or
-    evaluation command in the new Phase-7 boundary.
+    evaluation command in the new Phase-7 boundary;
+16. readiness succeeds when the Phase-6 contract and acquisition authorization
+    both establish `paper_only=true` while the downstream release, result, and
+    closure omit a `paper_only` field;
+17. dividend-v3 identity is proven through the exact contract/acquisition-
+    authorization binding and is not required as a field in the receipt,
+    release, or result;
+18. readiness fails closed when the acquisition authorization's
+    `dividend_reconciliation_sha256` differs from the frozen Phase-6 contract.
 
 After focused tests pass, run the full repository test suite. Then run the
 readiness CLI once against the existing private JSON evidence. Do not pass the
