@@ -1186,7 +1186,7 @@ def test_committed_phase7_request_is_non_authorizing_and_binds_implementation():
     )
     assert request["status"] == "READY_FOR_INDEPENDENT_AUDIT"
     assert request["implementation_commit"] == (
-        "574780fcd69340247c5e34c105138256239196af"
+        "7893306e3c77b85c59f044b787a55579593c678b"
     )
     assert request["phase7_gate_implementation_sha256"] == _sha(
         Path(phase7_entry_module.__file__)

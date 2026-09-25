@@ -6,7 +6,7 @@ Repository: `caspar5911/Investment-Tracker`
 
 Branch: `governance/phase6-successor-dividend-normalization-v3`
 
-Frozen implementation commit: `574780fcd69340247c5e34c105138256239196af`
+Frozen implementation commit: `7893306e3c77b85c59f044b787a55579593c678b`
 
 Machine-readable request:
 `data/governance/successor/generation4-phase7-entry-independent-audit-request.json`
@@ -28,7 +28,7 @@ The frozen entry verifier and CLI are:
 
 - `src/investment_tracker/independent_audit/post_generation3/phase7_entry.py`
   at SHA-256
-  `b7fd09a176a8475642afa68ff2c00663cc154b15f8688388470974707ebc85ee`;
+  `63738d5e71aec76adcdc8206567083a78b6d45737b97b7d538b0f239623a75e3`;
 - `src/investment_tracker/independent_audit/post_generation3/phase7_entry_cli.py`
   at SHA-256
   `7110c7a695e97f7351fc19ffd9433b8d3d95f2f7464668d9a214ec19d4966dfc`.
@@ -154,7 +154,7 @@ Act as the Independent Auditor for the governed, paper-only Generation-4 Phase-7
 
 Repository: C:\Users\Caspar\Desktop\AllFolder\Github Projects\Investment\Investment-Tracker
 Branch: governance/phase6-successor-dividend-normalization-v3
-Frozen implementation commit: 574780fcd69340247c5e34c105138256239196af
+Frozen implementation commit: 7893306e3c77b85c59f044b787a55579593c678b
 Approved design: docs/superpowers/specs/2026-09-25-generation4-phase7-entry-gate-design.md
 Machine-readable audit request: data/governance/successor/generation4-phase7-entry-independent-audit-request.json
 Non-authorizing template: data/governance/successor/generation4-phase7-entry-authorization.template.json
