@@ -96,12 +96,34 @@ def _require_equal(
         raise Generation4Phase7EntryError(code, field)
 
 
+def _require_false(value: object, *, field: str) -> None:
+    _require_equal(
+        value, False, code=GEN4_PHASE7_GOVERNANCE_MISMATCH, field=field
+    )
+
+
+def _require_true(value: object, *, field: str) -> None:
+    _require_equal(value, True, code=GEN4_PHASE7_GOVERNANCE_MISMATCH, field=field)
+
+
 def _verify_contract(contract: dict[str, Any]) -> None:
     _require_equal(
         contract.get("schema_version"),
         _CONTRACT_SCHEMA,
         code=GEN4_PHASE7_IDENTITY_MISMATCH,
         field="contract.schema_version",
+    )
+    _require_equal(
+        contract.get("status"),
+        "FROZEN_PRE_ACCESS",
+        code=GEN4_PHASE7_GOVERNANCE_MISMATCH,
+        field="contract.status",
+    )
+    _require_equal(
+        contract.get("authority"),
+        "INDEPENDENT_AUDIT",
+        code=GEN4_PHASE7_GOVERNANCE_MISMATCH,
+        field="contract.authority",
     )
     _require_equal(
         contract.get("successor_formal_name"),
@@ -158,6 +180,351 @@ def _verify_contract(contract: dict[str, Any]) -> None:
         )
 
 
+def _verify_identity_fields(
+    value: dict[str, Any],
+    *,
+    name: str,
+    contract: dict[str, Any],
+    locked_symbols_field: str | None = None,
+) -> None:
+    strategy = contract["strategy"]
+    for field in ("candidate_id", "binding_sha256", "implementation_sha256"):
+        _require_equal(
+            value.get(field),
+            strategy[field],
+            code=GEN4_PHASE7_IDENTITY_MISMATCH,
+            field=f"{name}.{field}",
+        )
+    if locked_symbols_field is not None:
+        _require_equal(
+            value.get(locked_symbols_field),
+            contract["final_holdout"]["locked_symbols"],
+            code=GEN4_PHASE7_IDENTITY_MISMATCH,
+            field=f"{name}.{locked_symbols_field}",
+        )
+
+
+def _verify_downstream_methodology(
+    value: dict[str, Any], *, name: str, contract: dict[str, Any]
+) -> None:
+    methodology = contract["methodology"]
+    for field, expected in (
+        ("successor_normalizer_sha256", methodology["split_normalizer_sha256"]),
+        ("successor_evaluator_sha256", methodology["successor_evaluator_sha256"]),
+    ):
+        _require_equal(
+            value.get(field),
+            expected,
+            code=GEN4_PHASE7_IDENTITY_MISMATCH,
+            field=f"{name}.{field}",
+        )
+
+
+def _verify_receipt(
+    receipt: dict[str, Any],
+    *,
+    contract: dict[str, Any],
+    contract_sha256: str,
+    acquisition_authorization_sha256: str,
+) -> None:
+    for field, expected in (
+        ("schema_version", "SUCCESSOR-PHASE6-HOLDOUT-ACQUISITION-RECEIPT-v1"),
+        ("authority", "INDEPENDENT_AUDIT"),
+        ("status", "SEALED_FINAL_HOLDOUT_BUNDLE_CREATED"),
+        ("successor_formal_name", "GENERATION_4"),
+    ):
+        _require_equal(
+            receipt.get(field),
+            expected,
+            code=GEN4_PHASE7_EVIDENCE_INVALID,
+            field=f"receipt.{field}",
+        )
+    _verify_identity_fields(
+        receipt,
+        name="receipt",
+        contract=contract,
+        locked_symbols_field="protected_symbols_accessed",
+    )
+    _verify_downstream_methodology(receipt, name="receipt", contract=contract)
+    for field, expected in (
+        ("phase6_contract_sha256", contract_sha256),
+        ("acquisition_authorization_sha256", acquisition_authorization_sha256),
+    ):
+        _require_equal(
+            receipt.get(field),
+            expected,
+            code=GEN4_PHASE7_CHAIN_MISMATCH,
+            field=f"receipt.{field}",
+        )
+    _require_true(
+        receipt.get("final_holdout_accessed"), field="receipt.final_holdout_accessed"
+    )
+    _require_false(
+        receipt.get("performance_computed"), field="receipt.performance_computed"
+    )
+    _require_false(
+        receipt.get("performance_inspected"), field="receipt.performance_inspected"
+    )
+    _require_false(receipt.get("retry_allowed"), field="receipt.retry_allowed")
+    _require_true(
+        receipt.get("artifact_readback_verified"),
+        field="receipt.artifact_readback_verified",
+    )
+
+
+def _verify_release(
+    release: dict[str, Any],
+    *,
+    receipt: dict[str, Any],
+    contract: dict[str, Any],
+    contract_sha256: str,
+    receipt_sha256: str,
+) -> None:
+    for field, expected in (
+        ("schema_version", "SUCCESSOR-PHASE6-HOLDOUT-RELEASE-v1"),
+        ("authority", "INDEPENDENT_AUDIT"),
+        ("status", "FINAL_HOLDOUT_RELEASE_AUTHORIZED"),
+        ("successor_formal_name", "GENERATION_4"),
+    ):
+        _require_equal(
+            release.get(field),
+            expected,
+            code=GEN4_PHASE7_EVIDENCE_INVALID,
+            field=f"release.{field}",
+        )
+    _verify_identity_fields(
+        release,
+        name="release",
+        contract=contract,
+        locked_symbols_field="locked_symbols",
+    )
+    _verify_downstream_methodology(release, name="release", contract=contract)
+    for field, expected in (
+        ("holdout_id", receipt.get("holdout_id")),
+        ("phase6_contract_sha256", contract_sha256),
+        ("holdout_bundle_sha256", receipt.get("bundle_sha256")),
+        ("holdout_key_sha256", receipt.get("key_sha256")),
+    ):
+        _require_equal(
+            release.get(field),
+            expected,
+            code=GEN4_PHASE7_IDENTITY_MISMATCH,
+            field=f"release.{field}",
+        )
+    _require_equal(
+        release.get("acquisition_receipt_file_sha256"),
+        receipt_sha256,
+        code=GEN4_PHASE7_CHAIN_MISMATCH,
+        field="release.acquisition_receipt_file_sha256",
+    )
+    _require_true(release.get("one_time"), field="release.one_time")
+    _require_false(
+        release.get("performance_inspected_before_release"),
+        field="release.performance_inspected_before_release",
+    )
+    _require_true(
+        release.get("one_time_evaluation_authorized"),
+        field="release.one_time_evaluation_authorized",
+    )
+    _require_false(
+        release.get("phase7_authorized"), field="release.phase7_authorized"
+    )
+    _require_false(
+        release.get("production_readiness_approved"),
+        field="release.production_readiness_approved",
+    )
+    _require_equal(
+        release.get("recon009_status"),
+        "OPEN",
+        code=GEN4_PHASE7_GOVERNANCE_MISMATCH,
+        field="release.recon009_status",
+    )
+
+
+def _verify_result(
+    result: dict[str, Any],
+    *,
+    release: dict[str, Any],
+    contract: dict[str, Any],
+    contract_sha256: str,
+) -> None:
+    for field, expected, code in (
+        (
+            "schema_version",
+            "SUCCESSOR-PHASE6-FINAL-HOLDOUT-EVALUATION-v2",
+            GEN4_PHASE7_EVIDENCE_INVALID,
+        ),
+        (
+            "authority",
+            "COORDINATOR_UNDER_INDEPENDENT_AUDIT_RELEASE",
+            GEN4_PHASE7_EVIDENCE_INVALID,
+        ),
+        ("status", PHASE6_STATUS, GEN4_PHASE7_GOVERNANCE_MISMATCH),
+        ("successor_formal_name", "GENERATION_4", GEN4_PHASE7_IDENTITY_MISMATCH),
+        ("phase6_contract_sha256", contract_sha256, GEN4_PHASE7_IDENTITY_MISMATCH),
+        ("holdout_id", release.get("holdout_id"), GEN4_PHASE7_IDENTITY_MISMATCH),
+        ("release_id", release.get("release_id"), GEN4_PHASE7_IDENTITY_MISMATCH),
+    ):
+        _require_equal(result.get(field), expected, code=code, field=f"result.{field}")
+    _verify_identity_fields(
+        result,
+        name="result",
+        contract=contract,
+        locked_symbols_field="locked_symbols",
+    )
+    _verify_downstream_methodology(result, name="result", contract=contract)
+    _require_true(result.get("one_time_consumed"), field="result.one_time_consumed")
+    for field in (
+        "candidate_search_executed",
+        "candidate_parameters_changed",
+        "holdout_symbol_substitution_executed",
+        "phase7_authorized",
+        "phase7_started",
+        "production_readiness_approved",
+    ):
+        _require_false(result.get(field), field=f"result.{field}")
+    _require_equal(
+        result.get("recon009_status"),
+        "OPEN",
+        code=GEN4_PHASE7_GOVERNANCE_MISMATCH,
+        field="result.recon009_status",
+    )
+
+
+def _verify_marker(
+    marker: dict[str, Any],
+    *,
+    release: dict[str, Any],
+    contract: dict[str, Any],
+    contract_sha256: str,
+    result_sha256: str,
+) -> None:
+    for field, expected, code in (
+        (
+            "schema_version",
+            "SUCCESSOR-PHASE6-HOLDOUT-CONSUMPTION-v1",
+            GEN4_PHASE7_EVIDENCE_INVALID,
+        ),
+        ("status", "FINAL_HOLDOUT_RELEASE_CONSUMED", GEN4_PHASE7_GOVERNANCE_MISMATCH),
+        ("release_id", release.get("release_id"), GEN4_PHASE7_IDENTITY_MISMATCH),
+        ("holdout_id", release.get("holdout_id"), GEN4_PHASE7_IDENTITY_MISMATCH),
+        (
+            "candidate_id",
+            contract["strategy"]["candidate_id"],
+            GEN4_PHASE7_IDENTITY_MISMATCH,
+        ),
+        ("phase6_contract_sha256", contract_sha256, GEN4_PHASE7_IDENTITY_MISMATCH),
+        (
+            "holdout_bundle_sha256",
+            release.get("holdout_bundle_sha256"),
+            GEN4_PHASE7_IDENTITY_MISMATCH,
+        ),
+        ("evaluation_status", PHASE6_STATUS, GEN4_PHASE7_GOVERNANCE_MISMATCH),
+    ):
+        _require_equal(marker.get(field), expected, code=code, field=f"marker.{field}")
+    _require_equal(
+        marker.get("evaluation_result_sha256"),
+        result_sha256,
+        code=GEN4_PHASE7_CHAIN_MISMATCH,
+        field="marker.evaluation_result_sha256",
+    )
+    _require_true(
+        marker.get("result_readback_verified"),
+        field="marker.result_readback_verified",
+    )
+    _require_false(marker.get("retry_allowed"), field="marker.retry_allowed")
+
+
+def _verify_closure(
+    closure: dict[str, Any],
+    *,
+    release: dict[str, Any],
+    contract: dict[str, Any],
+    evidence_hashes: dict[str, str],
+) -> None:
+    for field, expected, code in (
+        (
+            "schema_version",
+            "SUCCESSOR-PHASE6-FINAL-HOLDOUT-CLOSURE-v1",
+            GEN4_PHASE7_EVIDENCE_INVALID,
+        ),
+        (
+            "authority",
+            "COORDINATOR_UNDER_INDEPENDENT_AUDIT_RELEASE",
+            GEN4_PHASE7_EVIDENCE_INVALID,
+        ),
+        ("status", PHASE6_STATUS, GEN4_PHASE7_GOVERNANCE_MISMATCH),
+        ("successor_formal_name", "GENERATION_4", GEN4_PHASE7_IDENTITY_MISMATCH),
+        ("holdout_id", release.get("holdout_id"), GEN4_PHASE7_IDENTITY_MISMATCH),
+        ("release_id", release.get("release_id"), GEN4_PHASE7_IDENTITY_MISMATCH),
+    ):
+        _require_equal(
+            closure.get(field), expected, code=code, field=f"closure.{field}"
+        )
+    _verify_identity_fields(
+        closure,
+        name="closure",
+        contract=contract,
+        locked_symbols_field="locked_symbols",
+    )
+    _verify_downstream_methodology(closure, name="closure", contract=contract)
+    for field in (
+        "phase6_contract_sha256",
+        "acquisition_receipt_sha256",
+        "release_sha256",
+        "evaluation_result_sha256",
+        "evaluation_consumption_marker_sha256",
+    ):
+        _require_equal(
+            closure.get(field),
+            evidence_hashes[field],
+            code=GEN4_PHASE7_CHAIN_MISMATCH,
+            field=f"closure.{field}",
+        )
+    one_time = closure.get("one_time_semantics")
+    phase7 = closure.get("phase7")
+    if not isinstance(one_time, dict) or not isinstance(phase7, dict):
+        raise Generation4Phase7EntryError(
+            GEN4_PHASE7_EVIDENCE_INVALID, "closure.governance"
+        )
+    _require_true(
+        one_time.get("holdout_consumed"),
+        field="closure.one_time_semantics.holdout_consumed",
+    )
+    _require_false(
+        one_time.get("retry_authorized"),
+        field="closure.one_time_semantics.retry_authorized",
+    )
+    _require_false(
+        one_time.get("symbol_substitution_authorized"),
+        field="closure.one_time_semantics.symbol_substitution_authorized",
+    )
+    _require_true(
+        one_time.get("methodology_change_from_holdout_forbidden"),
+        field="closure.one_time_semantics.methodology_change_from_holdout_forbidden",
+    )
+    _require_true(
+        one_time.get("parameter_change_from_holdout_forbidden"),
+        field="closure.one_time_semantics.parameter_change_from_holdout_forbidden",
+    )
+    _require_true(
+        phase7.get("eligible_for_independent_entry_review"),
+        field="closure.phase7.eligible_for_independent_entry_review",
+    )
+    for field in ("authorized", "entry_artifact_created", "started"):
+        _require_false(phase7.get(field), field=f"closure.phase7.{field}")
+    _require_false(
+        closure.get("production_readiness_approved"),
+        field="closure.production_readiness_approved",
+    )
+    _require_equal(
+        closure.get("recon009_status"),
+        "OPEN",
+        code=GEN4_PHASE7_GOVERNANCE_MISMATCH,
+        field="closure.recon009_status",
+    )
+
+
 def verify_generation4_phase7_readiness(
     *,
     phase6_contract_path: Path,
@@ -171,13 +538,14 @@ def verify_generation4_phase7_readiness(
     consumption_marker_path: Path,
     phase6_closure_path: Path,
 ) -> dict[str, Any]:
+    raw_contract = _load_object(phase6_contract_path, detail="phase6_contract")
+    _verify_contract(raw_contract)
     try:
         contract = verify_phase6_contract(phase6_contract_path)
     except (OSError, ValueError) as exc:
         raise Generation4Phase7EntryError(
             GEN4_PHASE7_EVIDENCE_INVALID, "phase6_contract"
         ) from exc
-    _verify_contract(contract)
 
     try:
         authorization = load_acquisition_authorization(
@@ -225,8 +593,21 @@ def verify_generation4_phase7_readiness(
             code=GEN4_PHASE7_IDENTITY_MISMATCH,
             field=f"acquisition_authorization.{field}",
         )
+    acquisition_authorization_sha256 = _sha(acquisition_authorization_path)
+    contract_sha256 = _sha(phase6_contract_path)
+    receipt_sha256 = _sha(acquisition_receipt_path)
+    release_sha256 = _sha(release_path)
+    result_sha256 = _sha(phase6_result_path)
+    marker_sha256 = _sha(consumption_marker_path)
+
+    raw_receipt = _load_object(acquisition_receipt_path, detail="receipt")
+    _verify_receipt(
+        raw_receipt,
+        contract=contract,
+        contract_sha256=contract_sha256,
+        acquisition_authorization_sha256=acquisition_authorization_sha256,
+    )
     try:
-        acquisition_authorization_sha256 = _sha(acquisition_authorization_path)
         receipt = load_receipt(
             acquisition_receipt_path,
             contract_path=phase6_contract_path,
@@ -235,34 +616,55 @@ def verify_generation4_phase7_readiness(
             virginity_attestation_path=virginity_attestation_path,
             virginity_evidence_path=virginity_evidence_path,
         )
-        release = load_release(release_path, contract_path=phase6_contract_path)
     except (OSError, ValueError, SuccessorAcquisitionAuthorityError) as exc:
         raise Generation4Phase7EntryError(
-            GEN4_PHASE7_EVIDENCE_INVALID, "receipt_or_release"
+            GEN4_PHASE7_EVIDENCE_INVALID, "receipt"
+        ) from exc
+
+    raw_release = _load_object(release_path, detail="release")
+    _verify_release(
+        raw_release,
+        receipt=receipt,
+        contract=contract,
+        contract_sha256=contract_sha256,
+        receipt_sha256=receipt_sha256,
+    )
+    try:
+        release = load_release(release_path, contract_path=phase6_contract_path)
+    except (OSError, ValueError) as exc:
+        raise Generation4Phase7EntryError(
+            GEN4_PHASE7_EVIDENCE_INVALID, "release"
         ) from exc
 
     result = _load_object(phase6_result_path, detail="phase6_result")
+    _verify_result(
+        result,
+        release=release,
+        contract=contract,
+        contract_sha256=contract_sha256,
+    )
     marker = _load_object(consumption_marker_path, detail="consumption_marker")
+    _verify_marker(
+        marker,
+        release=release,
+        contract=contract,
+        contract_sha256=contract_sha256,
+        result_sha256=result_sha256,
+    )
     closure = _load_object(phase6_closure_path, detail="phase6_closure")
-    methodology = contract["methodology"]
     locked_symbols = list(contract["final_holdout"]["locked_symbols"])
-
-    for name, value in (
-        ("receipt", receipt),
-        ("release", release),
-        ("result", result),
-        ("closure", closure),
-    ):
-        for field, expected in (
-            ("successor_normalizer_sha256", methodology["split_normalizer_sha256"]),
-            ("successor_evaluator_sha256", methodology["successor_evaluator_sha256"]),
-        ):
-            _require_equal(
-                value.get(field),
-                expected,
-                code=GEN4_PHASE7_IDENTITY_MISMATCH,
-                field=f"{name}.{field}",
-            )
+    _verify_closure(
+        closure,
+        release=release,
+        contract=contract,
+        evidence_hashes={
+            "phase6_contract_sha256": contract_sha256,
+            "acquisition_receipt_sha256": receipt_sha256,
+            "release_sha256": release_sha256,
+            "evaluation_result_sha256": result_sha256,
+            "evaluation_consumption_marker_sha256": marker_sha256,
+        },
+    )
 
     return {
         "schema_version": READINESS_SCHEMA,
@@ -279,12 +681,12 @@ def verify_generation4_phase7_readiness(
         "release_id": release.get("release_id"),
         "phase6_status": result.get("status"),
         "one_time_consumed": result.get("one_time_consumed"),
-        "phase6_contract_sha256": _sha(phase6_contract_path),
+        "phase6_contract_sha256": contract_sha256,
         "acquisition_authorization_sha256": acquisition_authorization_sha256,
-        "acquisition_receipt_sha256": _sha(acquisition_receipt_path),
-        "release_sha256": _sha(release_path),
-        "evaluation_result_sha256": _sha(phase6_result_path),
-        "evaluation_consumption_marker_sha256": _sha(consumption_marker_path),
+        "acquisition_receipt_sha256": receipt_sha256,
+        "release_sha256": release_sha256,
+        "evaluation_result_sha256": result_sha256,
+        "evaluation_consumption_marker_sha256": marker_sha256,
         "phase6_closure_sha256": _sha(phase6_closure_path),
         "authority_granted": False,
         "phase7_authorized": False,

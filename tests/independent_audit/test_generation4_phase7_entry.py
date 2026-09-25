@@ -8,6 +8,9 @@ import shutil
 import pytest
 
 from investment_tracker.independent_audit.post_generation3.phase7_entry import (
+    GEN4_PHASE7_CHAIN_MISMATCH,
+    GEN4_PHASE7_EVIDENCE_INVALID,
+    GEN4_PHASE7_GOVERNANCE_MISMATCH,
     GEN4_PHASE7_IDENTITY_MISMATCH,
     Generation4Phase7EntryError,
     verify_generation4_phase7_readiness,
@@ -279,3 +282,385 @@ def test_readiness_rejects_dividend_contract_authorization_mismatch(tmp_path: Pa
     with pytest.raises(Generation4Phase7EntryError) as excinfo:
         _readiness(paths)
     assert excinfo.value.code == GEN4_PHASE7_IDENTITY_MISMATCH
+
+
+def _mutate(paths: dict[str, Path], name: str, mutation) -> None:
+    value = json.loads(paths[name].read_text(encoding="utf-8"))
+    mutation(value)
+    _write(paths[name], value)
+
+
+def _expect_readiness_error(
+    paths: dict[str, Path], expected: str | tuple[str, ...]
+) -> None:
+    with pytest.raises(Generation4Phase7EntryError) as excinfo:
+        _readiness(paths)
+    expected_codes = (expected,) if isinstance(expected, str) else expected
+    assert excinfo.value.code in expected_codes
+
+
+@pytest.mark.parametrize(
+    "status", [None, "PHASE6_UNKNOWN_ABSTAIN", "PHASE6_COMPLETE"]
+)
+def test_readiness_rejects_wrong_phase6_status(tmp_path: Path, status: object):
+    paths = _valid_chain(tmp_path)
+    _mutate(paths, "result", lambda value: value.__setitem__("status", status))
+    _expect_readiness_error(paths, GEN4_PHASE7_GOVERNANCE_MISMATCH)
+
+
+def test_readiness_rejects_unconsumed_result(tmp_path: Path):
+    paths = _valid_chain(tmp_path)
+    _mutate(
+        paths, "result", lambda value: value.__setitem__("one_time_consumed", False)
+    )
+    _expect_readiness_error(paths, GEN4_PHASE7_GOVERNANCE_MISMATCH)
+
+
+@pytest.mark.parametrize("artifact", ["result", "closure"])
+def test_readiness_rejects_started_state(tmp_path: Path, artifact: str):
+    paths = _valid_chain(tmp_path)
+    if artifact == "result":
+        _mutate(
+            paths, artifact, lambda value: value.__setitem__("phase7_started", True)
+        )
+    else:
+        _mutate(
+            paths,
+            artifact,
+            lambda value: value["phase7"].__setitem__("started", True),
+        )
+    _expect_readiness_error(paths, GEN4_PHASE7_GOVERNANCE_MISMATCH)
+
+
+@pytest.mark.parametrize(
+    ("artifact", "mutation"),
+    [
+        (
+            "contract",
+            lambda value: value["governance"].__setitem__(
+                "production_readiness_approved", True
+            ),
+        ),
+        (
+            "acquisition_authorization",
+            lambda value: value.__setitem__("production_readiness_approved", True),
+        ),
+        (
+            "release",
+            lambda value: value.__setitem__("production_readiness_approved", True),
+        ),
+        (
+            "result",
+            lambda value: value.__setitem__("production_readiness_approved", True),
+        ),
+        (
+            "closure",
+            lambda value: value.__setitem__("production_readiness_approved", True),
+        ),
+    ],
+)
+def test_readiness_rejects_production_approval(
+    tmp_path: Path, artifact: str, mutation
+):
+    paths = _valid_chain(tmp_path)
+    _mutate(paths, artifact, mutation)
+    _expect_readiness_error(
+        paths,
+        (
+            GEN4_PHASE7_GOVERNANCE_MISMATCH,
+            GEN4_PHASE7_IDENTITY_MISMATCH,
+        ),
+    )
+
+
+def test_readiness_rejects_ineligible_closure(tmp_path: Path):
+    paths = _valid_chain(tmp_path)
+    _mutate(
+        paths,
+        "closure",
+        lambda value: value["phase7"].__setitem__(
+            "eligible_for_independent_entry_review", False
+        ),
+    )
+    _expect_readiness_error(paths, GEN4_PHASE7_GOVERNANCE_MISMATCH)
+
+
+@pytest.mark.parametrize(
+    ("artifact", "mutation"),
+    [
+        (
+            "contract",
+            lambda value: value["governance"].__setitem__("phase7_authorized", True),
+        ),
+        (
+            "acquisition_authorization",
+            lambda value: value.__setitem__("phase7_authorized", True),
+        ),
+        ("release", lambda value: value.__setitem__("phase7_authorized", True)),
+        ("result", lambda value: value.__setitem__("phase7_authorized", True)),
+        (
+            "closure",
+            lambda value: value["phase7"].__setitem__("authorized", True),
+        ),
+    ],
+)
+def test_readiness_rejects_preexisting_phase7_authority(
+    tmp_path: Path, artifact: str, mutation
+):
+    paths = _valid_chain(tmp_path)
+    _mutate(paths, artifact, mutation)
+    _expect_readiness_error(
+        paths,
+        (
+            GEN4_PHASE7_GOVERNANCE_MISMATCH,
+            GEN4_PHASE7_IDENTITY_MISMATCH,
+        ),
+    )
+
+
+@pytest.mark.parametrize("artifact", ["contract", "receipt", "release", "result", "closure"])
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("candidate_id", "G2-A|lookback=190|skip=21|top_k=1|rebalance=21"),
+        ("binding_sha256", "a" * 64),
+        ("implementation_sha256", "b" * 64),
+    ],
+)
+def test_readiness_rejects_strategy_identity_drift(
+    tmp_path: Path, artifact: str, field: str, replacement: str
+):
+    paths = _valid_chain(tmp_path)
+    if artifact == "contract":
+        _mutate(
+            paths,
+            artifact,
+            lambda value: value["strategy"].__setitem__(field, replacement),
+        )
+    else:
+        _mutate(paths, artifact, lambda value: value.__setitem__(field, replacement))
+    _expect_readiness_error(paths, GEN4_PHASE7_IDENTITY_MISMATCH)
+
+
+@pytest.mark.parametrize("mutation", ["replace", "swap"])
+def test_readiness_rejects_locked_symbol_drift(tmp_path: Path, mutation: str):
+    paths = _valid_chain(tmp_path)
+
+    def change(value: dict[str, object]) -> None:
+        symbols = list(value["locked_symbols"])
+        if mutation == "replace":
+            symbols[0] = "SPY"
+        else:
+            symbols[0], symbols[1] = symbols[1], symbols[0]
+        value["locked_symbols"] = symbols
+
+    _mutate(paths, "result", change)
+    _expect_readiness_error(paths, GEN4_PHASE7_IDENTITY_MISMATCH)
+
+
+@pytest.mark.parametrize("artifact", ["receipt", "release", "result", "marker"])
+def test_readiness_rejects_hash_chain_tamper(tmp_path: Path, artifact: str):
+    paths = _valid_chain(tmp_path)
+    value = json.loads(paths[artifact].read_text(encoding="utf-8"))
+    paths[artifact].write_text(
+        json.dumps(value, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    _expect_readiness_error(paths, GEN4_PHASE7_CHAIN_MISMATCH)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected"),
+    [
+        (
+            lambda value: value.__setitem__("schema_version", "WRONG"),
+            GEN4_PHASE7_EVIDENCE_INVALID,
+        ),
+        (
+            lambda value: value.__setitem__("candidate_id", "WRONG"),
+            GEN4_PHASE7_IDENTITY_MISMATCH,
+        ),
+        (
+            lambda value: value["phase7"].__setitem__("started", True),
+            GEN4_PHASE7_GOVERNANCE_MISMATCH,
+        ),
+        (
+            lambda value: value.__setitem__("release_sha256", "0" * 64),
+            GEN4_PHASE7_CHAIN_MISMATCH,
+        ),
+    ],
+)
+def test_readiness_rejects_closure_semantic_mutation(
+    tmp_path: Path, mutation, expected: str
+):
+    paths = _valid_chain(tmp_path)
+    _mutate(paths, "closure", mutation)
+    _expect_readiness_error(paths, expected)
+
+
+def test_readiness_reports_semantically_equivalent_closure_bytes(tmp_path: Path):
+    paths = _valid_chain(tmp_path)
+    original = _sha(paths["closure"])
+    closure = json.loads(paths["closure"].read_text(encoding="utf-8"))
+    paths["closure"].write_text(
+        json.dumps(closure, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    report = _readiness(paths)
+    assert report["phase6_closure_sha256"] == _sha(paths["closure"])
+    assert report["phase6_closure_sha256"] != original
+
+
+@pytest.mark.parametrize(
+    ("artifact", "mutation"),
+    [
+        (
+            "contract",
+            lambda value: value["governance"].__setitem__(
+                "retry_after_historical_access_allowed", True
+            ),
+        ),
+        (
+            "acquisition_authorization",
+            lambda value: value.__setitem__(
+                "retry_after_historical_access_allowed", True
+            ),
+        ),
+        ("receipt", lambda value: value.__setitem__("retry_allowed", True)),
+        ("marker", lambda value: value.__setitem__("retry_allowed", True)),
+        (
+            "closure",
+            lambda value: value["one_time_semantics"].__setitem__(
+                "retry_authorized", True
+            ),
+        ),
+    ],
+)
+def test_readiness_rejects_retry_authority(
+    tmp_path: Path, artifact: str, mutation
+):
+    paths = _valid_chain(tmp_path)
+    _mutate(paths, artifact, mutation)
+    _expect_readiness_error(
+        paths,
+        (GEN4_PHASE7_GOVERNANCE_MISMATCH, GEN4_PHASE7_IDENTITY_MISMATCH),
+    )
+
+
+@pytest.mark.parametrize(
+    ("artifact", "mutation"),
+    [
+        (
+            "contract",
+            lambda value: value["governance"].__setitem__(
+                "symbol_substitution_after_access_allowed", True
+            ),
+        ),
+        (
+            "acquisition_authorization",
+            lambda value: value.__setitem__(
+                "symbol_substitution_after_access_allowed", True
+            ),
+        ),
+        (
+            "result",
+            lambda value: value.__setitem__(
+                "holdout_symbol_substitution_executed", True
+            ),
+        ),
+        (
+            "closure",
+            lambda value: value["one_time_semantics"].__setitem__(
+                "symbol_substitution_authorized", True
+            ),
+        ),
+    ],
+)
+def test_readiness_rejects_symbol_substitution(
+    tmp_path: Path, artifact: str, mutation
+):
+    paths = _valid_chain(tmp_path)
+    _mutate(paths, artifact, mutation)
+    _expect_readiness_error(
+        paths,
+        (GEN4_PHASE7_GOVERNANCE_MISMATCH, GEN4_PHASE7_IDENTITY_MISMATCH),
+    )
+
+
+@pytest.mark.parametrize(
+    ("artifact", "mutation"),
+    [
+        (
+            "result",
+            lambda value: value.__setitem__("candidate_search_executed", True),
+        ),
+        (
+            "result",
+            lambda value: value.__setitem__("candidate_parameters_changed", True),
+        ),
+        (
+            "closure",
+            lambda value: value["one_time_semantics"].__setitem__(
+                "methodology_change_from_holdout_forbidden", False
+            ),
+        ),
+        (
+            "closure",
+            lambda value: value["one_time_semantics"].__setitem__(
+                "parameter_change_from_holdout_forbidden", False
+            ),
+        ),
+    ],
+)
+def test_readiness_rejects_result_dependent_change_authority(
+    tmp_path: Path, artifact: str, mutation
+):
+    paths = _valid_chain(tmp_path)
+    _mutate(paths, artifact, mutation)
+    _expect_readiness_error(paths, GEN4_PHASE7_GOVERNANCE_MISMATCH)
+
+
+@pytest.mark.parametrize(
+    ("artifact", "mutation"),
+    [
+        (
+            "contract",
+            lambda value: value["governance"].__setitem__(
+                "recon009_status", "CLOSED"
+            ),
+        ),
+        (
+            "acquisition_authorization",
+            lambda value: value.__setitem__("recon009_status", "CLOSED"),
+        ),
+        ("release", lambda value: value.__setitem__("recon009_status", "CLOSED")),
+        ("result", lambda value: value.__setitem__("recon009_status", "CLOSED")),
+        ("closure", lambda value: value.__setitem__("recon009_status", "CLOSED")),
+    ],
+)
+def test_readiness_rejects_recon009_change(
+    tmp_path: Path, artifact: str, mutation
+):
+    paths = _valid_chain(tmp_path)
+    _mutate(paths, artifact, mutation)
+    _expect_readiness_error(
+        paths,
+        (GEN4_PHASE7_GOVERNANCE_MISMATCH, GEN4_PHASE7_IDENTITY_MISMATCH),
+    )
+
+
+@pytest.mark.parametrize("artifact", ["contract", "acquisition_authorization"])
+def test_readiness_rejects_upstream_paper_only_change(
+    tmp_path: Path, artifact: str
+):
+    paths = _valid_chain(tmp_path)
+    if artifact == "contract":
+        _mutate(
+            paths,
+            artifact,
+            lambda value: value["governance"].__setitem__("paper_only", False),
+        )
+    else:
+        _mutate(paths, artifact, lambda value: value.__setitem__("paper_only", False))
+    _expect_readiness_error(
+        paths,
+        (GEN4_PHASE7_GOVERNANCE_MISMATCH, GEN4_PHASE7_IDENTITY_MISMATCH),
+    )
