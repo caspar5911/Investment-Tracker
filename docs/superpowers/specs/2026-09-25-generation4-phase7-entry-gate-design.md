@@ -129,9 +129,10 @@ After the implementation is tested and committed, create:
 
 The template is explicitly non-authorizing. The request records
 `authority_granted=false`, `phase7_authorized=false`, and the frozen
-implementation commit and evidence identities. These handoff artifacts are
-committed separately from the implementation so the request can cite the
-already-frozen implementation commit.
+implementation commit and all seven evidence identities, including the exact
+`acquisition_authorization_sha256`. These handoff artifacts are committed
+separately from the implementation so the request can cite the already-frozen
+implementation commit.
 
 No real Phase-7 authorization artifact is created by the coordinator.
 
@@ -192,6 +193,13 @@ the split/corporate-action normalizer, dividend-reconciliation-v3, and corrected
 evaluator-v3 identities without making a provider call. The acquisition
 authorization must match the frozen contract's three methodology identities and
 must retain `paper_only=true`.
+
+Only after that strict loader succeeds, the readiness verifier computes
+`acquisition_authorization_sha256` directly from the actual acquisition-
+authorization file bytes. That digest becomes a first-class readiness and
+downstream Independent Audit binding. The selection and virginity artifacts
+remain transitively protected by the existing strict acquisition-authorization
+loader and its frozen hash bindings; this gate does not redesign that layer.
 
 The receipt must satisfy the existing receipt verifier and must match the
 contract and acquisition authorization for candidate, binding,
@@ -299,6 +307,15 @@ The closure must retain:
 - production readiness false;
 - `RECON-009` open.
 
+The closure is the terminal Phase-6 artifact. Readiness must fully validate its
+schema, identity fields, governance fields, and its internal hashes of the
+contract, receipt, release, result, and consumption marker. It then computes
+and reports the actual closure file SHA-256. Before a Phase-7 authorization
+exists, however, no earlier Phase-6 artifact binds that closure-file digest.
+Therefore an otherwise semantically identical closure with different irrelevant
+JSON byte representation is not a pre-authorization chain-hash failure. No
+closure self-hash may be invented and the frozen closure must not be modified.
+
 The receipt, release, result, and closure are not required to contain a direct
 `dividend_reconciliation_sha256` field because their frozen schemas do not
 define one. The dividend-v3 identity is proven by exact equality between the
@@ -314,8 +331,18 @@ Only after all checks pass, return a report with schema
 `GENERATION4-PHASE7-ENTRY-READINESS-v1` and status
 `GENERATION4_PHASE7_READY_FOR_INDEPENDENT_AUDIT`.
 
-The report includes the frozen identities and actual file hashes needed by the
-auditor. It also states:
+The report includes the frozen identities and these seven actual artifact
+hashes needed by the auditor:
+
+1. `phase6_contract_sha256`;
+2. `acquisition_authorization_sha256`;
+3. `acquisition_receipt_sha256`;
+4. `release_sha256`;
+5. `evaluation_result_sha256`;
+6. `evaluation_consumption_marker_sha256`;
+7. `phase6_closure_sha256`.
+
+It also states:
 
 - `authority_granted=false`;
 - `phase7_authorized=false`;
@@ -344,8 +371,13 @@ Unknown fields are forbidden. The authorization must include:
   reconciliation, and evaluator identities;
 - exact ordered locked symbols;
 - holdout and release IDs;
-- file hashes for the Phase-6 contract, receipt, release, result, consumption
-  marker, and closure;
+- `phase6_contract_sha256`;
+- `acquisition_authorization_sha256`;
+- `acquisition_receipt_sha256`;
+- `release_sha256`;
+- `evaluation_result_sha256`;
+- `evaluation_consumption_marker_sha256`;
+- `phase6_closure_sha256`;
 - the exact successful Phase-6 status;
 - `one_time_consumed=true`;
 - `phase7_entry_authorized=true`;
@@ -361,12 +393,15 @@ Unknown fields are forbidden. The authorization must include:
 - `recon009_status=OPEN`;
 - `paper_only=true`.
 
-The authorization loader recomputes the request, gate, CLI, and evidence-file
-hashes and compares every bound value with a fresh readiness report. The
-implementation commit is provenance for the auditor-reviewed code; current
-source-byte hashes remain the runtime drift check because the request and
-future authorization necessarily live in commits after the implementation
-commit.
+The authorization loader recomputes the request, gate, CLI, and all seven
+evidence-file hashes and compares every bound value with a fresh readiness
+report. This includes exact comparison of
+`acquisition_authorization_sha256` and `phase6_closure_sha256`; after the audit
+request and authorization exist, any byte drift in either file fails with
+`GEN4_PHASE7_AUTHORIZATION_MISMATCH`. The implementation commit is provenance
+for the auditor-reviewed code; current source-byte hashes remain the runtime
+drift check because the request and future authorization necessarily live in
+commits after the implementation commit.
 
 The template uses a distinct template schema, authority `NONE`, and status
 `DRAFT_TEMPLATE_NOT_AUTHORIZATION`; it must be rejected by the loader.
@@ -378,8 +413,9 @@ verification. It then loads and validates the Independent Audit authorization.
 
 On success it returns schema `GENERATION4-PHASE7-ENTRY-DECISION-v1` and status
 `GENERATION4_PHASE7_ENTRY_ALLOWED`. The report binds the authorization ID,
-implementation commit, request hash, evidence-chain hashes, candidate,
-holdout, and release. It must continue to report:
+implementation commit, request hash, the seven evidence hashes including
+`acquisition_authorization_sha256`, candidate, holdout, and release. It must
+continue to report:
 
 - `phase7_started=false`;
 - `production_readiness_approved=false`;
@@ -422,8 +458,8 @@ new API is absent, then cover at least:
    applicable layer;
 5. candidate, binding, implementation, methodology, symbol order, holdout, or
    release mismatch fails;
-6. tampering with receipt, release, result, marker, or closure bytes breaks the
-   hash chain;
+6. byte tampering with receipt, release, result, or marker breaks a downstream
+   Phase-6 hash binding;
 7. retry, symbol substitution, candidate search, methodology change, or
    parameter change authority fails;
 8. missing authorization and the non-authorizing template fail;
@@ -443,7 +479,13 @@ new API is absent, then cover at least:
     authorization binding and is not required as a field in the receipt,
     release, or result;
 18. readiness fails closed when the acquisition authorization's
-    `dividend_reconciliation_sha256` differs from the frozen Phase-6 contract.
+    `dividend_reconciliation_sha256` differs from the frozen Phase-6 contract;
+19. closure semantic mutations fail readiness schema, identity, governance, or
+    internal-hash validation, while irrelevant JSON byte representation alone
+    is not classified as a pre-authorization chain-hash failure;
+20. acquisition-authorization byte drift or closure byte drift after the
+    request/authorization binding fails with
+    `GEN4_PHASE7_AUTHORIZATION_MISMATCH`.
 
 After focused tests pass, run the full repository test suite. Then run the
 readiness CLI once against the existing private JSON evidence. Do not pass the
