@@ -34,6 +34,17 @@ ACQUISITION_AUTHORIZATION = (
 SELECTION = ROOT / "data/generation4/preaccess/holdout-selection.json"
 ATTESTATION = ROOT / "data/generation4/preaccess/virginity-attestation.json"
 EVIDENCE = ROOT / "data/generation4/preaccess/virginity-evidence.json"
+TEMPLATE = (
+    ROOT
+    / "data/governance/successor/generation4-phase7-entry-authorization.template.json"
+)
+REQUEST = (
+    ROOT
+    / "data/governance/successor/generation4-phase7-entry-independent-audit-request.json"
+)
+REAL_AUTHORIZATION = (
+    ROOT / "data/governance/successor/generation4-phase7-entry-authorization.json"
+)
 
 
 def _sha(path: Path) -> str:
@@ -1143,3 +1154,67 @@ def test_stage_b_bound_source_hashes_remain_frozen():
     }
     for field, source in sources.items():
         assert authorization[field] == _sha(source)
+
+
+def test_committed_phase7_template_cannot_authorize_entry():
+    request = json.loads(REQUEST.read_text(encoding="utf-8"))
+    with pytest.raises(Generation4Phase7EntryError) as excinfo:
+        load_generation4_phase7_authorization(
+            authorization_path=TEMPLATE,
+            audit_request_path=REQUEST,
+            phase7_entry_path=Path(phase7_entry_module.__file__),
+            phase7_cli_path=Path(phase7_entry_cli.__file__),
+            readiness=request,
+        )
+    assert excinfo.value.code == GEN4_PHASE7_AUTHORIZATION_INVALID
+
+
+def test_committed_phase7_request_is_non_authorizing_and_binds_implementation():
+    request = json.loads(REQUEST.read_text(encoding="utf-8"))
+    assert (
+        request["schema_version"]
+        == "GENERATION4-PHASE7-ENTRY-INDEPENDENT-AUDIT-REQUEST-v1"
+    )
+    assert request["status"] == "READY_FOR_INDEPENDENT_AUDIT"
+    assert request["implementation_commit"] == (
+        "574780fcd69340247c5e34c105138256239196af"
+    )
+    assert request["phase7_gate_implementation_sha256"] == _sha(
+        Path(phase7_entry_module.__file__)
+    )
+    assert request["phase7_cli_implementation_sha256"] == _sha(
+        Path(phase7_entry_cli.__file__)
+    )
+    assert request["phase6_contract_sha256"] == _sha(CONTRACT)
+    assert request["acquisition_authorization_sha256"] == _sha(
+        ACQUISITION_AUTHORIZATION
+    )
+    expected_private_hashes = {
+        "acquisition_receipt_sha256": "98d6e5696749382df706a39c461135a3d897b9c8654b0bae5d8e3b75d58426bb",
+        "release_sha256": "75ff62f5ebb3ff7f0051eedc3d9e5020cc951acd294e64fb81883e4d06492c6d",
+        "evaluation_result_sha256": "73f8fa006219855522ecb3dab264078bd494ae8a1474542f58be7556c88facfc",
+        "evaluation_consumption_marker_sha256": "5841029bb3c29b164399150318cb3590591c96d0ef87a55e61f5e0973615848c",
+        "phase6_closure_sha256": "58d5d4ee63cca02ebad8a64be8f57a86c5ac4e986bc4e89a16818bb73d3c0330",
+    }
+    for field, expected in expected_private_hashes.items():
+        assert request[field] == expected
+    assert request["authority_granted"] is False
+    assert request["phase7_authorized"] is False
+    assert request["phase7_started"] is False
+    assert request["production_readiness_approved"] is False
+    assert request["live_trading_authorized"] is False
+    assert request["recon009_status"] == "OPEN"
+    assert request["paper_only"] is True
+
+
+def test_real_repository_entry_stays_forbidden_without_authorization():
+    assert not REAL_AUTHORIZATION.exists()
+    with pytest.raises(Generation4Phase7EntryError) as excinfo:
+        load_generation4_phase7_authorization(
+            authorization_path=REAL_AUTHORIZATION,
+            audit_request_path=REQUEST,
+            phase7_entry_path=Path(phase7_entry_module.__file__),
+            phase7_cli_path=Path(phase7_entry_cli.__file__),
+            readiness={},
+        )
+    assert excinfo.value.code == GEN4_PHASE7_AUTHORIZATION_MISSING
