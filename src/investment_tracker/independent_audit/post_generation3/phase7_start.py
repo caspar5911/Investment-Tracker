@@ -43,7 +43,9 @@ _DIVIDEND_RECONCILIATION_SHA256 = (
 _SUCCESSOR_EVALUATOR_SHA256 = (
     "fb20b368d6d7ac0f698c5ab45e5824aaad73341cccfacc25bc6903b98c9a2b21"
 )
-_LOCKED_SYMBOLS = ("QQQM", "FALN", "IIPR", "PSTL", "EFAS")
+_LOCKED_SYMBOLS_SHA256 = (
+    "1f7880217a7679df2513551372d8abe1b81c63d13ab6c729077c017186ba80b7"
+)
 
 _IDENTITY_EXPECTATIONS = {
     "candidate_id": _CANDIDATE_ID,
@@ -135,7 +137,7 @@ def _sha(path: Path) -> str:
     return sha256(Path(path).read_bytes()).hexdigest()
 
 
-def _canonical_json(value: dict[str, Any]) -> bytes:
+def _canonical_json(value: Any) -> bytes:
     return json.dumps(
         value,
         sort_keys=True,
@@ -241,9 +243,10 @@ def verify_generation4_phase7_start_readiness(
             code=GEN4_PHASE7_START_BINDING_MISMATCH,
             field=f"authorization.{field}",
         )
+    locked_symbols = list(authorization.locked_symbols)
     _require_equal(
-        list(authorization.locked_symbols),
-        list(_LOCKED_SYMBOLS),
+        sha256(_canonical_json(locked_symbols)).hexdigest(),
+        _LOCKED_SYMBOLS_SHA256,
         code=GEN4_PHASE7_START_BINDING_MISMATCH,
         field="authorization.locked_symbols",
     )
@@ -331,7 +334,7 @@ def verify_generation4_phase7_start_readiness(
         "split_normalizer_sha256": _SPLIT_NORMALIZER_SHA256,
         "dividend_reconciliation_sha256": _DIVIDEND_RECONCILIATION_SHA256,
         "successor_evaluator_sha256": _SUCCESSOR_EVALUATOR_SHA256,
-        "locked_symbols": list(_LOCKED_SYMBOLS),
+        "locked_symbols": locked_symbols,
         "holdout_id": authorization.holdout_id,
         "release_id": authorization.release_id,
         "phase6_status": PHASE6_STATUS,

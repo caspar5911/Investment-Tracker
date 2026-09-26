@@ -1216,14 +1216,15 @@ def test_committed_phase7_request_is_non_authorizing_and_binds_implementation():
     assert request["paper_only"] is True
 
 
-def test_real_repository_entry_stays_forbidden_without_authorization():
-    assert not REAL_AUTHORIZATION.exists()
-    with pytest.raises(Generation4Phase7EntryError) as excinfo:
-        load_generation4_phase7_authorization(
-            authorization_path=REAL_AUTHORIZATION,
-            audit_request_path=REQUEST,
-            phase7_entry_path=Path(phase7_entry_module.__file__),
-            phase7_cli_path=Path(phase7_entry_cli.__file__),
-            readiness={},
-        )
-    assert excinfo.value.code == GEN4_PHASE7_AUTHORIZATION_MISSING
+def test_real_repository_entry_authorization_is_strict_and_bound():
+    request = json.loads(REQUEST.read_text(encoding="utf-8"))
+    authorization = load_generation4_phase7_authorization(
+        authorization_path=REAL_AUTHORIZATION,
+        audit_request_path=REQUEST,
+        phase7_entry_path=Path(phase7_entry_module.__file__),
+        phase7_cli_path=Path(phase7_entry_cli.__file__),
+        readiness=request,
+    )
+    assert authorization.status == "GENERATION4_PHASE7_ENTRY_AUTHORIZED"
+    assert authorization.phase7_entry_authorized is True
+    assert authorization.phase7_started is False

@@ -8,7 +8,9 @@ import pytest
 
 from investment_tracker.independent_audit.post_generation3 import (
     phase7_entry as phase7_entry_module,
+    phase7_entry_cli,
     phase7_start as phase7_start_module,
+    phase7_start_cli,
 )
 from investment_tracker.independent_audit.post_generation3.phase7_start import (
     GEN4_PHASE7_ALREADY_STARTED,
@@ -616,3 +618,162 @@ def test_exclusive_create_race_fails_closed(
 
     assert excinfo.value.code == GEN4_PHASE7_ALREADY_STARTED
     assert not output.exists()
+
+
+def _cli_fixture(tmp_path: Path) -> dict[str, Path]:
+    paths, _, contract = _contract_fixture(tmp_path)
+    paths["phase7_entry_cli"] = Path(phase7_entry_cli.__file__)
+    paths["phase7_start_cli"] = Path(phase7_start_cli.__file__)
+
+    request = json.loads(paths["audit_request"].read_text(encoding="utf-8"))
+    request["phase7_cli_implementation_sha256"] = _file_sha(
+        paths["phase7_entry_cli"]
+    )
+    _write(paths["audit_request"], request)
+    authorization = json.loads(
+        paths["authorization"].read_text(encoding="utf-8")
+    )
+    authorization["phase7_cli_implementation_sha256"] = _file_sha(
+        paths["phase7_entry_cli"]
+    )
+    authorization["audit_request_sha256"] = _file_sha(paths["audit_request"])
+    _write(paths["authorization"], authorization)
+
+    readiness = verify_generation4_phase7_start_readiness(**_start_kwargs(paths))
+    for field in (
+        "entry_authorization_sha256",
+        "audit_request_sha256",
+        "phase7_entry_cli_source_sha256",
+    ):
+        contract[field] = readiness[field]
+    contract["phase7_start_source_sha256"] = _file_sha(paths["phase7_start"])
+    contract["phase7_start_cli_source_sha256"] = _file_sha(
+        paths["phase7_start_cli"]
+    )
+    _write(paths["start_contract"], contract)
+    paths["start_output"] = tmp_path / "phase7-start.json"
+    return paths
+
+
+def _cli_common_args(paths: dict[str, Path]) -> list[str]:
+    return [
+        "--phase6-contract",
+        str(paths["contract"]),
+        "--acquisition-authorization",
+        str(paths["acquisition_authorization"]),
+        "--selection",
+        str(paths["selection"]),
+        "--virginity-attestation",
+        str(paths["virginity_attestation"]),
+        "--virginity-evidence",
+        str(paths["virginity_evidence"]),
+        "--acquisition-receipt",
+        str(paths["receipt"]),
+        "--release",
+        str(paths["release"]),
+        "--phase6-result",
+        str(paths["result"]),
+        "--consumption-marker",
+        str(paths["marker"]),
+        "--phase6-closure",
+        str(paths["closure"]),
+        "--audit-request",
+        str(paths["audit_request"]),
+        "--authorization",
+        str(paths["authorization"]),
+        "--start-contract",
+        str(paths["start_contract"]),
+    ]
+
+
+def test_cli_verify_start_readiness_is_non_mutating(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+):
+    paths = _cli_fixture(tmp_path)
+
+    result = phase7_start_cli.main(
+        ["verify-start-readiness", *_cli_common_args(paths)]
+    )
+
+    assert result == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "GENERATION4_PHASE7_START_READY"
+    assert output["phase7_started"] is False
+    assert output["phase7_performance_evaluation_authorized"] is False
+    assert not paths["start_output"].exists()
+    assert "metrics" not in output
+
+
+def test_cli_start_phase7_creates_only_requested_artifact(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+):
+    paths = _cli_fixture(tmp_path)
+
+    result = phase7_start_cli.main(
+        [
+            "start-phase7",
+            *_cli_common_args(paths),
+            "--start-output",
+            str(paths["start_output"]),
+        ]
+    )
+
+    assert result == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "GENERATION4_PHASE7_STARTED"
+    assert output["phase7_started"] is True
+    assert output["phase7_performance_evaluation_authorized"] is False
+    assert json.loads(paths["start_output"].read_bytes()) == output
+    assert "metrics" not in output
+
+
+def test_cli_error_is_canonical_nonzero_json_without_metrics(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+):
+    paths = _cli_fixture(tmp_path)
+    paths["authorization"].unlink()
+
+    result = phase7_start_cli.main(
+        ["verify-start-readiness", *_cli_common_args(paths)]
+    )
+
+    assert result == 1
+    raw = capsys.readouterr().out.strip()
+    output = json.loads(raw)
+    assert raw == json.dumps(
+        output,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    )
+    assert output["status"] == "FORBIDDEN"
+    assert output["code"] == GEN4_PHASE7_START_ENTRY_INVALID
+    assert "metrics" not in output
+
+
+def test_cli_exposes_only_start_boundary_commands_and_arguments():
+    source = Path(phase7_start_cli.__file__).read_text(encoding="utf-8")
+    for forbidden in (
+        "OpenTradeContext",
+        "place_order",
+        "modify_order",
+        "cancel_order",
+        "unlock_trade",
+        "acquire-final-holdout",
+        "evaluate-final-holdout",
+        "issue-final-holdout-release",
+        "close-phase6",
+        "--bundle",
+        "--key",
+        "--overwrite",
+        "--production",
+        "--live-trading",
+    ):
+        assert forbidden not in source
+
+    parser = phase7_start_cli._parser()
+    assert set(parser._subparsers._group_actions[0].choices) == {
+        "verify-start-readiness",
+        "start-phase7",
+    }
