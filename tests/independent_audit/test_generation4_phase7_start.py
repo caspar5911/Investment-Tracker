@@ -36,6 +36,13 @@ from tests.independent_audit.test_generation4_phase7_entry import (
 
 
 EXPECTED_SYMBOLS = ["QQQM", "FALN", "IIPR", "PSTL", "EFAS"]
+ROOT = Path(__file__).resolve().parents[2]
+COMMITTED_START_CONTRACT = (
+    ROOT / "data/governance/successor/generation4-phase7-start-contract.json"
+)
+COMMITTED_START_ARTIFACT = (
+    ROOT / "data/governance/successor/generation4-phase7-start.json"
+)
 EVIDENCE_HASH_FIELDS = (
     "phase6_contract_sha256",
     "acquisition_authorization_sha256",
@@ -777,3 +784,77 @@ def test_cli_exposes_only_start_boundary_commands_and_arguments():
         "verify-start-readiness",
         "start-phase7",
     }
+
+
+def test_committed_start_contract_binds_frozen_implementation_and_entry():
+    contract = json.loads(COMMITTED_START_CONTRACT.read_text(encoding="utf-8"))
+    authorization_path = (
+        ROOT
+        / "data/governance/successor/generation4-phase7-entry-authorization.json"
+    )
+    request_path = (
+        ROOT
+        / "data/governance/successor/"
+        "generation4-phase7-entry-independent-audit-request.json"
+    )
+    authorization = json.loads(authorization_path.read_text(encoding="utf-8"))
+
+    assert contract["phase7_start_implementation_commit"] == (
+        "356ee53a7652b33f2ea91bf8779bd174fa794fda"
+    )
+    assert contract["phase7_entry_implementation_commit"] == (
+        "7893306e3c77b85c59f044b787a55579593c678b"
+    )
+    assert contract["phase7_start_source_sha256"] == _file_sha(
+        Path(phase7_start_module.__file__)
+    )
+    assert contract["phase7_start_cli_source_sha256"] == _file_sha(
+        Path(phase7_start_cli.__file__)
+    )
+    assert contract["phase7_entry_source_sha256"] == _file_sha(
+        Path(phase7_entry_module.__file__)
+    )
+    assert contract["phase7_entry_cli_source_sha256"] == _file_sha(
+        Path(phase7_entry_cli.__file__)
+    )
+    assert contract["entry_authorization_sha256"] == _file_sha(
+        authorization_path
+    )
+    assert contract["audit_request_sha256"] == _file_sha(request_path)
+    for field in (
+        "candidate_id",
+        "binding_sha256",
+        "implementation_sha256",
+        "split_normalizer_sha256",
+        "dividend_reconciliation_sha256",
+        "successor_evaluator_sha256",
+        "locked_symbols",
+        "holdout_id",
+        "release_id",
+        "authorization_id",
+        *EVIDENCE_HASH_FIELDS,
+    ):
+        assert contract[field] == authorization[field]
+    assert contract["phase7_entry_authorized"] is True
+    assert contract["phase7_started"] is False
+    assert contract["phase7_performance_evaluation_authorized"] is False
+    assert contract["production_readiness_approved"] is False
+    assert contract["live_trading_authorized"] is False
+    assert contract["recon009_status"] == "OPEN"
+    assert contract["paper_only"] is True
+
+
+def test_real_repository_start_state_is_governed():
+    if not COMMITTED_START_ARTIFACT.exists():
+        return
+    artifact = json.loads(COMMITTED_START_ARTIFACT.read_text(encoding="utf-8"))
+    assert artifact["schema_version"] == "GENERATION4-PHASE7-START-v1"
+    assert artifact["status"] == "GENERATION4_PHASE7_STARTED"
+    assert artifact["phase7_entry_authorized"] is True
+    assert artifact["phase7_started"] is True
+    assert artifact["phase7_performance_evaluation_authorized"] is False
+    assert artifact["production_readiness_approved"] is False
+    assert artifact["live_trading_authorized"] is False
+    assert artifact["recon009_status"] == "OPEN"
+    assert artifact["paper_only"] is True
+    assert artifact["artifact_sha256"] == _artifact_self_hash(artifact)
