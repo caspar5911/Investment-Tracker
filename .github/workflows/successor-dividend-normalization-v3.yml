@@ -36,6 +36,12 @@ on:
       - "data/generation4/preaccess/holdout-selection-contract.json"
       - "data/governance/successor/post-generation3-methodology-authorization.template.json"
       - "docs/superpowers/reports/2026-09-23-post-generation3-audit-rejection-remediation.md"
+      - "src/investment_tracker/independent_audit/post_generation3/phase7_evaluation_cli.py"
+      - "src/investment_tracker/quant/phase7/generation4_durability.py"
+      - "tests/independent_audit/test_generation4_phase7_evaluation.py"
+      - "tests/independent_audit/test_generation4_phase7_data_boundary.py"
+      - "tests/independent_audit/test_generation4_phase7_evaluation_cli.py"
+      - "tests/quant/test_generation4_phase7_durability.py"
       - ".github/workflows/successor-dividend-normalization-v3.yml"
   pull_request:
     paths:
@@ -68,6 +74,12 @@ on:
       - "data/generation4/preaccess/holdout-selection-contract.json"
       - "data/governance/successor/post-generation3-methodology-authorization.template.json"
       - "docs/superpowers/reports/2026-09-23-post-generation3-audit-rejection-remediation.md"
+      - "src/investment_tracker/independent_audit/post_generation3/phase7_evaluation_cli.py"
+      - "src/investment_tracker/quant/phase7/generation4_durability.py"
+      - "tests/independent_audit/test_generation4_phase7_evaluation.py"
+      - "tests/independent_audit/test_generation4_phase7_data_boundary.py"
+      - "tests/independent_audit/test_generation4_phase7_evaluation_cli.py"
+      - "tests/quant/test_generation4_phase7_durability.py"
       - ".github/workflows/successor-dividend-normalization-v3.yml"
 
 jobs:
@@ -95,7 +107,11 @@ jobs:
             tests/independent_audit/test_generation4_stage_a_boundary.py \
             tests/independent_audit/test_generation4_stage_b_boundary.py \
             tests/independent_audit/test_generation4_phase7_entry.py \
-            tests/independent_audit/test_generation4_phase7_start.py
+            tests/independent_audit/test_generation4_phase7_start.py \
+            tests/independent_audit/test_generation4_phase7_evaluation.py \
+            tests/independent_audit/test_generation4_phase7_data_boundary.py \
+            tests/independent_audit/test_generation4_phase7_evaluation_cli.py \
+            tests/quant/test_generation4_phase7_durability.py
 
       - name: Governance boundary
         shell: bash
