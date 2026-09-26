@@ -56,6 +56,11 @@ from investment_tracker.quant.generation2.strategy import build_targets
 __all__ = [
     "BENCHMARK_SYMBOL",
     "CANDIDATE_ID",
+    "CHECKPOINT_PENDING",
+    "CHECKPOINT_SESSIONS_EARLY",
+    "CHECKPOINT_SESSIONS_INTERIM",
+    "CHECKPOINT_SESSIONS_PRIMARY",
+    "EARLY_DIAGNOSTIC",
     "FRICTION_CASES_BPS",
     "GEN4_PHASE7_DURABILITY_ALIGNMENT_INVALID",
     "GEN4_PHASE7_DURABILITY_BENCHMARK_INVALID",
@@ -64,7 +69,14 @@ __all__ = [
     "GEN4_PHASE7_DURABILITY_UNIVERSE_INVALID",
     "Generation4DurabilityError",
     "INITIAL_CASH",
+    "INTERIM_DIAGNOSTIC",
+    "PHASE7_GOVERNANCE_FAILURE",
+    "PHASE7_PROSPECTIVE_EVIDENCE_COMPLETE",
+    "PHASE7_PROSPECTIVE_EVIDENCE_PENDING",
+    "PHASE7_UNKNOWN_ABSTAIN",
     "PRIMARY_FRICTION_BPS",
+    "PRIMARY_PHASE7_ASSESSMENT",
+    "ProspectiveCheckpoint",
     "RESEARCH_UNIVERSE",
     "ReusedHistoryDataset",
     "benchmark_total_return",
@@ -78,6 +90,7 @@ __all__ = [
     "longest_losing_month_sequence",
     "period_average",
     "period_positive_fraction",
+    "prospective_checkpoint_report",
     "resolve_fixed_candidate",
     "return_concentration",
     "rolling_period_returns",
@@ -103,6 +116,21 @@ BENCHMARK_SYMBOL = "SPY"
 FRICTION_CASES_BPS = (0, 3, 10, 25, 50)
 PRIMARY_FRICTION_BPS = 3
 INITIAL_CASH = 100_000.0
+
+# Prospective checkpoint thresholds (scored sessions) and labels.
+CHECKPOINT_SESSIONS_EARLY = 63
+CHECKPOINT_SESSIONS_INTERIM = 126
+CHECKPOINT_SESSIONS_PRIMARY = 252
+EARLY_DIAGNOSTIC = "EARLY_DIAGNOSTIC"
+INTERIM_DIAGNOSTIC = "INTERIM_DIAGNOSTIC"
+PRIMARY_PHASE7_ASSESSMENT = "PRIMARY_PHASE7_ASSESSMENT"
+CHECKPOINT_PENDING = "PENDING"
+
+# Prospective result status semantics (evidence-oriented, not a verdict).
+PHASE7_PROSPECTIVE_EVIDENCE_PENDING = "PHASE7_PROSPECTIVE_EVIDENCE_PENDING"
+PHASE7_PROSPECTIVE_EVIDENCE_COMPLETE = "PHASE7_PROSPECTIVE_EVIDENCE_COMPLETE"
+PHASE7_UNKNOWN_ABSTAIN = "PHASE7_UNKNOWN_ABSTAIN"
+PHASE7_GOVERNANCE_FAILURE = "PHASE7_GOVERNANCE_FAILURE"
 
 # ---------------------------------------------------------------------------
 # Error codes
@@ -649,3 +677,218 @@ def historical_durability_report(dataset: ReusedHistoryDataset) -> dict[str, Any
         "historical_windows": historical_windows,
         "corporate_action_evidence": corporate_action_evidence,
     }
+
+
+# ---------------------------------------------------------------------------
+# Prospective checkpoint lane (post-start primary evidence)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ProspectiveCheckpoint:
+    """Caller-supplied prospective checkpoint inputs.
+
+    ``bars`` spans the causal warmup (<=210 sessions) plus the scored sessions
+    accumulated since the frozen Phase-7 start. ``scored_start`` is the frozen
+    first eligible session strictly after the start timestamp; sessions at or
+    after it are scored and warmup P&L is excluded. ``checkpoint_cutoff`` caps
+    how many scored sessions are evaluated. No provider is accessed here.
+    """
+
+    bars: dict[str, pd.DataFrame]
+    scored_start: pd.Timestamp
+    checkpoint_cutoff: int = CHECKPOINT_SESSIONS_PRIMARY
+
+
+def _checkpoint_label(scored_count: int) -> str:
+    """Descriptive checkpoint label for a given number of scored sessions.
+
+    Fewer than 63 scored sessions has no descriptive checkpoint and remains
+    pending; 63/126 are descriptive only; 252+ reaches the primary assessment.
+    """
+    if scored_count >= CHECKPOINT_SESSIONS_PRIMARY:
+        return PRIMARY_PHASE7_ASSESSMENT
+    if scored_count >= CHECKPOINT_SESSIONS_INTERIM:
+        return INTERIM_DIAGNOSTIC
+    if scored_count >= CHECKPOINT_SESSIONS_EARLY:
+        return EARLY_DIAGNOSTIC
+    return CHECKPOINT_PENDING
+
+
+def _prospective_governance_flags() -> dict[str, Any]:
+    return {
+        "paper_only": True,
+        "production_authority": False,
+        "live_trading_authority": False,
+        "production_pass": False,
+        "no_tuning_performed": True,
+        "no_final_holdout_reuse": True,
+        "candidate_changed": False,
+        "methodology_changed": False,
+    }
+
+
+def prospective_checkpoint_report(snapshot: ProspectiveCheckpoint) -> dict[str, Any]:
+    """Build the prospective Phase-7 checkpoint report.
+
+    The result status is evidence-oriented, not a production verdict:
+
+    - fewer than 252 scored sessions -> ``PHASE7_PROSPECTIVE_EVIDENCE_PENDING``;
+    - 252+ scored sessions with every required non-DQ metric available ->
+      ``PHASE7_PROSPECTIVE_EVIDENCE_COMPLETE``;
+    - required evidence missing, inconsistent, or unreconcilable ->
+      ``PHASE7_UNKNOWN_ABSTAIN``.
+
+    A complete result does not imply profitability, production readiness, or
+    live-trading approval; those flags stay false. No missing future session is
+    ever synthesized or estimated. No provider is accessed here.
+    """
+    bars = snapshot.bars
+    validate_research_universe(bars)
+    cutoff = int(snapshot.checkpoint_cutoff)
+    if cutoff <= 0:
+        raise Generation4DurabilityError(
+            GEN4_PHASE7_DURABILITY_METRIC_INVALID, "checkpoint cutoff must be positive"
+        )
+    scored_start = pd.Timestamp(snapshot.scored_start)
+
+    # The scored session calendar is the SPY benchmark calendar from the frozen
+    # scored start forward, capped at the checkpoint. The count reflects only
+    # sessions actually present: no missing session is synthesized.
+    spy_index = sorted(pd.DatetimeIndex(bars[BENCHMARK_SYMBOL]["close"].index))
+    scored_calendar = [session for session in spy_index if session >= scored_start][:cutoff]
+    scored_count = len(scored_calendar)
+    report: dict[str, Any] = {
+        "schema": "GENERATION4-PHASE7-PROSPECTIVE-CHECKPOINT-v1",
+        "candidate_id": CANDIDATE_ID,
+        "checkpoint_cutoff": int(cutoff),
+        "scored_session_count": int(scored_count),
+        "checkpoint_label": _checkpoint_label(scored_count),
+        "scored_start": scored_start.isoformat(),
+    }
+    report.update(_prospective_governance_flags())
+
+    if scored_count == 0:
+        report.update(
+            status=PHASE7_PROSPECTIVE_EVIDENCE_PENDING,
+            reason="NO_SCORED_SESSIONS",
+            friction_cases={},
+            benchmark_total_return=_unknown("INSUFFICIENT_DATA"),
+            excess_return_vs_spy=_unknown("INSUFFICIENT_DATA"),
+            excess_return_vs_cash=_unknown("INSUFFICIENT_DATA"),
+            exposure_invariant_passes=False,
+        )
+        return report
+
+    # Exact alignment: every scored session must be present in every
+    # non-benchmark strategy frame. A gap in any frame makes the evidence
+    # unreconcilable -> ABSTAIN (no rows are dropped to paper over the gap).
+    misaligned: dict[str, list[str]] = {}
+    for symbol in RESEARCH_UNIVERSE:
+        if symbol == BENCHMARK_SYMBOL:
+            continue
+        index = set(pd.DatetimeIndex(bars[symbol]["close"].index))
+        missing = [session for session in scored_calendar if session not in index]
+        if missing:
+            misaligned[symbol] = [session.isoformat() for session in missing]
+    if misaligned:
+        report.update(
+            status=PHASE7_UNKNOWN_ABSTAIN,
+            reason="INCONSISTENT_ALIGNMENT",
+            misaligned_symbols=sorted(misaligned),
+            friction_cases={},
+            benchmark_total_return=_unknown("INCONSISTENT_ALIGNMENT"),
+            excess_return_vs_spy=_unknown("INCONSISTENT_ALIGNMENT"),
+            excess_return_vs_cash=_unknown("INCONSISTENT_ALIGNMENT"),
+            exposure_invariant_passes=False,
+        )
+        return report
+
+    # Aligned: replay the fixed candidate over the whole window (warmup gives
+    # causal context) and slice the scored P&L out of one continuous replay per
+    # friction case; the portfolio state is never reset at a subperiod boundary.
+    targets = build_fixed_targets(bars)
+    replays = {
+        bps: replay_decision_targets(
+            bars, tuple(targets), friction_bps=bps, initial_cash=INITIAL_CASH
+        )
+        for bps in FRICTION_CASES_BPS
+    }
+    primary_sessions, primary_equity = scored_equity_window(
+        replays[PRIMARY_FRICTION_BPS], scored_start
+    )
+    primary_sessions = tuple(primary_sessions)[:cutoff]
+    primary_equity = tuple(primary_equity)[:cutoff]
+    if len(primary_sessions) != scored_count:
+        report.update(
+            status=PHASE7_UNKNOWN_ABSTAIN,
+            reason="CANNOT_RECONCILE",
+            friction_cases={},
+            benchmark_total_return=_unknown("CANNOT_RECONCILE"),
+            excess_return_vs_spy=_unknown("CANNOT_RECONCILE"),
+            excess_return_vs_cash=_unknown("CANNOT_RECONCILE"),
+            exposure_invariant_passes=False,
+        )
+        return report
+    scored_sessions = primary_sessions
+
+    cases: dict[str, dict[str, Any]] = {}
+    for bps in FRICTION_CASES_BPS:
+        sessions, equity = scored_equity_window(replays[bps], scored_start)
+        sessions = tuple(sessions)[:cutoff]
+        equity = tuple(equity)[:cutoff]
+        cases[str(bps)] = {
+            "friction_bps": int(bps),
+            "scored_session_count": int(len(sessions)),
+            "total_return": scored_total_return(sessions, equity),
+        }
+
+    primary_total = cases[str(PRIMARY_FRICTION_BPS)]["total_return"]
+    benchmark = benchmark_total_return(bars, scored_sessions)
+    if primary_total["status"] == "AVAILABLE" and benchmark["status"] == "AVAILABLE":
+        excess_spy = excess_return(primary_total, benchmark)
+    else:
+        excess_spy = _unknown("INSUFFICIENT_DATA")
+    if primary_total["status"] == "AVAILABLE":
+        excess_cash = {
+            "status": "AVAILABLE",
+            "value": float(primary_total["value"]) - 0.0,
+            "reason": "OK",
+        }
+    else:
+        excess_cash = _unknown(primary_total["reason"])
+
+    exposure_ok = bool(exposure_invariant_passes(replays[PRIMARY_FRICTION_BPS]))
+    months = compound_month_returns(scored_sessions, primary_equity)
+    dq = drawdown_calmar_recovery(scored_sessions, primary_equity)
+
+    required_available = (
+        all(case["total_return"]["status"] == "AVAILABLE" for case in cases.values())
+        and benchmark["status"] == "AVAILABLE"
+        and excess_spy["status"] == "AVAILABLE"
+        and excess_cash["status"] == "AVAILABLE"
+        and exposure_ok
+    )
+    if scored_count < CHECKPOINT_SESSIONS_PRIMARY:
+        status = PHASE7_PROSPECTIVE_EVIDENCE_PENDING
+    elif required_available:
+        status = PHASE7_PROSPECTIVE_EVIDENCE_COMPLETE
+    else:
+        status = PHASE7_UNKNOWN_ABSTAIN
+
+    report.update(
+        status=status,
+        friction_cases=cases,
+        benchmark_total_return=benchmark,
+        excess_return_vs_spy=excess_spy,
+        excess_return_vs_cash=excess_cash,
+        exposure_invariant_passes=exposure_ok,
+        calendar_month_returns=months,
+        positive_month_fraction=period_positive_fraction(months),
+        worst_complete_month=worst_period(months),
+        rolling_12m_return=_trailing_window(scored_sessions, primary_equity, 12),
+        max_drawdown=dq["max_drawdown"],
+        calmar=dq["calmar"],
+        recovery=dq["recovery"],
+    )
+    return report

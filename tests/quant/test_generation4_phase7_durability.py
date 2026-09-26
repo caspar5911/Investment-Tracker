@@ -471,3 +471,139 @@ def test_historical_windows_are_available_when_complete() -> None:
 def test_historical_report_is_deterministic() -> None:
     dataset = dur.ReusedHistoryDataset(_history_bars(210), True)
     assert dur.historical_durability_report(dataset) == dur.historical_durability_report(dataset)
+
+
+# ---------------------------------------------------------------------------
+# Prospective checkpoint lane (post-start primary evidence)
+# ---------------------------------------------------------------------------
+
+# The scored window begins after the (already-committed) Phase-7 start
+# timestamp. These synthetic snapshots use 210 causal warmup sessions
+# (the maximum permitted) so the 189-lookback + 21-skip target engine has full
+# context before the first scored session. The scored region is the SPY
+# benchmark calendar from ``scored_start`` forward, capped at the checkpoint.
+PROSPECTIVE_WARMUP = 210
+
+
+def _prospective_bars(total: int) -> tuple[dict[str, pd.DataFrame], pd.Timestamp]:
+    """A prospective universe spanning ``total`` sessions from 2024.
+
+    QQQ trends up fastest, SPY trends gently (so the benchmark total return is
+    non-trivial and hand-computable), the rest are flat. The scored window
+    starts at session index ``PROSPECTIVE_WARMUP``.
+    """
+    index = pd.bdate_range("2024-01-01", periods=total, tz="UTC")
+    frames: dict[str, pd.DataFrame] = {}
+    for symbol in UNIVERSE:
+        if symbol == "QQQ":
+            close = [100.0 * (1.002**i) for i in range(total)]
+        elif symbol == "SPY":
+            close = [100.0 * (1.001**i) for i in range(total)]
+        else:
+            close = [100.0] * total
+        frames[symbol] = pd.DataFrame(
+            {"open": [value * 0.999 for value in close], "close": close}, index=index
+        )
+    return frames, index[PROSPECTIVE_WARMUP]
+
+
+def _prospective_report(total: int, checkpoint_cutoff: int = 252) -> dict:
+    bars, start = _prospective_bars(total)
+    snapshot = dur.ProspectiveCheckpoint(bars, start, checkpoint_cutoff)
+    return dur.prospective_checkpoint_report(snapshot)
+
+
+def test_prospective_report_schema() -> None:
+    report = _prospective_report(270)
+    assert report["schema"] == "GENERATION4-PHASE7-PROSPECTIVE-CHECKPOINT-v1"
+
+
+def test_prospective_fewer_than_sixty_three_sessions_remains_pending() -> None:
+    report = _prospective_report(270)  # 60 scored sessions
+    assert report["scored_session_count"] == 60
+    assert report["checkpoint_label"] == "PENDING"
+    assert report["status"] == dur.PHASE7_PROSPECTIVE_EVIDENCE_PENDING
+
+
+def test_prospective_sixty_three_sessions_is_early_diagnostic() -> None:
+    report = _prospective_report(273)  # 63 scored sessions
+    assert report["scored_session_count"] == 63
+    assert report["checkpoint_label"] == dur.EARLY_DIAGNOSTIC
+    assert report["status"] == dur.PHASE7_PROSPECTIVE_EVIDENCE_PENDING
+
+
+def test_prospective_126_sessions_is_interim_diagnostic() -> None:
+    report = _prospective_report(336)  # 126 scored sessions
+    assert report["scored_session_count"] == 126
+    assert report["checkpoint_label"] == dur.INTERIM_DIAGNOSTIC
+    assert report["status"] == dur.PHASE7_PROSPECTIVE_EVIDENCE_PENDING
+
+
+def test_prospective_252_sessions_is_primary_assessment_eligibility() -> None:
+    report = _prospective_report(462)  # 252 scored sessions
+    assert report["scored_session_count"] == 252
+    assert report["checkpoint_label"] == dur.PRIMARY_PHASE7_ASSESSMENT
+
+
+def test_prospective_fewer_than_252_never_returns_complete() -> None:
+    for total in (273, 336):
+        report = _prospective_report(total)
+        assert report["status"] != dur.PHASE7_PROSPECTIVE_EVIDENCE_COMPLETE
+
+
+def test_prospective_does_not_synthesize_missing_sessions() -> None:
+    # Only 60 sessions are available; requesting the 252 checkpoint must not
+    # pad or estimate the missing sessions.
+    report = _prospective_report(270, checkpoint_cutoff=252)
+    assert report["scored_session_count"] == 60
+    assert report["checkpoint_label"] == "PENDING"
+
+
+def test_prospective_reports_all_five_friction_cases() -> None:
+    report = _prospective_report(462)
+    assert set(report["friction_cases"]) == {"0", "3", "10", "25", "50"}
+
+
+def test_prospective_spy_benchmark_alignment_is_exact() -> None:
+    total, warmup = 462, PROSPECTIVE_WARMUP
+    bars, start = _prospective_bars(total)
+    spy_close = bars["SPY"]["close"]
+    scored = [s for s in spy_close.index if s >= start][:252]
+    expected = float(spy_close.loc[scored[-1]]) / float(spy_close.loc[scored[0]]) - 1.0
+    snapshot = dur.ProspectiveCheckpoint(bars, start, 252)
+    report = dur.prospective_checkpoint_report(snapshot)
+    assert report["benchmark_total_return"]["status"] == "AVAILABLE"
+    assert report["benchmark_total_return"]["value"] == pytest.approx(expected, rel=1e-12)
+
+
+def test_prospective_excess_return_vs_cash_is_exact() -> None:
+    report = _prospective_report(462)
+    primary = report["friction_cases"]["3"]["total_return"]
+    # Cash earns 0%; the excess-versus-cash return is the primary total return.
+    assert report["excess_return_vs_cash"]["status"] == "AVAILABLE"
+    assert report["excess_return_vs_cash"]["value"] == pytest.approx(primary["value"], rel=1e-12)
+
+
+def test_prospective_missing_required_evidence_abstains() -> None:
+    # 252 scored sessions on the SPY calendar, but GLD is missing one scored
+    # session: the evidence cannot be reconciled -> ABSTAIN.
+    bars, start = _prospective_bars(462)
+    gap = bars["GLD"].index[PROSPECTIVE_WARMUP + 100]
+    bars["GLD"] = bars["GLD"].drop(index=gap)
+    snapshot = dur.ProspectiveCheckpoint(bars, start, 252)
+    report = dur.prospective_checkpoint_report(snapshot)
+    assert report["status"] == dur.PHASE7_UNKNOWN_ABSTAIN
+
+
+def test_prospective_complete_252_session_evidence_is_complete() -> None:
+    report = _prospective_report(462)
+    assert report["status"] == dur.PHASE7_PROSPECTIVE_EVIDENCE_COMPLETE
+
+
+def test_prospective_completion_grants_no_production_or_live_authority() -> None:
+    report = _prospective_report(462)
+    assert report["status"] == dur.PHASE7_PROSPECTIVE_EVIDENCE_COMPLETE
+    assert report["production_authority"] is False
+    assert report["live_trading_authority"] is False
+    assert report["production_pass"] is False
+    assert report["paper_only"] is True
