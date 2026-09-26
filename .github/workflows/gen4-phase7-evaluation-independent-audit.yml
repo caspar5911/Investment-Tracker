@@ -1,0 +1,170 @@
+name: gen4-phase7-evaluation-independent-audit
+
+on:
+  push:
+    branches:
+      - audit/gen4-phase7-eval-20260927
+    paths:
+      - ".github/workflows/gen4-phase7-evaluation-independent-audit.yml"
+
+jobs:
+  independent-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact audited handoff commit
+        uses: actions/checkout@v4
+        with:
+          ref: a529cc6f087651b4f5effbc6f3af9812bda67eb5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install audit dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev,quant,audit]'
+
+      - name: Verify audited commit identity
+        run: |
+          test "$(git rev-parse HEAD)" = "a529cc6f087651b4f5effbc6f3af9812bda67eb5"
+          test ! -e data/governance/successor/generation4-phase7-evaluation-authorization.json
+
+      - name: Required focused tests
+        run: |
+          python -m pytest -q             tests/independent_audit/test_generation4_phase7_entry.py             tests/independent_audit/test_generation4_phase7_start.py             tests/independent_audit/test_generation4_phase7_evaluation.py             tests/independent_audit/test_generation4_phase7_data_boundary.py             tests/independent_audit/test_generation4_phase7_evaluation_cli.py             tests/independent_audit/test_generation4_phase7_evaluation_contract.py             tests/quant/test_generation4_phase7_durability.py
+
+      - name: Required compile check
+        run: |
+          python -m compileall -q src/investment_tracker/independent_audit/post_generation3
+
+      - name: Verify frozen byte bindings and governance request
+        run: |
+          python - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+
+          request_path = Path("data/governance/successor/generation4-phase7-evaluation-independent-audit-request.json")
+          contract_path = Path("data/governance/successor/generation4-phase7-evaluation-contract.json")
+          request = json.loads(request_path.read_text())
+          contract = json.loads(contract_path.read_text())
+
+          expected_files = {
+              "evaluation_module_sha256": "src/investment_tracker/independent_audit/post_generation3/phase7_evaluation.py",
+              "evaluation_cli_sha256": "src/investment_tracker/independent_audit/post_generation3/phase7_evaluation_cli.py",
+              "durability_module_sha256": "src/investment_tracker/quant/phase7/generation4_durability.py",
+              "data_boundary_module_sha256": "src/investment_tracker/independent_audit/post_generation3/phase7_data.py",
+          }
+          for field, rel in expected_files.items():
+              actual = hashlib.sha256(Path(rel).read_bytes()).hexdigest()
+              assert actual == request[field], (field, actual, request[field])
+
+          contract_sha = hashlib.sha256(contract_path.read_bytes()).hexdigest()
+          assert contract_sha == request["evaluation_contract_sha256"]
+          assert request["frozen_evaluation_implementation_commit"] == "de3aa468d63e5157c935c6af867b0492573510c6"
+          assert request["prospective_first_scored_session"] == "2026-09-28"
+          assert request["research_universe"] == ["GLD","IEF","IWM","QQQ","SPY","TLT","VNQ","XLP"]
+          assert request["forbidden_holdout_symbols"] == ["QQQM","FALN","IIPR","PSTL","EFAS"]
+          assert request["benchmark_symbol"] == "SPY"
+          assert request["friction_cases_bps"] == [0,3,10,25,50]
+          assert request["primary_friction_bps"] == 3
+          assert request["warmup_session_limit"] == 210
+          assert request["checkpoint_sessions"] == [63,126,252]
+          assert request["phase7_started"] is True
+          for field in (
+              "phase7_performance_evaluation_authorized",
+              "production_readiness_approved",
+              "live_trading_authorized",
+              "holdout_reuse_authorized",
+              "candidate_search_authorized",
+              "parameter_mutation_authorized",
+              "symbol_substitution_authorized",
+              "adaptive_walk_forward_authorized",
+              "annual_reoptimization_authorized",
+              "result_dependent_methodology_change_allowed",
+              "result_dependent_parameter_change_allowed",
+          ):
+              assert request[field] is False, field
+          assert request["recon009_status"] == "OPEN"
+          assert request["paper_only"] is True
+
+          assert contract["prospective_first_scored_session"] == "2026-09-28"
+          assert contract["phase7_started"] is True
+          assert contract["phase7_performance_evaluation_authorized"] is False
+          assert contract["production_readiness_approved"] is False
+          assert contract["live_trading_authorized"] is False
+          assert contract["holdout_reuse_authorized"] is False
+          assert contract["recon009_status"] == "OPEN"
+          assert contract["paper_only"] is True
+
+          print("REQUEST_SHA256=" + hashlib.sha256(request_path.read_bytes()).hexdigest())
+          print("CONTRACT_SHA256=" + contract_sha)
+          PY
+
+      - name: Run read-only evaluation preflight
+        run: |
+          python -m investment_tracker.independent_audit.post_generation3.phase7_evaluation_cli             verify-evaluation-preflight             --start-artifact data/governance/successor/generation4-phase7-start.json             --start-contract data/governance/successor/generation4-phase7-start-contract.json             --evaluation-contract data/governance/successor/generation4-phase7-evaluation-contract.json             | tee /tmp/preflight.json
+          python - <<'PY'
+          import json
+          value=json.load(open("/tmp/preflight.json"))
+          assert value["status"] == "GENERATION4_PHASE7_EVALUATION_PREFLIGHT_READY"
+          assert value["phase7_started"] is True
+          assert value["phase7_performance_evaluation_authorized"] is False
+          assert value["production_readiness_approved"] is False
+          assert value["live_trading_authorized"] is False
+          assert value["recon009_status"] == "OPEN"
+          assert value["paper_only"] is True
+          forbidden = {"total_return","cagr","sharpe","sortino","performance"}
+          assert not (forbidden & set(value))
+          PY
+
+      - name: Resolve prospective boundary from XNYS calendar authority
+        run: |
+          python - <<'PY'
+          import json
+          import exchange_calendars as xcals
+          cal = xcals.get_calendar("XNYS")
+          sessions = cal.sessions_in_range("2026-01-01", "2026-10-05")
+          values = [str(x.date()) for x in sessions]
+          with open("/tmp/xnys-sessions.json","w") as f:
+              json.dump(values,f)
+          assert "2026-09-28" in values
+          PY
+          python -m investment_tracker.independent_audit.post_generation3.phase7_evaluation_cli             resolve-prospective-boundary             --start-artifact data/governance/successor/generation4-phase7-start.json             --sessions /tmp/xnys-sessions.json             | tee /tmp/boundary.json
+          python - <<'PY'
+          import json
+          value=json.load(open("/tmp/boundary.json"))
+          assert value["first_scored_session"] == "2026-09-28"
+          assert value["scored_boundary_session"] == "2026-09-28"
+          assert value["warmup_session_limit"] == 210
+          assert value["warmup_excluded_from_scored_pnl"] is True
+          PY
+
+      - name: Prove post-authorization commands fail closed before provider/data access
+        shell: bash
+        run: |
+          set +e
+          out1=$(python -m investment_tracker.independent_audit.post_generation3.phase7_evaluation_cli             acquire-phase7-data             --evaluation-authorization /tmp/does-not-exist-auth.json             --output-dir /tmp/phase7-no-write             --requested-start 2026-01-01             --requested-end 2026-12-31             --retrieved-at-utc 2026-09-27T00:00:00Z 2>&1)
+          rc1=$?
+          echo "$out1"
+          test "$rc1" -eq 1
+          echo "$out1" | grep -q '"status":"FORBIDDEN"'
+          echo "$out1" | grep -q 'GEN4_PHASE7_DATA_AUTHORIZATION_MISSING'
+          test ! -e /tmp/phase7-no-write
+
+          out2=$(python -m investment_tracker.independent_audit.post_generation3.phase7_evaluation_cli             evaluate-phase7-checkpoint             --evaluation-authorization /tmp/does-not-exist-auth.json             --snapshot /tmp/does-not-exist-snapshot 2>&1)
+          rc2=$?
+          echo "$out2"
+          test "$rc2" -eq 1
+          echo "$out2" | grep -q '"status":"FORBIDDEN"'
+          echo "$out2" | grep -q 'GEN4_PHASE7_DATA_AUTHORIZATION_MISSING'
+
+      - name: Static no-trading and no-authorization-writer checks
+        shell: bash
+        run: |
+          ! grep -R -nE 'OpenTradeContext|place_order|modify_order|cancel_order|unlock_trade|TrdEnv'             src/investment_tracker/independent_audit/post_generation3             src/investment_tracker/quant/phase7/generation4_durability.py
+          ! grep -R -nE 'def .*authorization.*write|def .*create.*authorization|def .*seal.*authorization'             src/investment_tracker/independent_audit/post_generation3/phase7_evaluation.py             src/investment_tracker/independent_audit/post_generation3/phase7_evaluation_cli.py             src/investment_tracker/independent_audit/post_generation3/phase7_data.py
+
+      - name: Audit complete
+        run: echo "GEN4_PHASE7_EVALUATION_INDEPENDENT_AUDIT_CHECKS_PASS"
