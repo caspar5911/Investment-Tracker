@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date, timedelta
 from hashlib import sha256
 from pathlib import Path
 
@@ -8,6 +9,8 @@ import pytest
 
 from investment_tracker.independent_audit.post_generation3.phase7_evaluation import (
     GEN4_PHASE7_EVAL_BINDING_MISMATCH,
+    GEN4_PHASE7_EVAL_BOUNDARY_INVALID,
+    GEN4_PHASE7_EVAL_BOUNDARY_UNRESOLVED,
     GEN4_PHASE7_EVAL_CONTRACT_INVALID,
     GEN4_PHASE7_EVAL_CONTRACT_MISSING,
     GEN4_PHASE7_EVAL_EVIDENCE_INVALID,
@@ -16,6 +19,7 @@ from investment_tracker.independent_audit.post_generation3.phase7_evaluation imp
     GEN4_PHASE7_EVAL_START_CONTRACT_INVALID,
     Generation4Phase7EvaluationContract,
     Generation4Phase7EvaluationError,
+    resolve_generation4_phase7_prospective_boundary,
     verify_generation4_phase7_evaluation_preflight,
 )
 
@@ -663,3 +667,171 @@ def test_evaluation_contract_model_is_strict_and_frozen() -> None:
             {**payload, "unexpected": True}
         )
     assert Generation4Phase7EvaluationContract.model_config["extra"] == "forbid"
+
+
+# Task 2 - prospective session boundary
+
+
+def _sessions(anchor: date, count: int) -> list[str]:
+    return [
+        (anchor + timedelta(days=offset)).isoformat() for offset in range(count)
+    ]
+
+
+def _boundary_error(
+    sessions: list[str], started_at_utc: str, **kwargs: object
+) -> Generation4Phase7EvaluationError:
+    with pytest.raises(Generation4Phase7EvaluationError) as excinfo:
+        resolve_generation4_phase7_prospective_boundary(
+            sessions=sessions, started_at_utc=started_at_utc, **kwargs
+        )
+    return excinfo.value
+
+
+def test_first_scored_session_is_strictly_after_start() -> None:
+    sessions = ["2026-09-25", "2026-09-28", "2026-09-29", "2026-09-30"]
+    report = resolve_generation4_phase7_prospective_boundary(
+        sessions=sessions, started_at_utc="2026-09-26T11:42:49Z"
+    )
+    assert report["first_scored_session"] == "2026-09-28"
+    assert report["first_scored_session"] > "2026-09-26"
+
+
+def test_start_at_session_opening_excludes_that_session() -> None:
+    sessions = ["2026-10-01", "2026-10-02", "2026-10-03"]
+    report = resolve_generation4_phase7_prospective_boundary(
+        sessions=sessions, started_at_utc="2026-10-01T00:00:00Z"
+    )
+    assert report["first_scored_session"] == "2026-10-02"
+
+
+def test_boundary_follows_session_authority_not_calendar_day_arithmetic() -> None:
+    sessions = ["2026-10-02", "2026-10-07", "2026-10-08"]
+    report = resolve_generation4_phase7_prospective_boundary(
+        sessions=sessions, started_at_utc="2026-10-05T12:00:00Z"
+    )
+    assert report["first_scored_session"] == "2026-10-07"
+    assert report["first_scored_session"] in sessions
+
+
+def test_warmup_sessions_precede_scored_start_and_are_never_scored() -> None:
+    sessions = _sessions(date(2026, 1, 1), 250)
+    assert sessions[-1] == "2026-09-07"
+    report = resolve_generation4_phase7_prospective_boundary(
+        sessions=sessions, started_at_utc="2026-09-06T12:00:00Z"
+    )
+    assert report["first_scored_session"] == sessions[-1]
+    assert report["scored_boundary_session"] == sessions[-1]
+    assert report["warmup_session_count"] == 210
+    assert report["warmup_boundary_session"] == sessions[-1 - 210]
+    assert report["warmup_boundary_session"] < report["first_scored_session"]
+    assert report["warmup_excluded_from_scored_pnl"] is True
+
+
+def test_warmup_is_capped_at_210_sessions() -> None:
+    sessions = _sessions(date(2025, 6, 1), 300)
+    assert sessions[-1] == "2026-03-27"
+    report = resolve_generation4_phase7_prospective_boundary(
+        sessions=sessions, started_at_utc="2026-03-26T12:00:00Z"
+    )
+    assert report["warmup_session_count"] == 210
+    assert report["warmup_boundary_session"] == sessions[-1 - 210]
+
+
+def test_warmup_is_limited_to_available_sessions() -> None:
+    sessions = [
+        "2026-09-01",
+        "2026-09-02",
+        "2026-09-03",
+        "2026-09-04",
+        "2026-09-08",
+    ]
+    report = resolve_generation4_phase7_prospective_boundary(
+        sessions=sessions, started_at_utc="2026-09-05T00:00:00Z"
+    )
+    assert report["first_scored_session"] == "2026-09-08"
+    assert report["warmup_session_count"] == 4
+    assert report["warmup_boundary_session"] == "2026-09-01"
+
+
+def test_no_warmup_sessions_when_start_precedes_all_sessions() -> None:
+    sessions = ["2026-09-08", "2026-09-09"]
+    report = resolve_generation4_phase7_prospective_boundary(
+        sessions=sessions, started_at_utc="2026-09-01T00:00:00Z"
+    )
+    assert report["first_scored_session"] == "2026-09-08"
+    assert report["warmup_session_count"] == 0
+    assert report["warmup_boundary_session"] is None
+
+
+def test_no_session_strictly_after_start_is_unresolved() -> None:
+    error = _boundary_error(
+        ["2026-09-25", "2026-09-28"], "2026-09-28T00:00:00Z"
+    )
+    assert error.code == GEN4_PHASE7_EVAL_BOUNDARY_UNRESOLVED
+
+
+def test_empty_session_sequence_is_invalid() -> None:
+    error = _boundary_error([], "2026-09-26T11:42:49Z")
+    assert error.code == GEN4_PHASE7_EVAL_BOUNDARY_INVALID
+
+
+def test_unsorted_session_sequence_is_invalid() -> None:
+    error = _boundary_error(
+        ["2026-09-29", "2026-09-28"], "2026-09-26T11:42:49Z"
+    )
+    assert error.code == GEN4_PHASE7_EVAL_BOUNDARY_INVALID
+
+
+def test_duplicate_session_sequence_is_invalid() -> None:
+    error = _boundary_error(
+        ["2026-09-28", "2026-09-28"], "2026-09-26T11:42:49Z"
+    )
+    assert error.code == GEN4_PHASE7_EVAL_BOUNDARY_INVALID
+
+
+def test_malformed_session_is_invalid() -> None:
+    error = _boundary_error(
+        ["2026-09-1"], "2026-09-26T11:42:49Z"
+    )
+    assert error.code == GEN4_PHASE7_EVAL_BOUNDARY_INVALID
+
+
+def test_malformed_start_timestamp_is_invalid() -> None:
+    error = _boundary_error(
+        ["2026-09-28"], "not-a-timestamp"
+    )
+    assert error.code == GEN4_PHASE7_EVAL_BOUNDARY_INVALID
+
+
+def test_naive_start_timestamp_is_invalid() -> None:
+    error = _boundary_error(
+        ["2026-09-28"], "2026-09-26T11:42:49"
+    )
+    assert error.code == GEN4_PHASE7_EVAL_BOUNDARY_INVALID
+
+
+def test_warmup_limit_above_maximum_is_invalid() -> None:
+    error = _boundary_error(
+        ["2026-09-28"], "2026-09-26T11:42:49Z", warmup_session_limit=211
+    )
+    assert error.code == GEN4_PHASE7_EVAL_BOUNDARY_INVALID
+
+
+def test_warmup_limit_zero_is_invalid() -> None:
+    error = _boundary_error(
+        ["2026-09-28"], "2026-09-26T11:42:49Z", warmup_session_limit=0
+    )
+    assert error.code == GEN4_PHASE7_EVAL_BOUNDARY_INVALID
+
+
+def test_boundary_report_schema() -> None:
+    report = resolve_generation4_phase7_prospective_boundary(
+        sessions=["2026-09-28", "2026-09-29"],
+        started_at_utc="2026-09-26T11:42:49Z",
+    )
+    assert report["schema_version"] == "GENERATION4-PHASE7-PROSPECTIVE-BOUNDARY-v1"
+    assert report["generation"] == "GENERATION_4"
+    assert report["started_at_utc"] == "2026-09-26T11:42:49Z"
+    assert report["warmup_session_limit"] == 210
+    assert report["scored_boundary_session"] == report["first_scored_session"]

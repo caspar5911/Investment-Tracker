@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
+from datetime import date, datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 from typing import Any, Literal
@@ -11,6 +13,8 @@ from pydantic import ValidationError
 PREFLIGHT_SCHEMA = "GENERATION4-PHASE7-EVALUATION-PREFLIGHT-v1"
 PREFLIGHT_STATUS = "GENERATION4_PHASE7_EVALUATION_PREFLIGHT_READY"
 
+GEN4_PHASE7_EVAL_BOUNDARY_INVALID = "GEN4_PHASE7_EVAL_BOUNDARY_INVALID"
+GEN4_PHASE7_EVAL_BOUNDARY_UNRESOLVED = "GEN4_PHASE7_EVAL_BOUNDARY_UNRESOLVED"
 GEN4_PHASE7_EVAL_EVIDENCE_INVALID = "GEN4_PHASE7_EVAL_EVIDENCE_INVALID"
 GEN4_PHASE7_EVAL_START_ARTIFACT_INVALID = "GEN4_PHASE7_EVAL_START_ARTIFACT_INVALID"
 GEN4_PHASE7_EVAL_START_CONTRACT_INVALID = "GEN4_PHASE7_EVAL_START_CONTRACT_INVALID"
@@ -431,4 +435,93 @@ def verify_generation4_phase7_evaluation_preflight(
         "result_dependent_parameter_change_allowed": contract.result_dependent_parameter_change_allowed,
         "recon009_status": contract.recon009_status,
         "paper_only": contract.paper_only,
+    }
+
+
+PROSPECTIVE_BOUNDARY_SCHEMA = "GENERATION4-PHASE7-PROSPECTIVE-BOUNDARY-v1"
+
+
+def _parse_start_timestamp(value: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        raise Generation4Phase7EvaluationError(
+            GEN4_PHASE7_EVAL_BOUNDARY_INVALID, "started_at_utc"
+        ) from None
+    if parsed.tzinfo is None:
+        raise Generation4Phase7EvaluationError(
+            GEN4_PHASE7_EVAL_BOUNDARY_INVALID, "started_at_utc"
+        )
+    return parsed.astimezone(timezone.utc)
+
+
+def resolve_generation4_phase7_prospective_boundary(
+    *,
+    sessions: Sequence[str],
+    started_at_utc: str,
+    warmup_session_limit: int = _WARMUP_SESSION_LIMIT,
+) -> dict[str, Any]:
+    if isinstance(warmup_session_limit, bool) or not isinstance(
+        warmup_session_limit, int
+    ):
+        raise Generation4Phase7EvaluationError(
+            GEN4_PHASE7_EVAL_BOUNDARY_INVALID, "warmup_session_limit"
+        )
+    if not 1 <= warmup_session_limit <= _WARMUP_SESSION_LIMIT:
+        raise Generation4Phase7EvaluationError(
+            GEN4_PHASE7_EVAL_BOUNDARY_INVALID, "warmup_session_limit"
+        )
+    started = _parse_start_timestamp(started_at_utc)
+    if not sessions:
+        raise Generation4Phase7EvaluationError(
+            GEN4_PHASE7_EVAL_BOUNDARY_INVALID, "sessions"
+        )
+    parsed_sessions: list[date] = []
+    for value in sessions:
+        if not isinstance(value, str):
+            raise Generation4Phase7EvaluationError(
+                GEN4_PHASE7_EVAL_BOUNDARY_INVALID, "sessions"
+            )
+        try:
+            parsed_sessions.append(date.fromisoformat(value))
+        except ValueError:
+            raise Generation4Phase7EvaluationError(
+                GEN4_PHASE7_EVAL_BOUNDARY_INVALID, "sessions"
+            ) from None
+    for previous, current in zip(parsed_sessions, parsed_sessions[1:]):
+        if current <= previous:
+            raise Generation4Phase7EvaluationError(
+                GEN4_PHASE7_EVAL_BOUNDARY_INVALID, "sessions"
+            )
+    scored_index: int | None = None
+    for index, session in enumerate(parsed_sessions):
+        if (
+            datetime(
+                session.year, session.month, session.day, tzinfo=timezone.utc
+            )
+            > started
+        ):
+            scored_index = index
+            break
+    if scored_index is None:
+        raise Generation4Phase7EvaluationError(
+            GEN4_PHASE7_EVAL_BOUNDARY_UNRESOLVED, "first_scored_session"
+        )
+    warmup_session_count = min(scored_index, warmup_session_limit)
+    warmup_boundary_session = (
+        sessions[scored_index - warmup_session_count]
+        if warmup_session_count
+        else None
+    )
+    first_scored_session = sessions[scored_index]
+    return {
+        "schema_version": PROSPECTIVE_BOUNDARY_SCHEMA,
+        "generation": "GENERATION_4",
+        "started_at_utc": started_at_utc,
+        "first_scored_session": first_scored_session,
+        "scored_boundary_session": first_scored_session,
+        "warmup_boundary_session": warmup_boundary_session,
+        "warmup_session_limit": warmup_session_limit,
+        "warmup_session_count": warmup_session_count,
+        "warmup_excluded_from_scored_pnl": True,
     }
