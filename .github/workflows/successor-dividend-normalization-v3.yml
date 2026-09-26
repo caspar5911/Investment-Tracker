@@ -1,0 +1,164 @@
+name: successor-dividend-normalization-v3
+
+concurrency:
+  group: successor-dividend-normalization-v3-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    paths:
+      - "src/investment_tracker/quant/successor/dividend_reconciliation_v3.py"
+      - "src/investment_tracker/independent_audit/successor/evaluate_dividend_v3.py"
+      - "tests/quant/test_successor_dividend_reconciliation_v3.py"
+      - "tests/independent_audit/test_successor_dividend_evaluator_v3.py"
+      - "data/governance/successor/dividend-reconciliation-v3.json"
+      - "data/governance/holdout-exclusion-registry.json"
+      - "src/investment_tracker/independent_audit/post_generation3/**"
+      - "src/investment_tracker/independent_audit/successor/acquisition_authority.py"
+      - "src/investment_tracker/independent_audit/successor/phase6_contract.py"
+      - "src/investment_tracker/independent_audit/successor/acquisition.py"
+      - "src/investment_tracker/independent_audit/successor/release.py"
+      - "src/investment_tracker/independent_audit/successor/closure.py"
+      - "src/investment_tracker/independent_audit/successor/virginity.py"
+      - "tests/independent_audit/test_post_generation3_authority.py"
+      - "tests/independent_audit/test_generation4_stage_a_boundary.py"
+      - "data/governance/successor/generation4-acquisition-authorization.template.json"
+      - "data/governance/successor/generation4-stage-b-independent-audit-request.json"
+      - "docs/superpowers/requests/2026-09-23-generation4-stage-b-independent-audit-request.md"
+      - "tests/independent_audit/test_generation4_stage_b_boundary.py"
+      - "tests/independent_audit/test_generation4_phase7_entry.py"
+      - "tests/independent_audit/test_generation4_phase7_start.py"
+      - "data/governance/successor/generation4-phase7-start-contract.json"
+      - "data/governance/successor/generation4-phase7-start.json"
+      - "data/governance/successor/generation4-phase7-entry-authorization.template.json"
+      - "data/governance/successor/generation4-phase7-entry-independent-audit-request.json"
+      - "docs/superpowers/requests/2026-09-25-generation4-phase7-entry-independent-audit-request.md"
+      - "data/generation4/preaccess/holdout-selection-contract.json"
+      - "data/governance/successor/post-generation3-methodology-authorization.template.json"
+      - "docs/superpowers/reports/2026-09-23-post-generation3-audit-rejection-remediation.md"
+      - ".github/workflows/successor-dividend-normalization-v3.yml"
+  pull_request:
+    paths:
+      - "src/investment_tracker/quant/successor/dividend_reconciliation_v3.py"
+      - "src/investment_tracker/independent_audit/successor/evaluate_dividend_v3.py"
+      - "tests/quant/test_successor_dividend_reconciliation_v3.py"
+      - "tests/independent_audit/test_successor_dividend_evaluator_v3.py"
+      - "data/governance/successor/dividend-reconciliation-v3.json"
+      - "data/governance/holdout-exclusion-registry.json"
+      - "src/investment_tracker/independent_audit/post_generation3/**"
+      - "src/investment_tracker/independent_audit/successor/acquisition_authority.py"
+      - "src/investment_tracker/independent_audit/successor/phase6_contract.py"
+      - "src/investment_tracker/independent_audit/successor/acquisition.py"
+      - "src/investment_tracker/independent_audit/successor/release.py"
+      - "src/investment_tracker/independent_audit/successor/closure.py"
+      - "src/investment_tracker/independent_audit/successor/virginity.py"
+      - "tests/independent_audit/test_post_generation3_authority.py"
+      - "tests/independent_audit/test_generation4_stage_a_boundary.py"
+      - "data/governance/successor/generation4-acquisition-authorization.template.json"
+      - "data/governance/successor/generation4-stage-b-independent-audit-request.json"
+      - "docs/superpowers/requests/2026-09-23-generation4-stage-b-independent-audit-request.md"
+      - "tests/independent_audit/test_generation4_stage_b_boundary.py"
+      - "tests/independent_audit/test_generation4_phase7_entry.py"
+      - "tests/independent_audit/test_generation4_phase7_start.py"
+      - "data/governance/successor/generation4-phase7-start-contract.json"
+      - "data/governance/successor/generation4-phase7-start.json"
+      - "data/governance/successor/generation4-phase7-entry-authorization.template.json"
+      - "data/governance/successor/generation4-phase7-entry-independent-audit-request.json"
+      - "docs/superpowers/requests/2026-09-25-generation4-phase7-entry-independent-audit-request.md"
+      - "data/generation4/preaccess/holdout-selection-contract.json"
+      - "data/governance/successor/post-generation3-methodology-authorization.template.json"
+      - "docs/superpowers/reports/2026-09-23-post-generation3-audit-rejection-remediation.md"
+      - ".github/workflows/successor-dividend-normalization-v3.yml"
+
+jobs:
+  successor-dividend-v3:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e '.[dev,quant,audit]'
+
+      - name: Compile successor dividend code
+        run: |
+          python -m compileall -q src/investment_tracker/quant/successor/dividend_reconciliation_v3.py src/investment_tracker/independent_audit/successor/evaluate_dividend_v3.py src/investment_tracker/independent_audit/post_generation3
+
+      - name: Focused successor dividend regression tests
+        run: |
+          python -m pytest -q \
+            tests/quant/test_successor_corporate_actions_v2.py \
+            tests/quant/test_successor_dividend_reconciliation_v3.py \
+            tests/independent_audit/test_successor_dividend_evaluator_v3.py \
+            tests/independent_audit/test_post_generation3_authority.py \
+            tests/independent_audit/test_generation4_stage_a_boundary.py \
+            tests/independent_audit/test_generation4_stage_b_boundary.py \
+            tests/independent_audit/test_generation4_phase7_entry.py \
+            tests/independent_audit/test_generation4_phase7_start.py
+
+      - name: Governance boundary
+        shell: bash
+        run: |
+          ! grep -R -nE 'OpenTradeContext|place_order|modify_order|cancel_order|unlock_trade|TrdEnv' \
+            src/investment_tracker/quant/successor/dividend_reconciliation_v3.py \
+            src/investment_tracker/independent_audit/successor/evaluate_dividend_v3.py \
+            src/investment_tracker/independent_audit/post_generation3 \
+            tests/quant/test_successor_dividend_reconciliation_v3.py \
+            tests/independent_audit/test_successor_dividend_evaluator_v3.py \
+            tests/independent_audit/test_generation4_stage_a_boundary.py
+          ! grep -R -nE '\b(ACV|GVIP|WBIY|FCEF|FDLO)\b' \
+            src/investment_tracker/quant/successor/dividend_reconciliation_v3.py \
+            src/investment_tracker/independent_audit/successor/evaluate_dividend_v3.py \
+            src/investment_tracker/independent_audit/post_generation3 \
+            tests/quant/test_successor_dividend_reconciliation_v3.py \
+            tests/independent_audit/test_successor_dividend_evaluator_v3.py \
+            tests/independent_audit/test_generation4_stage_a_boundary.py \
+            tests/independent_audit/test_generation4_phase7_entry.py
+          ! grep -R -nE '\b(QQQM|FALN|IIPR|PSTL|EFAS)\b' \
+            src/investment_tracker/quant/successor/dividend_reconciliation_v3.py \
+            src/investment_tracker/independent_audit/successor/evaluate_dividend_v3.py \
+            src/investment_tracker/independent_audit/post_generation3 \
+            tests/quant/test_successor_dividend_reconciliation_v3.py \
+            tests/independent_audit/test_successor_dividend_evaluator_v3.py \
+            tests/independent_audit/test_generation4_stage_a_boundary.py \
+            tests/independent_audit/test_generation4_stage_b_boundary.py \
+            tests/independent_audit/test_generation4_phase7_entry.py
+          python - <<'PY'
+          from hashlib import sha256
+          import json
+          from pathlib import Path
+
+          closure = json.loads(Path(
+              "data/generation3/phase6/phase6-final-holdout-closure.json"
+          ).read_text())
+          assert closure["status"] == "PHASE6_UNKNOWN_ABSTAIN"
+          assert closure["one_time_semantics"]["holdout_consumed"] is True
+          assert closure["one_time_semantics"]["retry_authorized"] is False
+          assert closure["phase7"]["authorized"] is False
+          assert closure["recon009_status"] == "OPEN"
+
+          old_evaluator = Path(
+              "src/investment_tracker/independent_audit/successor/evaluate.py"
+          )
+          assert sha256(old_evaluator.read_bytes()).hexdigest() == (
+              "c933cc2b71bf068f9db1f4656f7fea57ed3a5e0307819abc177897782e63e0ea"
+          )
+
+          registry = json.loads(Path(
+              "data/governance/holdout-exclusion-registry.json"
+          ).read_text())
+          symbols = {
+              symbol
+              for group in registry["permanent_exclusions"]
+              for symbol in group["symbols"]
+          }
+          assert len(symbols) == 28
+          groups = [
+              group for group in registry["permanent_exclusions"]
+              if group["reason"]
+              == "GENERATION3_FINAL_HOLDOUT_FROZEN_ACCESSED_AND_CONSUMED"
+          ]
+          assert len(groups) == 1
+          assert len(groups[0]["symbols"]) == 5
+          PY

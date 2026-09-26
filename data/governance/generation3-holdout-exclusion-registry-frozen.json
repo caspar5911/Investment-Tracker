@@ -45,16 +45,6 @@
         "VICI"
       ],
       "reason": "GENERATION2_FINAL_HOLDOUT_FROZEN_ACCESSED_AND_CONSUMED"
-    },
-    {
-      "symbols": [
-        "ACV",
-        "GVIP",
-        "WBIY",
-        "FCEF",
-        "FDLO"
-      ],
-      "reason": "GENERATION3_FINAL_HOLDOUT_FROZEN_ACCESSED_AND_CONSUMED"
     }
   ],
   "rules": {
