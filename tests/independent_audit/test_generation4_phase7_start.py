@@ -11,6 +11,7 @@ from investment_tracker.independent_audit.post_generation3 import (
     phase7_start as phase7_start_module,
 )
 from investment_tracker.independent_audit.post_generation3.phase7_start import (
+    GEN4_PHASE7_ALREADY_STARTED,
     GEN4_PHASE7_START_BINDING_MISMATCH,
     GEN4_PHASE7_START_CONTRACT_INVALID,
     GEN4_PHASE7_START_CONTRACT_MISSING,
@@ -19,6 +20,7 @@ from investment_tracker.independent_audit.post_generation3.phase7_start import (
     Generation4Phase7StartContract,
     Generation4Phase7StartError,
     load_generation4_phase7_start_contract,
+    start_generation4_phase7,
     verify_generation4_phase7_start_readiness,
 )
 from tests.independent_audit.test_generation4_phase7_entry import (
@@ -466,3 +468,151 @@ def test_contract_governance_drift_fails_closed(
     _expect_contract_error(
         paths, readiness, GEN4_PHASE7_START_GOVERNANCE_MISMATCH
     )
+
+
+def _start_operation_kwargs(paths: dict[str, Path]) -> dict[str, object]:
+    values: dict[str, object] = _start_kwargs(paths)
+    values.update(
+        {
+            "start_contract_path": paths["start_contract"],
+            "start_output_path": paths["start_output"],
+            "phase7_start_path": paths["phase7_start"],
+            "phase7_start_cli_path": paths["phase7_start_cli"],
+        }
+    )
+    return values
+
+
+def _start_fixture(tmp_path: Path) -> tuple[dict[str, Path], dict[str, object]]:
+    paths, _, contract = _contract_fixture(tmp_path)
+    paths["start_output"] = tmp_path / "phase7-start.json"
+    return paths, contract
+
+
+def _artifact_self_hash(artifact: dict[str, object]) -> str:
+    payload = artifact.copy()
+    del payload["artifact_sha256"]
+    canonical = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    return sha256(canonical).hexdigest()
+
+
+def test_start_creates_canonical_governed_artifact(tmp_path: Path):
+    paths, contract = _start_fixture(tmp_path)
+
+    artifact = start_generation4_phase7(**_start_operation_kwargs(paths))
+
+    assert artifact["schema_version"] == "GENERATION4-PHASE7-START-v1"
+    assert artifact["status"] == "GENERATION4_PHASE7_STARTED"
+    assert artifact["authority"] == (
+        "COORDINATOR_UNDER_INDEPENDENT_AUDIT_ENTRY_AUTHORIZATION"
+    )
+    assert artifact["phase7_entry_authorized"] is True
+    assert artifact["phase7_started"] is True
+    assert artifact["phase7_performance_evaluation_authorized"] is False
+    assert artifact["production_readiness_approved"] is False
+    assert artifact["live_trading_authorized"] is False
+    assert artifact["retry_authorized"] is False
+    assert artifact["holdout_reuse_authorized"] is False
+    assert artifact["candidate_search_authorized"] is False
+    assert artifact["parameter_mutation_authorized"] is False
+    assert artifact["symbol_substitution_authorized"] is False
+    assert artifact["result_dependent_methodology_change_allowed"] is False
+    assert artifact["result_dependent_parameter_change_allowed"] is False
+    assert artifact["recon009_status"] == "OPEN"
+    assert artifact["paper_only"] is True
+    assert artifact["artifact_sha256"] == _artifact_self_hash(artifact)
+    assert json.loads(paths["start_output"].read_bytes()) == artifact
+    assert paths["start_output"].read_bytes() == json.dumps(
+        artifact,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    for field in (
+        "candidate_id",
+        "binding_sha256",
+        "implementation_sha256",
+        "split_normalizer_sha256",
+        "dividend_reconciliation_sha256",
+        "successor_evaluator_sha256",
+        "locked_symbols",
+        "holdout_id",
+        "release_id",
+        "authorization_id",
+        "entry_authorization_sha256",
+        "audit_request_sha256",
+        "phase7_entry_implementation_commit",
+        "phase7_entry_source_sha256",
+        "phase7_entry_cli_source_sha256",
+        "phase7_start_implementation_commit",
+        "phase7_start_source_sha256",
+        "phase7_start_cli_source_sha256",
+        *EVIDENCE_HASH_FIELDS,
+    ):
+        assert artifact[field] == contract[field]
+    assert artifact["start_contract_sha256"] == _file_sha(paths["start_contract"])
+    assert "metrics" not in artifact
+
+
+def test_second_start_attempt_never_overwrites(tmp_path: Path):
+    paths, _ = _start_fixture(tmp_path)
+    first = start_generation4_phase7(**_start_operation_kwargs(paths))
+    original_bytes = paths["start_output"].read_bytes()
+
+    with pytest.raises(Generation4Phase7StartError) as excinfo:
+        start_generation4_phase7(**_start_operation_kwargs(paths))
+
+    assert excinfo.value.code == GEN4_PHASE7_ALREADY_STARTED
+    assert paths["start_output"].read_bytes() == original_bytes
+    assert json.loads(original_bytes) == first
+
+
+def test_malformed_existing_start_artifact_is_never_overwritten(tmp_path: Path):
+    paths, _ = _start_fixture(tmp_path)
+    paths["start_output"].write_bytes(b"not-json")
+
+    with pytest.raises(Generation4Phase7StartError) as excinfo:
+        start_generation4_phase7(**_start_operation_kwargs(paths))
+
+    assert excinfo.value.code == GEN4_PHASE7_ALREADY_STARTED
+    assert paths["start_output"].read_bytes() == b"not-json"
+
+
+def test_failure_before_write_leaves_output_absent(tmp_path: Path):
+    paths, contract = _start_fixture(tmp_path)
+    contract["phase6_closure_sha256"] = "f" * 64
+    _write(paths["start_contract"], contract)
+
+    with pytest.raises(Generation4Phase7StartError) as excinfo:
+        start_generation4_phase7(**_start_operation_kwargs(paths))
+
+    assert excinfo.value.code == GEN4_PHASE7_START_BINDING_MISMATCH
+    assert not paths["start_output"].exists()
+
+
+def test_exclusive_create_race_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    paths, _ = _start_fixture(tmp_path)
+    output = paths["start_output"]
+    original_open = Path.open
+
+    def racing_open(self: Path, mode: str = "r", *args, **kwargs):
+        if self == output and mode == "xb":
+            raise FileExistsError(str(self))
+        return original_open(self, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", racing_open)
+
+    with pytest.raises(Generation4Phase7StartError) as excinfo:
+        start_generation4_phase7(**_start_operation_kwargs(paths))
+
+    assert excinfo.value.code == GEN4_PHASE7_ALREADY_STARTED
+    assert not output.exists()

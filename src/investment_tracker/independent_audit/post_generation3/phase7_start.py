@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -132,6 +133,16 @@ class Generation4Phase7StartError(RuntimeError):
 
 def _sha(path: Path) -> str:
     return sha256(Path(path).read_bytes()).hexdigest()
+
+
+def _canonical_json(value: dict[str, Any]) -> bytes:
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
 
 
 def _require_equal(
@@ -450,3 +461,123 @@ def load_generation4_phase7_start_contract(
             field=f"readiness.{field}",
         )
     return contract
+
+
+def _started_at_utc() -> str:
+    return (
+        datetime.now(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
+def start_generation4_phase7(
+    *,
+    audit_request_path: Path,
+    authorization_path: Path,
+    phase6_contract_path: Path,
+    acquisition_authorization_path: Path,
+    selection_path: Path,
+    virginity_attestation_path: Path,
+    virginity_evidence_path: Path,
+    acquisition_receipt_path: Path,
+    release_path: Path,
+    phase6_result_path: Path,
+    consumption_marker_path: Path,
+    phase6_closure_path: Path,
+    start_contract_path: Path,
+    start_output_path: Path,
+    phase7_entry_path: Path | None = None,
+    phase7_entry_cli_path: Path | None = None,
+    phase7_start_path: Path | None = None,
+    phase7_start_cli_path: Path | None = None,
+) -> dict[str, Any]:
+    output_path = Path(start_output_path)
+    if output_path.exists():
+        raise Generation4Phase7StartError(
+            GEN4_PHASE7_ALREADY_STARTED, "start_output"
+        )
+
+    entry_source = (
+        Path(phase7_entry_path)
+        if phase7_entry_path is not None
+        else Path(__file__).with_name("phase7_entry.py")
+    )
+    entry_cli_source = (
+        Path(phase7_entry_cli_path)
+        if phase7_entry_cli_path is not None
+        else Path(__file__).with_name("phase7_entry_cli.py")
+    )
+    start_source = (
+        Path(phase7_start_path) if phase7_start_path is not None else Path(__file__)
+    )
+    start_cli_source = (
+        Path(phase7_start_cli_path)
+        if phase7_start_cli_path is not None
+        else Path(__file__).with_name("phase7_start_cli.py")
+    )
+    readiness = verify_generation4_phase7_start_readiness(
+        audit_request_path=Path(audit_request_path),
+        authorization_path=Path(authorization_path),
+        phase6_contract_path=Path(phase6_contract_path),
+        acquisition_authorization_path=Path(acquisition_authorization_path),
+        selection_path=Path(selection_path),
+        virginity_attestation_path=Path(virginity_attestation_path),
+        virginity_evidence_path=Path(virginity_evidence_path),
+        acquisition_receipt_path=Path(acquisition_receipt_path),
+        release_path=Path(release_path),
+        phase6_result_path=Path(phase6_result_path),
+        consumption_marker_path=Path(consumption_marker_path),
+        phase6_closure_path=Path(phase6_closure_path),
+        phase7_entry_path=entry_source,
+        phase7_entry_cli_path=entry_cli_source,
+    )
+    contract = load_generation4_phase7_start_contract(
+        contract_path=Path(start_contract_path),
+        readiness=readiness,
+        authorization_path=Path(authorization_path),
+        audit_request_path=Path(audit_request_path),
+        phase7_entry_path=entry_source,
+        phase7_entry_cli_path=entry_cli_source,
+        phase7_start_path=start_source,
+        phase7_start_cli_path=start_cli_source,
+    )
+
+    artifact = contract.model_dump(mode="json")
+    artifact.update(
+        {
+            "schema_version": "GENERATION4-PHASE7-START-v1",
+            "status": "GENERATION4_PHASE7_STARTED",
+            "authority": "COORDINATOR_UNDER_INDEPENDENT_AUDIT_ENTRY_AUTHORIZATION",
+            "started_at_utc": _started_at_utc(),
+            "start_contract_sha256": _sha(Path(start_contract_path)),
+            "phase7_started": True,
+        }
+    )
+    artifact["artifact_sha256"] = sha256(_canonical_json(artifact)).hexdigest()
+    encoded = _canonical_json(artifact)
+    try:
+        with output_path.open("xb") as handle:
+            handle.write(encoded)
+    except FileExistsError as exc:
+        raise Generation4Phase7StartError(
+            GEN4_PHASE7_ALREADY_STARTED, "start_output"
+        ) from exc
+    except OSError as exc:
+        raise Generation4Phase7StartError(
+            GEN4_PHASE7_START_WRITE_FAILED, "start_output"
+        ) from exc
+
+    try:
+        readback = output_path.read_bytes()
+        decoded = json.loads(readback)
+    except Exception as exc:
+        raise Generation4Phase7StartError(
+            GEN4_PHASE7_START_WRITE_FAILED, "start_output_readback"
+        ) from exc
+    if readback != encoded or decoded != artifact:
+        raise Generation4Phase7StartError(
+            GEN4_PHASE7_START_WRITE_FAILED, "start_output_readback"
+        )
+    return artifact
