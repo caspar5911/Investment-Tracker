@@ -28,6 +28,7 @@ import hashlib
 import json
 import math
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 import pandas as pd
@@ -65,6 +66,7 @@ __all__ = [
     "INITIAL_CASH",
     "PRIMARY_FRICTION_BPS",
     "RESEARCH_UNIVERSE",
+    "ReusedHistoryDataset",
     "benchmark_total_return",
     "build_fixed_targets",
     "compound_month_returns",
@@ -72,6 +74,7 @@ __all__ = [
     "compute_fixed_friction_cases",
     "drawdown_calmar_recovery",
     "excess_return",
+    "historical_durability_report",
     "longest_losing_month_sequence",
     "period_average",
     "period_positive_fraction",
@@ -564,4 +567,85 @@ def drawdown_calmar_recovery(
         "max_drawdown": _metric(drawdown),
         "calmar": _metric(calmar),
         "recovery": _unknown("INSUFFICIENT_DATA"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Historical diagnostic lane (reused history only)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ReusedHistoryDataset:
+    """A caller-supplied, already-validated reused-history dataset.
+
+    This is the *reused* long-history lane: bars already acquired in a prior
+    generation, re-expressed over the frozen research universe. It is NOT the
+    Generation-4 final holdout. The caller is responsible for validation and for
+    reporting an accurate ``corporate_actions_complete`` flag; this module only
+    consumes the supplied dataset and never accesses a data provider.
+    """
+
+    bars: dict[str, pd.DataFrame]
+    corporate_actions_complete: bool
+
+
+def _trailing_window(
+    sessions: Sequence[pd.Timestamp], equity: Sequence[float], months: int
+) -> dict[str, Any]:
+    """Trailing ``months``-calendar-month return ending at the last session.
+
+    Emits a value only when a complete window is available (the history reaches
+    back a full ``months`` from the last session); otherwise the metric fails
+    closed to ``UNKNOWN``/``INCOMPLETE_WINDOW`` rather than estimating.
+    """
+    windows = rolling_period_returns(sessions, equity, months)
+    if not windows:
+        return _unknown("INCOMPLETE_WINDOW")
+    return {"status": "AVAILABLE", "value": float(windows[-1]["return"]), "reason": "OK"}
+
+
+def historical_durability_report(dataset: ReusedHistoryDataset) -> dict[str, Any]:
+    """Build the reused-history durability diagnostic report.
+
+    The report is strictly ``REUSED_HISTORY_DIAGNOSTIC_ONLY``: it reuses the
+    fixed-protocol primitives over an already-validated reused-history dataset.
+    It can never claim new out-of-sample/virgin evidence, never set production
+    or live-trading authority, never change the candidate or methodology, and can
+    never produce a production PASS. Any metric the older history cannot support
+    is emitted UNKNOWN with an explicit reason. No provider is accessed here.
+    """
+    bars = dataset.bars
+    cases = compute_fixed_friction_cases(bars)
+    targets = build_fixed_targets(bars)
+    primary_replay = replay_decision_targets(
+        bars, tuple(targets), friction_bps=PRIMARY_FRICTION_BPS, initial_cash=INITIAL_CASH
+    )
+    sessions = primary_replay.sessions
+    equity = [float(value) for value in primary_replay.close_equity]
+    benchmark = benchmark_total_return(bars, sessions)
+    historical_windows = {
+        label: _trailing_window(sessions, equity, months)
+        for label, months in (("12m", 12), ("36m", 36), ("60m", 60))
+    }
+    corporate_action_evidence = (
+        {"status": "AVAILABLE", "value": None, "reason": "OK"}
+        if dataset.corporate_actions_complete
+        else _unknown("INCOMPLETE_CORPORATE_ACTIONS")
+    )
+    return {
+        "schema": "GENERATION4-PHASE7-HISTORICAL-DURABILITY-v1",
+        "classification": "REUSED_HISTORY_DIAGNOSTIC_ONLY",
+        "candidate_id": CANDIDATE_ID,
+        "candidate_changed": False,
+        "methodology_changed": False,
+        "new_out_of_sample_evidence": False,
+        "virgin_holdout_evidence": False,
+        "production_authority": False,
+        "live_trading_authority": False,
+        "production_pass": False,
+        "friction_cases": cases,
+        "benchmark_total_return": benchmark,
+        "historical_windows": historical_windows,
+        "corporate_action_evidence": corporate_action_evidence,
     }

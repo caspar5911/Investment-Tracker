@@ -378,3 +378,96 @@ def test_compute_fixed_friction_cases_is_deterministic() -> None:
     first = dur.compute_fixed_friction_cases(bars)
     second = dur.compute_fixed_friction_cases(bars)
     assert first == second
+
+
+# ---------------------------------------------------------------------------
+# Historical diagnostic lane (reused history only)
+# ---------------------------------------------------------------------------
+
+
+def _history_bars(n: int) -> dict[str, pd.DataFrame]:
+    """A reused long-history universe. QQQ trends up; the rest is flat.
+
+    ``n`` business days from 2015, long enough (``n >= ~1550``) to complete the
+    60-month window or short enough (``n`` just past the 189-session warmup)
+    that no historical window is complete.
+    """
+    index = pd.bdate_range("2015-01-01", periods=n, tz="UTC")
+    qqq_close = [100.0 * (1.001**i) for i in range(n)]
+    frames: dict[str, pd.DataFrame] = {}
+    for symbol in UNIVERSE:
+        close = qqq_close if symbol == "QQQ" else [100.0] * n
+        frames[symbol] = pd.DataFrame(
+            {"open": [value * 0.999 for value in close], "close": close}, index=index
+        )
+    return frames
+
+
+def _historical_report(n: int, corporate_actions_complete: bool = True) -> dict:
+    return dur.historical_durability_report(
+        dur.ReusedHistoryDataset(_history_bars(n), corporate_actions_complete)
+    )
+
+
+def test_historical_report_schema_classification_and_candidate() -> None:
+    report = _historical_report(210)
+    assert report["schema"] == "GENERATION4-PHASE7-HISTORICAL-DURABILITY-v1"
+    assert report["classification"] == "REUSED_HISTORY_DIAGNOSTIC_ONLY"
+    assert report["candidate_id"] == CANDIDATE_ID
+
+
+def test_historical_report_claims_no_new_oos_or_virgin_evidence() -> None:
+    report = _historical_report(210)
+    assert report["new_out_of_sample_evidence"] is False
+    assert report["virgin_holdout_evidence"] is False
+
+
+def test_historical_report_sets_no_production_or_live_authority() -> None:
+    report = _historical_report(210)
+    assert report["production_authority"] is False
+    assert report["live_trading_authority"] is False
+
+
+def test_historical_report_changes_no_candidate_or_methodology() -> None:
+    report = _historical_report(210)
+    assert report["candidate_changed"] is False
+    assert report["methodology_changed"] is False
+
+
+def test_historical_report_cannot_produce_a_production_pass() -> None:
+    report = _historical_report(210)
+    assert report["production_pass"] is False
+
+
+def test_historical_report_flags_incomplete_corporate_actions_as_unknown() -> None:
+    report = _historical_report(210, corporate_actions_complete=False)
+    assert report["corporate_action_evidence"]["status"] == "UNKNOWN"
+    assert report["corporate_action_evidence"]["reason"] == "INCOMPLETE_CORPORATE_ACTIONS"
+
+
+def test_historical_report_corporate_actions_available_when_complete() -> None:
+    report = _historical_report(210, corporate_actions_complete=True)
+    assert report["corporate_action_evidence"]["status"] == "AVAILABLE"
+    assert report["corporate_action_evidence"]["reason"] == "OK"
+
+
+def test_historical_windows_are_unknown_when_incomplete() -> None:
+    report = _historical_report(210)
+    for label in ("12m", "36m", "60m"):
+        window = report["historical_windows"][label]
+        assert window["status"] == "UNKNOWN"
+        assert window["reason"] == "INCOMPLETE_WINDOW"
+
+
+def test_historical_windows_are_available_when_complete() -> None:
+    report = _historical_report(1550)
+    for label in ("12m", "36m", "60m"):
+        window = report["historical_windows"][label]
+        assert window["status"] == "AVAILABLE"
+        assert window["reason"] == "OK"
+        assert isinstance(window["value"], float)
+
+
+def test_historical_report_is_deterministic() -> None:
+    dataset = dur.ReusedHistoryDataset(_history_bars(210), True)
+    assert dur.historical_durability_report(dataset) == dur.historical_durability_report(dataset)
