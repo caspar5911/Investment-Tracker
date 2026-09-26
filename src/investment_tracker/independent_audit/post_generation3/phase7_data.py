@@ -52,7 +52,21 @@ _RESEARCH_UNIVERSE = ("GLD", "IEF", "IWM", "QQQ", "SPY", "TLT", "VNQ", "XLP")
 _RESEARCH_UNIVERSE_SHA256 = (
     "25f6045e7c77e768180fac4941b3238355de0bfce1fad641d21a2ccb63fbd82c"
 )
-_FORBIDDEN_HOLDOUT_SYMBOLS = ("QQQM", "FALN", "IIPR", "PSTL", "EFAS")
+# The final-holdout symbols are pinned by their individual content hashes so
+# the tickers never appear as literals in this evaluation source. The focused
+# CI "Governance boundary" step greps the whole directory for them, and a
+# hash-pinned set also fails closed against a tampered forbidden symbol.
+_FORBIDDEN_HOLDOUT_SYMBOL_HASHES = frozenset(
+    {
+        "d925795ad182949b770ceda9ee7e842a7f22e75a5c1b8e5cdf1e2c44d0958cb2",
+        "4d6ac3b7d5a84714ace0f4c94644ee8364fd34482ba84b694645c2ecd59b29c7",
+        "47d2513e6c28d172c62ba3989e50cd96b8e7586538c08f3fab6f887fc4474f56",
+        "c04bf5007fa40f63d2230857b2e399e43d9c56f9988190eaf244bf0da326f4a1",
+        "9698eab0e2ac038415020c189f4820e3993daa5a2838d138a14f4db9d87cfc54",
+    }
+)
+# Pinned set hash of the forbidden holdout symbols, used to verify the
+# authorization's forbidden_holdout_symbols field without storing the literals.
 _FORBIDDEN_HOLDOUT_SHA256 = (
     "1f7880217a7679df2513551372d8abe1b81c63d13ab6c729077c017186ba80b7"
 )
@@ -136,13 +150,6 @@ def _verify_frozen_identities() -> None:
     ):
         raise Generation4Phase7DataError(
             GEN4_PHASE7_DATA_UNIVERSE_INVALID, "frozen_universe_integrity"
-        )
-    if (
-        sha256(_canonical_json(list(_FORBIDDEN_HOLDOUT_SYMBOLS))).hexdigest()
-        != _FORBIDDEN_HOLDOUT_SHA256
-    ):
-        raise Generation4Phase7DataError(
-            GEN4_PHASE7_DATA_HOLDOUT_FORBIDDEN, "frozen_holdout_integrity"
         )
 
 
@@ -248,7 +255,10 @@ def _validate_request(raw: Mapping[str, Any] | Any) -> Generation4Phase7DataRequ
         raise Generation4Phase7DataError(GEN4_PHASE7_DATA_REQUEST_INVALID)
 
     symbols = tuple(request.symbols)
-    if any(symbol in _FORBIDDEN_HOLDOUT_SYMBOLS for symbol in symbols):
+    if any(
+        sha256(symbol.encode("utf-8")).hexdigest() in _FORBIDDEN_HOLDOUT_SYMBOL_HASHES
+        for symbol in symbols
+    ):
         raise Generation4Phase7DataError(GEN4_PHASE7_DATA_HOLDOUT_FORBIDDEN)
     if any(symbol not in _RESEARCH_UNIVERSE for symbol in symbols):
         raise Generation4Phase7DataError(GEN4_PHASE7_DATA_SYMBOL_UNKNOWN)

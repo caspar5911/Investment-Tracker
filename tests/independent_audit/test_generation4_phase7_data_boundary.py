@@ -404,6 +404,21 @@ def test_module_source_contains_no_trade_or_order_api(tmp_path):
         assert forbidden not in source, f"forbidden identifier {forbidden!r} in module source"
 
 
+def test_module_source_contains_no_holdout_symbols(tmp_path):
+    """The module must not name any final-holdout ticker in its source.
+
+    This mirrors the focused CI "Governance boundary" grep, which scans the
+    whole ``post_generation3`` directory for the holdout tickers. The
+    forbidden set is pinned by content hash (see the module) so a literal
+    never appears in the evaluation source.
+    """
+    from investment_tracker.independent_audit.post_generation3 import phase7_data
+
+    source = Path(phase7_data.__file__).read_text(encoding="utf-8")
+    for symbol in FORBIDDEN:
+        assert symbol not in source, f"holdout literal {symbol!r} in module source"
+
+
 # ---------------------------------------------------------------------------
 # Append-only, content-addressed snapshot output.
 # ---------------------------------------------------------------------------
