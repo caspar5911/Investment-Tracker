@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 from pathlib import Path
 
 import pytest
@@ -11,9 +12,13 @@ from investment_tracker.independent_audit.post_generation3 import (
 )
 from investment_tracker.independent_audit.post_generation3.phase7_start import (
     GEN4_PHASE7_START_BINDING_MISMATCH,
+    GEN4_PHASE7_START_CONTRACT_INVALID,
+    GEN4_PHASE7_START_CONTRACT_MISSING,
     GEN4_PHASE7_START_ENTRY_INVALID,
     GEN4_PHASE7_START_GOVERNANCE_MISMATCH,
+    Generation4Phase7StartContract,
     Generation4Phase7StartError,
+    load_generation4_phase7_start_contract,
     verify_generation4_phase7_start_readiness,
 )
 from tests.independent_audit.test_generation4_phase7_entry import (
@@ -236,3 +241,228 @@ def test_forbidden_authority_fails_closed(
     _replace_entry(monkeypatch, entry)
 
     _expect_start_error(paths, GEN4_PHASE7_START_ENTRY_INVALID)
+
+
+def _file_sha(path: Path) -> str:
+    return sha256(path.read_bytes()).hexdigest()
+
+
+def _contract_fixture(
+    tmp_path: Path,
+) -> tuple[dict[str, Path], dict[str, object], dict[str, object]]:
+    paths, _ = _valid_start_inputs(tmp_path)
+    readiness = verify_generation4_phase7_start_readiness(**_start_kwargs(paths))
+    paths["phase7_start"] = Path(phase7_start_module.__file__)
+    paths["phase7_start_cli"] = tmp_path / "phase7_start_cli.py"
+    paths["phase7_start_cli"].write_text(
+        "# synthetic start CLI identity\n", encoding="utf-8"
+    )
+    contract = {
+        "schema_version": "GENERATION4-PHASE7-START-CONTRACT-v1",
+        "status": "FROZEN_PRE_START",
+        "authority": "COORDINATOR_UNDER_INDEPENDENT_AUDIT_ENTRY_AUTHORIZATION",
+        "generation": "GENERATION_4",
+        "candidate_id": readiness["candidate_id"],
+        "binding_sha256": readiness["binding_sha256"],
+        "implementation_sha256": readiness["implementation_sha256"],
+        "split_normalizer_sha256": readiness["split_normalizer_sha256"],
+        "dividend_reconciliation_sha256": readiness[
+            "dividend_reconciliation_sha256"
+        ],
+        "successor_evaluator_sha256": readiness["successor_evaluator_sha256"],
+        "locked_symbols": readiness["locked_symbols"],
+        "holdout_id": readiness["holdout_id"],
+        "release_id": readiness["release_id"],
+        "authorization_id": readiness["authorization_id"],
+        "entry_authorization_sha256": readiness["entry_authorization_sha256"],
+        "audit_request_sha256": readiness["audit_request_sha256"],
+        "phase6_status": readiness["phase6_status"],
+        "one_time_consumed": True,
+        "phase7_entry_implementation_commit": readiness[
+            "phase7_entry_implementation_commit"
+        ],
+        "phase7_entry_source_sha256": _file_sha(paths["phase7_entry"]),
+        "phase7_entry_cli_source_sha256": _file_sha(paths["phase7_entry_cli"]),
+        "phase7_start_implementation_commit": "2" * 40,
+        "phase7_start_source_sha256": _file_sha(paths["phase7_start"]),
+        "phase7_start_cli_source_sha256": _file_sha(paths["phase7_start_cli"]),
+        "phase7_entry_authorized": True,
+        "phase7_started": False,
+        "phase7_performance_evaluation_authorized": False,
+        "production_readiness_approved": False,
+        "live_trading_authorized": False,
+        "retry_authorized": False,
+        "holdout_reuse_authorized": False,
+        "candidate_search_authorized": False,
+        "parameter_mutation_authorized": False,
+        "symbol_substitution_authorized": False,
+        "result_dependent_methodology_change_allowed": False,
+        "result_dependent_parameter_change_allowed": False,
+        "recon009_status": "OPEN",
+        "paper_only": True,
+    }
+    contract.update(
+        {field: readiness[field] for field in EVIDENCE_HASH_FIELDS}
+    )
+    paths["start_contract"] = _write(tmp_path / "start-contract.json", contract)
+    return paths, readiness, contract
+
+
+def _load_contract(
+    paths: dict[str, Path], readiness: dict[str, object]
+) -> Generation4Phase7StartContract:
+    return load_generation4_phase7_start_contract(
+        contract_path=paths["start_contract"],
+        readiness=readiness,
+        authorization_path=paths["authorization"],
+        audit_request_path=paths["audit_request"],
+        phase7_entry_path=paths["phase7_entry"],
+        phase7_entry_cli_path=paths["phase7_entry_cli"],
+        phase7_start_path=paths["phase7_start"],
+        phase7_start_cli_path=paths["phase7_start_cli"],
+    )
+
+
+def _expect_contract_error(
+    paths: dict[str, Path], readiness: dict[str, object], code: str
+) -> pytest.ExceptionInfo[Generation4Phase7StartError]:
+    with pytest.raises(Generation4Phase7StartError) as excinfo:
+        _load_contract(paths, readiness)
+    assert excinfo.value.code == code
+    return excinfo
+
+
+def test_valid_strict_start_contract_loads(tmp_path: Path):
+    paths, readiness, _ = _contract_fixture(tmp_path)
+
+    contract = _load_contract(paths, readiness)
+
+    assert contract.schema_version == "GENERATION4-PHASE7-START-CONTRACT-v1"
+    assert contract.status == "FROZEN_PRE_START"
+    assert contract.phase7_started is False
+    assert contract.phase7_performance_evaluation_authorized is False
+
+
+def test_missing_start_contract_fails_closed(tmp_path: Path):
+    paths, readiness, _ = _contract_fixture(tmp_path)
+    paths["start_contract"].unlink()
+
+    _expect_contract_error(paths, readiness, GEN4_PHASE7_START_CONTRACT_MISSING)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("schema_version", "GENERATION4-PHASE7-START-CONTRACT-v2"),
+        ("status", "STARTED"),
+        ("authority", "INDEPENDENT_AUDIT"),
+    ),
+)
+def test_contract_header_mismatch_is_invalid(
+    tmp_path: Path, field: str, value: object
+):
+    paths, readiness, contract = _contract_fixture(tmp_path)
+    contract[field] = value
+    _write(paths["start_contract"], contract)
+
+    _expect_contract_error(paths, readiness, GEN4_PHASE7_START_CONTRACT_INVALID)
+
+
+def test_contract_unknown_field_is_invalid(tmp_path: Path):
+    paths, readiness, contract = _contract_fixture(tmp_path)
+    contract["unexpected"] = True
+    _write(paths["start_contract"], contract)
+
+    _expect_contract_error(paths, readiness, GEN4_PHASE7_START_CONTRACT_INVALID)
+
+
+def test_wrong_entry_implementation_commit_fails_binding(tmp_path: Path):
+    paths, readiness, contract = _contract_fixture(tmp_path)
+    contract["phase7_entry_implementation_commit"] = "f" * 40
+    _write(paths["start_contract"], contract)
+
+    _expect_contract_error(paths, readiness, GEN4_PHASE7_START_BINDING_MISMATCH)
+
+
+def test_malformed_start_implementation_commit_is_invalid(tmp_path: Path):
+    paths, readiness, contract = _contract_fixture(tmp_path)
+    contract["phase7_start_implementation_commit"] = "not-a-commit"
+    _write(paths["start_contract"], contract)
+
+    _expect_contract_error(paths, readiness, GEN4_PHASE7_START_CONTRACT_INVALID)
+
+
+@pytest.mark.parametrize(
+    "field",
+    (
+        "phase7_entry_source_sha256",
+        "phase7_entry_cli_source_sha256",
+        "phase7_start_source_sha256",
+        "phase7_start_cli_source_sha256",
+    ),
+)
+def test_source_hash_drift_fails_binding(tmp_path: Path, field: str):
+    paths, readiness, contract = _contract_fixture(tmp_path)
+    contract[field] = "f" * 64
+    _write(paths["start_contract"], contract)
+
+    _expect_contract_error(paths, readiness, GEN4_PHASE7_START_BINDING_MISMATCH)
+
+
+@pytest.mark.parametrize(
+    ("path_name", "field"),
+    (
+        ("authorization", "entry_authorization_sha256"),
+        ("audit_request", "audit_request_sha256"),
+    ),
+)
+def test_entry_authority_file_drift_fails_binding(
+    tmp_path: Path, path_name: str, field: str
+):
+    paths, readiness, _ = _contract_fixture(tmp_path)
+    paths[path_name].write_bytes(paths[path_name].read_bytes() + b"\n")
+
+    excinfo = _expect_contract_error(
+        paths, readiness, GEN4_PHASE7_START_BINDING_MISMATCH
+    )
+    assert excinfo.value.detail == field
+
+
+@pytest.mark.parametrize("field", EVIDENCE_HASH_FIELDS)
+def test_contract_evidence_hash_drift_fails_binding(tmp_path: Path, field: str):
+    paths, readiness, contract = _contract_fixture(tmp_path)
+    contract[field] = "f" * 64
+    _write(paths["start_contract"], contract)
+
+    _expect_contract_error(paths, readiness, GEN4_PHASE7_START_BINDING_MISMATCH)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("phase7_entry_authorized", False),
+        ("phase7_started", True),
+        ("phase7_performance_evaluation_authorized", True),
+        ("production_readiness_approved", True),
+        ("live_trading_authorized", True),
+        ("retry_authorized", True),
+        ("holdout_reuse_authorized", True),
+        ("candidate_search_authorized", True),
+        ("parameter_mutation_authorized", True),
+        ("symbol_substitution_authorized", True),
+        ("result_dependent_methodology_change_allowed", True),
+        ("result_dependent_parameter_change_allowed", True),
+        ("recon009_status", "CLOSED"),
+        ("paper_only", False),
+    ),
+)
+def test_contract_governance_drift_fails_closed(
+    tmp_path: Path, field: str, value: object
+):
+    paths, readiness, contract = _contract_fixture(tmp_path)
+    contract[field] = value
+    _write(paths["start_contract"], contract)
+
+    _expect_contract_error(
+        paths, readiness, GEN4_PHASE7_START_GOVERNANCE_MISMATCH
+    )

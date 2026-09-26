@@ -3,7 +3,9 @@ from __future__ import annotations
 from hashlib import sha256
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from investment_tracker.independent_audit.post_generation3.phase7_entry import (
     Generation4Phase7Authorization,
@@ -67,6 +69,58 @@ _PROHIBITION_FIELDS = (
     "result_dependent_methodology_change_allowed",
     "result_dependent_parameter_change_allowed",
 )
+
+
+class Generation4Phase7StartContract(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["GENERATION4-PHASE7-START-CONTRACT-v1"]
+    status: Literal["FROZEN_PRE_START"]
+    authority: Literal[
+        "COORDINATOR_UNDER_INDEPENDENT_AUDIT_ENTRY_AUTHORIZATION"
+    ]
+    generation: str = Field(min_length=1)
+    candidate_id: str = Field(min_length=1)
+    binding_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    implementation_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    split_normalizer_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    dividend_reconciliation_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    successor_evaluator_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    locked_symbols: tuple[str, ...]
+    holdout_id: str = Field(min_length=1)
+    release_id: str = Field(min_length=1)
+    authorization_id: str = Field(min_length=1)
+    entry_authorization_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    audit_request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    phase6_contract_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    acquisition_authorization_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    acquisition_receipt_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    release_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    evaluation_result_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    evaluation_consumption_marker_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    phase6_closure_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    phase6_status: str = Field(min_length=1)
+    one_time_consumed: StrictBool
+    phase7_entry_implementation_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
+    phase7_entry_source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    phase7_entry_cli_source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    phase7_start_implementation_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
+    phase7_start_source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    phase7_start_cli_source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    phase7_entry_authorized: StrictBool
+    phase7_started: StrictBool
+    phase7_performance_evaluation_authorized: StrictBool
+    production_readiness_approved: StrictBool
+    live_trading_authorized: StrictBool
+    retry_authorized: StrictBool
+    holdout_reuse_authorized: StrictBool
+    candidate_search_authorized: StrictBool
+    parameter_mutation_authorized: StrictBool
+    symbol_substitution_authorized: StrictBool
+    result_dependent_methodology_change_allowed: StrictBool
+    result_dependent_parameter_change_allowed: StrictBool
+    recon009_status: str = Field(min_length=1)
+    paper_only: StrictBool
 
 
 class Generation4Phase7StartError(RuntimeError):
@@ -283,4 +337,116 @@ def verify_generation4_phase7_start_readiness(
         {field: getattr(authorization, field) for field in _EVIDENCE_HASH_FIELDS}
     )
     report.update({field: False for field in _PROHIBITION_FIELDS})
+    report["parameter_mutation_authorized"] = False
     return report
+
+
+_CONTRACT_READINESS_FIELDS = (
+    "generation",
+    "candidate_id",
+    "binding_sha256",
+    "implementation_sha256",
+    "split_normalizer_sha256",
+    "dividend_reconciliation_sha256",
+    "successor_evaluator_sha256",
+    "locked_symbols",
+    "holdout_id",
+    "release_id",
+    "authorization_id",
+    "entry_authorization_sha256",
+    "audit_request_sha256",
+    *_EVIDENCE_HASH_FIELDS,
+    "phase6_status",
+    "one_time_consumed",
+    "phase7_entry_implementation_commit",
+    "phase7_entry_source_sha256",
+    "phase7_entry_cli_source_sha256",
+)
+
+_CONTRACT_GOVERNANCE_EXPECTATIONS = {
+    "phase7_entry_authorized": True,
+    "phase7_started": False,
+    "phase7_performance_evaluation_authorized": False,
+    "production_readiness_approved": False,
+    "live_trading_authorized": False,
+    "retry_authorized": False,
+    "holdout_reuse_authorized": False,
+    "candidate_search_authorized": False,
+    "parameter_mutation_authorized": False,
+    "symbol_substitution_authorized": False,
+    "result_dependent_methodology_change_allowed": False,
+    "result_dependent_parameter_change_allowed": False,
+    "recon009_status": "OPEN",
+    "paper_only": True,
+}
+
+
+def load_generation4_phase7_start_contract(
+    *,
+    contract_path: Path,
+    readiness: dict[str, Any],
+    authorization_path: Path,
+    audit_request_path: Path,
+    phase7_entry_path: Path,
+    phase7_entry_cli_path: Path,
+    phase7_start_path: Path,
+    phase7_start_cli_path: Path,
+) -> Generation4Phase7StartContract:
+    if not Path(contract_path).is_file():
+        raise Generation4Phase7StartError(
+            GEN4_PHASE7_START_CONTRACT_MISSING, "start_contract"
+        )
+    try:
+        raw = json.loads(Path(contract_path).read_bytes())
+        contract = Generation4Phase7StartContract.model_validate(raw)
+    except Exception as exc:
+        raise Generation4Phase7StartError(
+            GEN4_PHASE7_START_CONTRACT_INVALID, "start_contract"
+        ) from exc
+
+    for field in _CONTRACT_READINESS_FIELDS:
+        actual = getattr(contract, field)
+        if field == "locked_symbols":
+            actual = list(actual)
+        _require_equal(
+            actual,
+            readiness.get(field),
+            code=GEN4_PHASE7_START_BINDING_MISMATCH,
+            field=field,
+        )
+
+    try:
+        actual_hashes = {
+            "entry_authorization_sha256": _sha(Path(authorization_path)),
+            "audit_request_sha256": _sha(Path(audit_request_path)),
+            "phase7_entry_source_sha256": _sha(Path(phase7_entry_path)),
+            "phase7_entry_cli_source_sha256": _sha(Path(phase7_entry_cli_path)),
+            "phase7_start_source_sha256": _sha(Path(phase7_start_path)),
+            "phase7_start_cli_source_sha256": _sha(Path(phase7_start_cli_path)),
+        }
+    except OSError as exc:
+        raise Generation4Phase7StartError(
+            GEN4_PHASE7_START_EVIDENCE_INVALID, "contract_binding_source"
+        ) from exc
+    for field, actual in actual_hashes.items():
+        _require_equal(
+            getattr(contract, field),
+            actual,
+            code=GEN4_PHASE7_START_BINDING_MISMATCH,
+            field=field,
+        )
+
+    for field, expected in _CONTRACT_GOVERNANCE_EXPECTATIONS.items():
+        _require_equal(
+            getattr(contract, field),
+            expected,
+            code=GEN4_PHASE7_START_GOVERNANCE_MISMATCH,
+            field=field,
+        )
+        _require_equal(
+            readiness.get(field),
+            expected,
+            code=GEN4_PHASE7_START_GOVERNANCE_MISMATCH,
+            field=f"readiness.{field}",
+        )
+    return contract
