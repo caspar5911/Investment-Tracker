@@ -705,6 +705,7 @@ class ProspectiveCheckpoint:
     splits: tuple[SplitEvent, ...] = ()
     dividends: tuple[DividendEvent, ...] = ()
     corporate_action_reconciliation: tuple[Mapping[str, Any], ...] = ()
+    evidence_bindings: Mapping[str, str] | None = None
 
 
 def _checkpoint_label(scored_count: int) -> str:
@@ -808,6 +809,7 @@ def prospective_checkpoint_report(snapshot: ProspectiveCheckpoint) -> dict[str, 
         "corporate_action_reconciliation": list(
             snapshot.corporate_action_reconciliation
         ),
+        "evidence_bindings": dict(snapshot.evidence_bindings or {}),
     }
     report.update(_prospective_governance_flags())
 
@@ -848,7 +850,12 @@ def prospective_checkpoint_report(snapshot: ProspectiveCheckpoint) -> dict[str, 
         )
         return report
 
-    targets = build_fixed_targets(signal_bars)
+    targets = build_fixed_targets(
+        signal_bars,
+        due_from=scored_start,
+        due_until=scored_calendar[-1],
+        align_start=scored_start,
+    )
     replays = {
         bps: replay_decision_targets(
             execution_bars,
