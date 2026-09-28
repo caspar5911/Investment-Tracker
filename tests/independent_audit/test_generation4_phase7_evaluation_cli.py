@@ -526,8 +526,9 @@ def test_evaluate_phase7_checkpoint_valid_auth_renders_pending_report(
     assert rc == 0
     report = _stdout_json(capsys)
     assert report["schema"] == "GENERATION4-PHASE7-PROSPECTIVE-CHECKPOINT-v1"
-    # All bars precede the frozen scored start, so no session is scored yet.
-    assert report["scored_session_count"] == 0
+    # The fixture contains three completed post-start sessions, well below
+    # the 63/126/252 checkpoints, so the result remains prospective pending.
+    assert report["scored_session_count"] == 3
     assert report["status"] == "PHASE7_PROSPECTIVE_EVIDENCE_PENDING"
     # A pending/complete result never grants production or live authority.
     assert report["production_authority"] is False
