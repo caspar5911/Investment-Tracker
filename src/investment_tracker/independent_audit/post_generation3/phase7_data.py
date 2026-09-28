@@ -814,6 +814,7 @@ def _build_snapshot(
     retrieved_at_utc: str,
     *,
     snapshot_id: str,
+    authorization_sha256: str,
 ) -> tuple[dict[str, Any], dict[str, bytes]]:
     file_payloads: dict[str, bytes] = {}
     symbol_entries: dict[str, dict[str, str]] = {}
@@ -862,6 +863,12 @@ def _build_snapshot(
         "warmup_session_count": request.warmup_session_count,
         "scored_session_count": request.scored_session_count,
         "candidate_id": authorization.candidate_id,
+        "evaluation_authorization_id": authorization.authorization_id,
+        "evaluation_authorization_sha256": authorization_sha256,
+        "audit_request_sha256": authorization.audit_request_sha256,
+        "evaluation_contract_sha256": authorization.evaluation_contract_sha256,
+        "start_artifact_sha256": authorization.start_artifact_sha256,
+        "frozen_evaluation_implementation_commit": authorization.frozen_evaluation_implementation_commit,
         "benchmark_symbol": _BENCHMARK_SYMBOL,
         "friction_cases_bps": list(_FRICTION_CASES_BPS),
         "primary_friction_bps": _PRIMARY_FRICTION_BPS,
@@ -926,6 +933,21 @@ def acquire_prospective_phase7_data(
     authorization = verify_generation4_phase7_evaluation_authorization(
         evaluation_authorization
     )
+    if isinstance(evaluation_authorization, Path):
+        try:
+            authorization_sha256 = sha256(
+                evaluation_authorization.read_bytes()
+            ).hexdigest()
+        except OSError:
+            raise Generation4Phase7DataError(
+                GEN4_PHASE7_DATA_AUTHORIZATION_INVALID, "authorization_bytes"
+            ) from None
+    elif isinstance(evaluation_authorization, Mapping):
+        authorization_sha256 = sha256(
+            _canonical_json(dict(evaluation_authorization))
+        ).hexdigest()
+    else:
+        raise Generation4Phase7DataError(GEN4_PHASE7_DATA_AUTHORIZATION_MISSING)
     # Gate 2: the request (universe, holdout, unknown, ranges) before provider.
     validated_request, expected_sessions = _validate_request(
         request, retrieved_at_utc=retrieved_at_utc
@@ -988,6 +1010,7 @@ def acquire_prospective_phase7_data(
         split_payloads,
         retrieved_at_utc,
         snapshot_id=snapshot_dir.name,
+        authorization_sha256=authorization_sha256,
     )
     _write_snapshot(snapshot_dir, manifest, file_payloads)
     return manifest
