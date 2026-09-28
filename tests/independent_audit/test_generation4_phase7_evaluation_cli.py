@@ -525,15 +525,15 @@ def test_evaluate_phase7_checkpoint_valid_auth_renders_pending_report(
     frames = _frames()
     factory, _ = _spy_client_factory(frames)
     monkeypatch.setattr(phase7_data, "_default_client_factory", factory)
+    auth_file = _write(tmp_path / "auth.json", _authorization())
     manifest = acquire_prospective_phase7_data(
-        evaluation_authorization=_authorization(),
+        evaluation_authorization=auth_file,
         request=_request(),
         output_dir=tmp_path / "snap",
         retrieved_at_utc="2026-10-01T00:00:00Z",
         client_factory=factory,
     )
     snapshot_dir = tmp_path / "snap" / "snapshots" / manifest["snapshot_id"]
-    auth_file = _write(tmp_path / "auth.json", _authorization())
     rc = phase7_evaluation_cli.main(
         [
             "evaluate-phase7-checkpoint",
