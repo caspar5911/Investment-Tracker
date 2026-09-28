@@ -184,8 +184,8 @@ def test_rehashed_request_cannot_omit_required_source_identity(bound_evidence, t
     [
         ("evaluation_module_sha256", "phase7_evaluation_source_sha256"),
         ("evaluation_cli_sha256", "phase7_evaluation_cli_source_sha256"),
-        ("durability_module_sha256", None),
-        ("data_boundary_module_sha256", None),
+        ("durability_module_sha256", "phase7_durability_source_sha256"),
+        ("data_boundary_module_sha256", "phase7_data_boundary_source_sha256"),
     ],
 )
 def test_rebound_source_still_must_match_frozen_git_tree(
@@ -197,8 +197,7 @@ def test_rebound_source_still_must_match_frozen_git_tree(
     digest = sha256(paths[field].read_bytes()).hexdigest()
     contract = json.loads(paths["evaluation_contract"].read_text(encoding="utf-8"))
     request = json.loads(paths["audit_request"].read_text(encoding="utf-8"))
-    if contract_field is not None:
-        contract[contract_field] = digest
+    contract[contract_field] = digest
     request[field] = digest
     auth = _rebind_contract_and_request(
         bound_evidence, contract, request, **{field: digest}

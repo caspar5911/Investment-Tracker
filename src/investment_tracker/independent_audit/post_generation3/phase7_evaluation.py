@@ -174,6 +174,8 @@ class Generation4Phase7EvaluationContract(BaseModel):
     phase7_evaluation_implementation_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
     phase7_evaluation_source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     phase7_evaluation_cli_source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    phase7_durability_source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    phase7_data_boundary_source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     research_universe: tuple[str, ...]
     forbidden_holdout_symbols: tuple[str, ...]
     benchmark_symbol: str = Field(min_length=1)

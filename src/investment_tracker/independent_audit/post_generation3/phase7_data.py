@@ -319,6 +319,10 @@ def _verify_evidence_bindings(
         raise _invalid("evaluation_contract.phase7_evaluation_source_sha256")
     if contract.get("phase7_evaluation_cli_source_sha256") != authorization.evaluation_cli_sha256:
         raise _invalid("evaluation_contract.phase7_evaluation_cli_source_sha256")
+    if contract.get("phase7_durability_source_sha256") != authorization.durability_module_sha256:
+        raise _invalid("evaluation_contract.phase7_durability_source_sha256")
+    if contract.get("phase7_data_boundary_source_sha256") != authorization.data_boundary_module_sha256:
+        raise _invalid("evaluation_contract.phase7_data_boundary_source_sha256")
 
 
 def verify_generation4_phase7_evaluation_authorization(

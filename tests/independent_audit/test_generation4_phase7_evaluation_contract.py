@@ -6,9 +6,11 @@ from hashlib import sha256
 from pathlib import Path
 
 from investment_tracker.independent_audit.post_generation3 import (
+    phase7_data as phase7_data_module,
     phase7_evaluation as phase7_evaluation_module,
     phase7_evaluation_cli as phase7_evaluation_cli_module,
 )
+from investment_tracker.quant.phase7 import generation4_durability as durability_module
 from investment_tracker.independent_audit.post_generation3.phase7_evaluation import (
     resolve_generation4_phase7_prospective_boundary,
     verify_generation4_phase7_evaluation_preflight,
@@ -133,6 +135,12 @@ def test_committed_evaluation_contract_binds_frozen_source_hashes() -> None:
     )
     assert contract["phase7_evaluation_cli_source_sha256"] == _file_sha(
         Path(phase7_evaluation_cli_module.__file__)
+    )
+    assert contract["phase7_durability_source_sha256"] == _file_sha(
+        Path(durability_module.__file__)
+    )
+    assert contract["phase7_data_boundary_source_sha256"] == _file_sha(
+        Path(phase7_data_module.__file__)
     )
 
 

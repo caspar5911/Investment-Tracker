@@ -81,6 +81,8 @@ def bound_evidence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> BoundEvid
     contract["phase7_evaluation_implementation_commit"] = commit
     contract["phase7_evaluation_source_sha256"] = file_sha(paths["evaluation_module_sha256"])
     contract["phase7_evaluation_cli_source_sha256"] = file_sha(paths["evaluation_cli_sha256"])
+    contract["phase7_durability_source_sha256"] = file_sha(paths["durability_module_sha256"])
+    contract["phase7_data_boundary_source_sha256"] = file_sha(paths["data_boundary_module_sha256"])
     contract_path = tmp_path / GOVERNANCE / "generation4-phase7-evaluation-contract.json"
     write_json(contract_path, contract)
     paths["evaluation_contract"] = contract_path

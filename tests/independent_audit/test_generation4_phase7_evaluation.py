@@ -163,6 +163,8 @@ def _evaluation_contract_payload(
         "phase7_evaluation_implementation_commit": "e" * 40,
         "phase7_evaluation_source_sha256": "0" * 64,
         "phase7_evaluation_cli_source_sha256": "8" * 64,
+        "phase7_durability_source_sha256": "7" * 64,
+        "phase7_data_boundary_source_sha256": "6" * 64,
         "research_universe": list(RESEARCH_UNIVERSE),
         "forbidden_holdout_symbols": list(HOLDOUT_SYMBOLS),
         "benchmark_symbol": "SPY",
