@@ -27,27 +27,25 @@ from investment_tracker.independent_audit.post_generation3.phase7_data import (
 )
 
 UNIVERSE = ("GLD", "IEF", "IWM", "QQQ", "SPY", "TLT", "VNQ", "XLP")
-START = "2026-09-23"
 SCORED = "2026-09-28"
 END = "2026-09-30"
 AFTER_CLOSE = "2026-10-01T00:00:00Z"
+_CALENDAR = xcals.get_calendar("XNYS")
+_ALL = _CALENDAR.sessions_in_range("2025-01-01", END)
+_SCORED_POS = _ALL.get_loc(pd.Timestamp(SCORED))
+_WINDOW = _ALL[_SCORED_POS - 210 : _SCORED_POS + 3]
+START = str(_WINDOW[0].date())
 
 
 def _sessions() -> pd.DatetimeIndex:
-    cal = xcals.get_calendar("XNYS")
-    sessions = cal.sessions_in_range(START, END)
-    assert [str(value.date()) for value in sessions] == [
-        "2026-09-23",
-        "2026-09-24",
-        "2026-09-25",
-        "2026-09-28",
-        "2026-09-29",
-        "2026-09-30",
-    ]
+    sessions = _CALENDAR.sessions_in_range(START, END)
+    assert len(sessions) == 213
+    assert str(sessions[210].date()) == SCORED
+    assert str(sessions[-1].date()) == END
     return sessions
 
 
-def _request(*, warmup: int = 3, scored: int = 3) -> dict[str, object]:
+def _request(*, warmup: int = 210, scored: int = 3) -> dict[str, object]:
     return {
         "schema_version": "GENERATION4-PHASE7-DATA-REQUEST-v1",
         "symbols": list(UNIVERSE),
@@ -133,7 +131,7 @@ def test_raw_time_key_is_canonicalized_before_snapshot_write(bound_evidence, tmp
         retrieved_at_utc=AFTER_CLOSE,
         client_factory=factory,
     )
-    assert manifest["warmup_session_count"] == 3
+    assert manifest["warmup_session_count"] == 210
     assert manifest["scored_session_count"] == 3
     snapshot = tmp_path / "out" / "snapshots" / manifest["snapshot_id"]
     saved = pd.read_csv(snapshot / "bars" / "SPY.csv", index_col=0)
@@ -197,6 +195,6 @@ def test_cli_derives_actual_session_counts_instead_of_checkpoint_max(monkeypatch
     )
     assert rc == 0
     request = captured["request"]
-    assert request["warmup_session_count"] == 3
+    assert request["warmup_session_count"] == 210
     assert request["scored_session_count"] == 3
     assert json.loads(capsys.readouterr().out)["status"] == "SYNTHETIC_OK"
