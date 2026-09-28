@@ -562,12 +562,7 @@ def _validate_request(
 
 
 class Phase7QuoteClient:
-    """Read-only quote client wrapping a provider OpenQuoteContext.
-
-    It exposes only :meth:`fetch_daily_bars` and :meth:`close`. It has no
-    order or trade capability and must never be used to place, submit, cancel,
-    buy, or sell.
-    """
+    """Read-only quote/corporate-action client for the frozen Phase-7 path."""
 
     def __init__(self, quote_context: Any, *, sdk: Any, host: str, port: int) -> None:
         self._quote_context = quote_context
@@ -577,9 +572,11 @@ class Phase7QuoteClient:
         self.sdk_module = getattr(sdk, "__name__", None)
         self.sdk_version = getattr(sdk, "__version__", None)
 
-    def fetch_daily_bars(self, symbol: str, start: str, end: str) -> pd.DataFrame:
+    def _fetch_daily_bars(
+        self, symbol: str, start: str, end: str, *, autype: Any
+    ) -> pd.DataFrame:
         code = f"US.{symbol}"
-        chunks: list[Any] = []
+        chunks: list[pd.DataFrame] = []
         page_req_key: Any = None
         while True:
             ret, data, page_req_key = self._quote_context.request_history_kline(
@@ -587,25 +584,84 @@ class Phase7QuoteClient:
                 start=start,
                 end=end,
                 ktype=self._sdk.KLType.K_DAY,
-                autype=self._sdk.AuType.QFQ,
+                autype=autype,
                 max_count=1000,
                 page_req_key=page_req_key,
                 extended_time=False,
             )
-            if int(ret) != 0:
+            if int(ret) != 0 or not isinstance(data, pd.DataFrame):
                 raise Generation4Phase7DataError(
-                    GEN4_PHASE7_DATA_SDK_UNAVAILABLE, f"ret={ret}"
+                    GEN4_PHASE7_DATA_SDK_UNAVAILABLE, f"history:{symbol}:ret={ret}"
                 )
-            if data is None or len(data) == 0:
+            if data.empty:
                 break
-            chunks.append(data)
+            chunks.append(data.copy(deep=True))
             if page_req_key in (None, ""):
                 break
         if not chunks:
             raise Generation4Phase7DataError(
-                GEN4_PHASE7_DATA_SDK_UNAVAILABLE, "no_bars_returned"
+                GEN4_PHASE7_DATA_SDK_UNAVAILABLE, f"history:{symbol}:empty"
             )
         return pd.concat(chunks, ignore_index=True)
+
+    def fetch_daily_bars(self, symbol: str, start: str, end: str) -> pd.DataFrame:
+        """QFQ signal bars."""
+        return self._fetch_daily_bars(
+            symbol, start, end, autype=self._sdk.AuType.QFQ
+        )
+
+    def fetch_unadjusted_daily_bars(
+        self, symbol: str, start: str, end: str
+    ) -> pd.DataFrame:
+        """Unadjusted execution/accounting bars."""
+        return self._fetch_daily_bars(
+            symbol, start, end, autype=self._sdk.AuType.NONE
+        )
+
+    def fetch_rehab(self, symbol: str) -> pd.DataFrame:
+        ret, data = self._quote_context.get_rehab(f"US.{symbol}")
+        if int(ret) != 0 or not isinstance(data, pd.DataFrame):
+            raise Generation4Phase7DataError(
+                GEN4_PHASE7_DATA_SDK_UNAVAILABLE, f"rehab:{symbol}:ret={ret}"
+            )
+        return data.copy(deep=True)
+
+    def fetch_dividends(self, symbol: str) -> dict[str, Any]:
+        ret, data = self._quote_context.get_corporate_actions_dividends(
+            f"US.{symbol}"
+        )
+        if int(ret) != 0 or not isinstance(data, dict):
+            raise Generation4Phase7DataError(
+                GEN4_PHASE7_DATA_SDK_UNAVAILABLE, f"dividends:{symbol}:ret={ret}"
+            )
+        rows = data.get("dividend_list", [])
+        if not isinstance(rows, list):
+            raise Generation4Phase7DataError(
+                GEN4_PHASE7_DATA_SDK_UNAVAILABLE, f"dividends:{symbol}:invalid"
+            )
+        return {"dividend_list": rows}
+
+    def fetch_splits(self, symbol: str) -> dict[str, Any]:
+        items: list[dict[str, Any]] = []
+        next_key: str | None = None
+        while True:
+            ret, data = self._quote_context.get_corporate_actions_stock_splits(
+                f"US.{symbol}", next_key=next_key, num=50
+            )
+            if int(ret) != 0 or not isinstance(data, dict):
+                raise Generation4Phase7DataError(
+                    GEN4_PHASE7_DATA_SDK_UNAVAILABLE, f"splits:{symbol}:ret={ret}"
+                )
+            page = data.get("split_list", [])
+            if not isinstance(page, list):
+                raise Generation4Phase7DataError(
+                    GEN4_PHASE7_DATA_SDK_UNAVAILABLE, f"splits:{symbol}:invalid"
+                )
+            items.extend(page)
+            next_key = str(data.get("next_key", "-1"))
+            if next_key == "-1":
+                break
+        return {"split_list": items}
 
     def close(self) -> None:
         self._quote_context.close()
@@ -734,28 +790,67 @@ def _frame_bytes(frame: pd.DataFrame) -> bytes:
     return frame.to_csv(index=True, index_label="session", date_format="%Y-%m-%d").encode("utf-8")
 
 
+def _rehab_bytes(frame: pd.DataFrame) -> bytes:
+    rendered = frame.copy(deep=True)
+    if "ex_div_date" in rendered.columns:
+        rendered = rendered.sort_values(["ex_div_date"], kind="stable")
+    return rendered.to_csv(
+        index=False, lineterminator="\n", float_format="%.17g"
+    ).encode("utf-8")
+
+
+def _json_bytes(value: dict[str, Any]) -> bytes:
+    return _canonical_json(value)
+
+
 def _build_snapshot(
     authorization: Generation4Phase7EvaluationAuthorization,
     request: Generation4Phase7DataRequest,
-    frames: Mapping[str, pd.DataFrame],
+    signal_frames: Mapping[str, pd.DataFrame],
+    execution_frames: Mapping[str, pd.DataFrame],
+    rehab_frames: Mapping[str, pd.DataFrame],
+    dividend_payloads: Mapping[str, dict[str, Any]],
+    split_payloads: Mapping[str, dict[str, Any]],
     retrieved_at_utc: str,
     *,
     snapshot_id: str,
 ) -> tuple[dict[str, Any], dict[str, bytes]]:
     file_payloads: dict[str, bytes] = {}
-    symbol_hashes: dict[str, str] = {}
-    file_entries: list[dict[str, Any]] = []
+    symbol_entries: dict[str, dict[str, str]] = {}
+
     for symbol in request.symbols:
-        csv_bytes = _frame_bytes(frames[symbol])
-        file_payloads[symbol] = csv_bytes
-        symbol_hashes[symbol] = sha256(csv_bytes).hexdigest()
-        file_entries.append(
-            {
-                "path": f"bars/{symbol}.csv",
-                "sha256": symbol_hashes[symbol],
-                "bytes": len(csv_bytes),
-            }
-        )
+        payloads = {
+            f"bars/qfq/{symbol}.csv": _frame_bytes(signal_frames[symbol]),
+            f"bars/unadjusted/{symbol}.csv": _frame_bytes(execution_frames[symbol]),
+            f"corporate_actions/rehab/{symbol}.csv": _rehab_bytes(rehab_frames[symbol]),
+            f"corporate_actions/dividends/{symbol}.json": _json_bytes(
+                dividend_payloads[symbol]
+            ),
+            f"corporate_actions/splits/{symbol}.json": _json_bytes(
+                split_payloads[symbol]
+            ),
+        }
+        file_payloads.update(payloads)
+        symbol_entries[symbol] = {
+            "qfq_sha256": sha256(payloads[f"bars/qfq/{symbol}.csv"]).hexdigest(),
+            "unadjusted_sha256": sha256(
+                payloads[f"bars/unadjusted/{symbol}.csv"]
+            ).hexdigest(),
+            "rehab_sha256": sha256(
+                payloads[f"corporate_actions/rehab/{symbol}.csv"]
+            ).hexdigest(),
+            "dividends_sha256": sha256(
+                payloads[f"corporate_actions/dividends/{symbol}.json"]
+            ).hexdigest(),
+            "splits_sha256": sha256(
+                payloads[f"corporate_actions/splits/{symbol}.json"]
+            ).hexdigest(),
+        }
+
+    file_entries = [
+        {"path": path, "sha256": sha256(payload).hexdigest(), "bytes": len(payload)}
+        for path, payload in sorted(file_payloads.items())
+    ]
     manifest: dict[str, Any] = {
         "schema_version": SNAPSHOT_SCHEMA,
         "snapshot_id": snapshot_id,
@@ -770,9 +865,10 @@ def _build_snapshot(
         "benchmark_symbol": _BENCHMARK_SYMBOL,
         "friction_cases_bps": list(_FRICTION_CASES_BPS),
         "primary_friction_bps": _PRIMARY_FRICTION_BPS,
-        "symbols": {
-            symbol: {"sha256": symbol_hashes[symbol]} for symbol in request.symbols
-        },
+        "signal_price_convention": "QFQ",
+        "execution_price_convention": "UNADJUSTED",
+        "corporate_actions_included": True,
+        "symbols": symbol_entries,
         "files": file_entries,
         "trading_context_created": False,
         "protected_holdout_symbols_accessed": [],
@@ -799,10 +895,10 @@ def _write_exclusive(path: Path, data: bytes) -> None:
 def _write_snapshot(
     snapshot_dir: Path, manifest: dict[str, Any], file_payloads: dict[str, bytes]
 ) -> None:
-    bars_dir = snapshot_dir / "bars"
-    bars_dir.mkdir(parents=True, exist_ok=True)
-    for symbol, csv_bytes in file_payloads.items():
-        _write_exclusive(bars_dir / f"{symbol}.csv", csv_bytes)
+    for relative, payload in sorted(file_payloads.items()):
+        path = snapshot_dir / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _write_exclusive(path, payload)
     manifest_bytes = json.dumps(
         manifest, sort_keys=True, indent=2, allow_nan=False
     ).encode("utf-8")
@@ -850,24 +946,46 @@ def acquire_prospective_phase7_data(
     factory = client_factory if client_factory is not None else _default_client_factory
     client = factory(host=host, port=port)
     try:
-        frames: dict[str, pd.DataFrame] = {}
+        signal_raw: dict[str, pd.DataFrame] = {}
+        execution_raw: dict[str, pd.DataFrame] = {}
+        rehab_frames: dict[str, pd.DataFrame] = {}
+        dividend_payloads: dict[str, dict[str, Any]] = {}
+        split_payloads: dict[str, dict[str, Any]] = {}
         for symbol in validated_request.symbols:
-            frames[symbol] = client.fetch_daily_bars(
+            signal_raw[symbol] = client.fetch_daily_bars(
                 symbol, validated_request.requested_start, validated_request.requested_end
             )
+            execution_raw[symbol] = client.fetch_unadjusted_daily_bars(
+                symbol, validated_request.requested_start, validated_request.requested_end
+            )
+            rehab_frames[symbol] = client.fetch_rehab(symbol)
+            dividend_payloads[symbol] = client.fetch_dividends(symbol)
+            split_payloads[symbol] = client.fetch_splits(symbol)
     finally:
         client.close()
 
-    normalized_frames = {
+    signal_frames = {
         symbol: _normalize_provider_frame(
-            frames[symbol], expected_sessions=expected_sessions, symbol=symbol
+            signal_raw[symbol], expected_sessions=expected_sessions, symbol=f"{symbol}:QFQ"
+        )
+        for symbol in validated_request.symbols
+    }
+    execution_frames = {
+        symbol: _normalize_provider_frame(
+            execution_raw[symbol],
+            expected_sessions=expected_sessions,
+            symbol=f"{symbol}:NONE",
         )
         for symbol in validated_request.symbols
     }
     manifest, file_payloads = _build_snapshot(
         authorization,
         validated_request,
-        normalized_frames,
+        signal_frames,
+        execution_frames,
+        rehab_frames,
+        dividend_payloads,
+        split_payloads,
         retrieved_at_utc,
         snapshot_id=snapshot_dir.name,
     )
