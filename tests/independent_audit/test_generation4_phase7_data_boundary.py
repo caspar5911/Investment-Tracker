@@ -22,6 +22,7 @@ import json
 from hashlib import sha256
 from pathlib import Path
 
+import exchange_calendars as xcals
 import pandas as pd
 import pytest
 
@@ -61,7 +62,7 @@ def _canonical(value):
 
 
 def _frames():
-    index = pd.bdate_range("2024-01-01", periods=6, tz="UTC")
+    index = xcals.get_calendar("XNYS").sessions_in_range("2026-09-23", "2026-09-30")
     out = {}
     for i, symbol in enumerate(RESEARCH_UNIVERSE):
         close = [100.0 + 0.5 * (i + 1) * step for step in range(1, len(index) + 1)]
@@ -103,11 +104,11 @@ def _request(**overrides):
     payload = {
         "schema_version": "GENERATION4-PHASE7-DATA-REQUEST-v1",
         "symbols": list(RESEARCH_UNIVERSE),
-        "requested_start": "2026-03-02",
+        "requested_start": "2026-09-23",
         "requested_end": "2026-09-30",
         "scored_start": "2026-09-28",
-        "warmup_session_count": 120,
-        "scored_session_count": 25,
+        "warmup_session_count": 3,
+        "scored_session_count": 3,
     }
     payload.update(overrides)
     return payload
@@ -120,7 +121,7 @@ def _run(tmp_path, *, auth=None, request=None, captured=None):
         evaluation_authorization=auth if auth is not None else _authorization(),
         request=request if request is not None else _request(),
         output_dir=tmp_path / "out",
-        retrieved_at_utc="2026-09-26T12:00:00Z",
+        retrieved_at_utc="2026-10-01T00:00:00Z",
         client_factory=factory,
     )
     if captured is not None:
@@ -145,7 +146,7 @@ def test_missing_authorization_fails_before_provider(tmp_path):
             evaluation_authorization=None,
             request=_request(),
             output_dir=tmp_path / "out",
-            retrieved_at_utc="2026-09-26T12:00:00Z",
+            retrieved_at_utc="2026-10-01T00:00:00Z",
             client_factory=factory,
         )
     assert excinfo.value.code == GEN4_PHASE7_DATA_AUTHORIZATION_MISSING
@@ -161,7 +162,7 @@ def test_invalid_authorization_status_fails_before_provider(tmp_path):
             evaluation_authorization=bad,
             request=_request(),
             output_dir=tmp_path / "out",
-            retrieved_at_utc="2026-09-26T12:00:00Z",
+            retrieved_at_utc="2026-10-01T00:00:00Z",
             client_factory=factory,
         )
     assert excinfo.value.code == GEN4_PHASE7_DATA_AUTHORIZATION_INVALID
@@ -177,7 +178,7 @@ def test_authorization_with_live_trading_true_fails_before_provider(tmp_path):
             evaluation_authorization=bad,
             request=_request(),
             output_dir=tmp_path / "out",
-            retrieved_at_utc="2026-09-26T12:00:00Z",
+            retrieved_at_utc="2026-10-01T00:00:00Z",
             client_factory=factory,
         )
     assert excinfo.value.code == GEN4_PHASE7_DATA_AUTHORIZATION_INVALID
@@ -193,7 +194,7 @@ def test_authorization_universe_mismatch_fails_before_provider(tmp_path):
             evaluation_authorization=bad,
             request=_request(),
             output_dir=tmp_path / "out",
-            retrieved_at_utc="2026-09-26T12:00:00Z",
+            retrieved_at_utc="2026-10-01T00:00:00Z",
             client_factory=factory,
         )
     assert excinfo.value.code == GEN4_PHASE7_DATA_AUTHORIZATION_INVALID
@@ -223,7 +224,7 @@ def test_universe_order_mismatch_rejected_before_provider(tmp_path):
             evaluation_authorization=_authorization(),
             request=_request(symbols=reordered),
             output_dir=tmp_path / "out",
-            retrieved_at_utc="2026-09-26T12:00:00Z",
+            retrieved_at_utc="2026-10-01T00:00:00Z",
             client_factory=factory,
         )
     assert excinfo.value.code == GEN4_PHASE7_DATA_UNIVERSE_INVALID
@@ -238,7 +239,7 @@ def test_extra_symbol_rejected_before_provider(tmp_path):
             evaluation_authorization=_authorization(),
             request=_request(symbols=list(RESEARCH_UNIVERSE) + ["XYZ"]),
             output_dir=tmp_path / "out",
-            retrieved_at_utc="2026-09-26T12:00:00Z",
+            retrieved_at_utc="2026-10-01T00:00:00Z",
             client_factory=factory,
         )
     assert excinfo.value.code == GEN4_PHASE7_DATA_SYMBOL_UNKNOWN
@@ -253,7 +254,7 @@ def test_missing_symbol_rejected_before_provider(tmp_path):
             evaluation_authorization=_authorization(),
             request=_request(symbols=list(RESEARCH_UNIVERSE[:-1])),
             output_dir=tmp_path / "out",
-            retrieved_at_utc="2026-09-26T12:00:00Z",
+            retrieved_at_utc="2026-10-01T00:00:00Z",
             client_factory=factory,
         )
     assert excinfo.value.code == GEN4_PHASE7_DATA_UNIVERSE_INVALID
@@ -269,7 +270,7 @@ def test_forbidden_holdout_rejected_before_provider(tmp_path, symbol):
             evaluation_authorization=_authorization(),
             request=_request(symbols=[symbol]),
             output_dir=tmp_path / "out",
-            retrieved_at_utc="2026-09-26T12:00:00Z",
+            retrieved_at_utc="2026-10-01T00:00:00Z",
             client_factory=factory,
         )
     assert excinfo.value.code == GEN4_PHASE7_DATA_HOLDOUT_FORBIDDEN
@@ -284,7 +285,7 @@ def test_unknown_symbol_rejected_before_provider(tmp_path):
             evaluation_authorization=_authorization(),
             request=_request(symbols=list(RESEARCH_UNIVERSE) + ["AAPL"]),
             output_dir=tmp_path / "out",
-            retrieved_at_utc="2026-09-26T12:00:00Z",
+            retrieved_at_utc="2026-10-01T00:00:00Z",
             client_factory=factory,
         )
     assert excinfo.value.code == GEN4_PHASE7_DATA_SYMBOL_UNKNOWN
@@ -299,7 +300,7 @@ def test_warmup_session_count_exceeding_limit_rejected_before_provider(tmp_path)
             evaluation_authorization=_authorization(),
             request=_request(warmup_session_count=211),
             output_dir=tmp_path / "out",
-            retrieved_at_utc="2026-09-26T12:00:00Z",
+            retrieved_at_utc="2026-10-01T00:00:00Z",
             client_factory=factory,
         )
     assert excinfo.value.code == GEN4_PHASE7_DATA_WARMUP_INVALID
@@ -314,7 +315,7 @@ def test_scored_session_count_exceeding_checkpoint_rejected_before_provider(tmp_
             evaluation_authorization=_authorization(),
             request=_request(scored_session_count=253),
             output_dir=tmp_path / "out",
-            retrieved_at_utc="2026-09-26T12:00:00Z",
+            retrieved_at_utc="2026-10-01T00:00:00Z",
             client_factory=factory,
         )
     assert excinfo.value.code == GEN4_PHASE7_DATA_CHECKPOINT_INVALID
@@ -331,7 +332,7 @@ def test_malformed_request_schema_rejected_before_provider(tmp_path):
             evaluation_authorization=_authorization(),
             request=bad,
             output_dir=tmp_path / "out",
-            retrieved_at_utc="2026-09-26T12:00:00Z",
+            retrieved_at_utc="2026-10-01T00:00:00Z",
             client_factory=factory,
         )
     assert excinfo.value.code == GEN4_PHASE7_DATA_REQUEST_INVALID
@@ -404,7 +405,7 @@ def test_append_only_snapshot_is_written(tmp_path):
     manifest, created = _run(tmp_path)
     snapshot_dir = Path(tmp_path) / "out" / "snapshots" / manifest["snapshot_id"]
     assert manifest["provider"] == "MOOMOO_OPEND"
-    assert manifest["retrieved_at_utc"] == "2026-09-26T12:00:00Z"
+    assert manifest["retrieved_at_utc"] == "2026-10-01T00:00:00Z"
     assert manifest["candidate_id"] == CANDIDATE_ID
     assert manifest["benchmark_symbol"] == "SPY"
     assert manifest["friction_cases_bps"] == [0, 3, 10, 25, 50]
