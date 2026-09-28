@@ -226,7 +226,10 @@ def _valid_paths(tmp_path: Path) -> dict[str, Path]:
 
 
 def _frames():
-    index = xcals.get_calendar("XNYS").sessions_in_range("2026-09-23", "2026-09-30")
+    calendar = xcals.get_calendar("XNYS")
+    all_sessions = calendar.sessions_in_range("2025-01-01", "2026-09-30")
+    scored_pos = all_sessions.get_loc(pd.Timestamp("2026-09-28"))
+    index = all_sessions[scored_pos - 210 : scored_pos + 3]
     if index.tz is None:
         index = index.tz_localize("UTC")
     out = {}
@@ -270,10 +273,10 @@ def _request(**overrides):
     payload = {
         "schema_version": "GENERATION4-PHASE7-DATA-REQUEST-v1",
         "symbols": list(RESEARCH_UNIVERSE),
-        "requested_start": "2026-09-23",
+        "requested_start": str(_frames()[RESEARCH_UNIVERSE[0]].index[0].date()),
         "requested_end": "2026-09-30",
         "scored_start": "2026-09-28",
-        "warmup_session_count": 3,
+        "warmup_session_count": 210,
         "scored_session_count": 3,
     }
     payload.update(overrides)
@@ -401,7 +404,7 @@ def test_acquire_phase7_data_missing_auth_fails_before_provider(
             "--output-dir",
             str(tmp_path / "out"),
             "--requested-start",
-            "2026-09-23",
+            str(_frames()[RESEARCH_UNIVERSE[0]].index[0].date()),
             "--requested-end",
             "2026-09-30",
             "--retrieved-at-utc",
@@ -429,7 +432,7 @@ def test_acquire_phase7_data_invalid_auth_fails_before_provider(
             "--output-dir",
             str(tmp_path / "out"),
             "--requested-start",
-            "2026-09-23",
+            str(_frames()[RESEARCH_UNIVERSE[0]].index[0].date()),
             "--requested-end",
             "2026-09-30",
             "--retrieved-at-utc",
@@ -457,7 +460,7 @@ def test_acquire_phase7_data_valid_auth_uses_provider_once(
             "--output-dir",
             str(tmp_path / "out"),
             "--requested-start",
-            "2026-09-23",
+            str(_frames()[RESEARCH_UNIVERSE[0]].index[0].date()),
             "--requested-end",
             "2026-09-30",
             "--retrieved-at-utc",
@@ -562,7 +565,7 @@ def test_no_command_accepts_arbitrary_symbols_or_parameters():
             "--output-dir",
             "b",
             "--requested-start",
-            "2026-09-23",
+            str(_frames()[RESEARCH_UNIVERSE[0]].index[0].date()),
             "--requested-end",
             "2026-09-30",
             "--retrieved-at-utc",
@@ -591,7 +594,7 @@ def test_acquire_command_rejects_arbitrary_symbol_flag():
                 "--output-dir",
                 "b",
                 "--requested-start",
-                "2026-09-23",
+                str(_frames()[RESEARCH_UNIVERSE[0]].index[0].date()),
                 "--requested-end",
                 "2026-09-30",
                 "--retrieved-at-utc",
