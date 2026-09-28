@@ -441,9 +441,9 @@ def _calendar_window(
 ) -> tuple[pd.DatetimeIndex, int, int]:
     """Resolve the exact completed XNYS sessions covered by a data request."""
     try:
-        start = pd.Timestamp(requested_start, tz="UTC")
-        end = pd.Timestamp(requested_end, tz="UTC")
-        scored = pd.Timestamp(scored_start, tz="UTC")
+        start = pd.Timestamp(requested_start)
+        end = pd.Timestamp(requested_end)
+        scored = pd.Timestamp(scored_start)
         retrieved = pd.Timestamp(retrieved_at_utc)
     except (TypeError, ValueError):
         raise Generation4Phase7DataError(GEN4_PHASE7_DATA_RANGE_INVALID) from None
@@ -454,14 +454,14 @@ def _calendar_window(
     retrieved = retrieved.tz_convert("UTC")
     try:
         calendar = xcals.get_calendar("XNYS")
-        sessions = calendar.sessions_in_range(start, end)
+        calendar_sessions = calendar.sessions_in_range(start, end)
     except (TypeError, ValueError):
         raise Generation4Phase7DataError(GEN4_PHASE7_DATA_RANGE_INVALID) from None
     if (
-        sessions.empty
-        or sessions[0] != start
-        or sessions[-1] != end
-        or scored not in sessions
+        calendar_sessions.empty
+        or calendar_sessions[0] != start
+        or calendar_sessions[-1] != end
+        or scored not in calendar_sessions
     ):
         raise Generation4Phase7DataError(
             GEN4_PHASE7_DATA_RANGE_INVALID, "exact_xnys_session_range"
@@ -470,8 +470,13 @@ def _calendar_window(
         raise Generation4Phase7DataError(
             GEN4_PHASE7_DATA_SESSION_INCOMPLETE, requested_end
         )
-    warmup_count = int((sessions < scored).sum())
-    scored_count = int((sessions >= scored).sum())
+    warmup_count = int((calendar_sessions < scored).sum())
+    scored_count = int((calendar_sessions >= scored).sum())
+    sessions = (
+        calendar_sessions.tz_localize("UTC")
+        if calendar_sessions.tz is None
+        else calendar_sessions.tz_convert("UTC")
+    )
     return sessions, warmup_count, scored_count
 
 
