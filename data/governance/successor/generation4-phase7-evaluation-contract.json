@@ -20,9 +20,11 @@
   "phase7_start_implementation_commit": "356ee53a7652b33f2ea91bf8779bd174fa794fda",
   "phase7_start_source_sha256": "552873e9a724425247ebdc4b79be5c9ade4006b5b9a42ff30f87d3df381996fe",
   "phase7_start_cli_source_sha256": "501de31d6ee87ce48d3edf112f4168274246f04fc7e42e90f5464f13528f40f2",
-  "phase7_evaluation_implementation_commit": "de3aa468d63e5157c935c6af867b0492573510c6",
-  "phase7_evaluation_source_sha256": "ac5a132cb77880d7919419bdfd0c61645c4810df21ce78657ab9f95ea3f57a55",
+  "phase7_evaluation_implementation_commit": "e8ec2c89f6f472e673a5b46dac4d413fe58b3da8",
+  "phase7_evaluation_source_sha256": "4cdeb100013da639a5084a5bbd46e3a69aba0ee2c6dc908a6cf523ff69630209",
   "phase7_evaluation_cli_source_sha256": "7c90ac633c4255268bd5bc22a9813b1fc8f7d03f06cb9e25940ec5830b1d986d",
+  "phase7_durability_source_sha256": "373517dd633026144e674340f7666ef6b7a688882d791ff075172ff9f277bbbd",
+  "phase7_data_boundary_source_sha256": "d47d22b7802fa4ad8ea2e762e6b4687a2b7edcf9f55dfcbf38048836197a7eb7",
   "research_universe": [
     "GLD",
     "IEF",
