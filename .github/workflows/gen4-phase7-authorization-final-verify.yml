@@ -1,0 +1,44 @@
+name: gen4-phase7-authorization-final-verify
+
+on:
+  push:
+    branches:
+      - audit/gen4-phase7-auth-verify-20260928
+    paths:
+      - ".github/workflows/gen4-phase7-authorization-final-verify.yml"
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 3793787f6605d534dbda7bd2920d1305be353cbe
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev,quant,audit]'
+      - name: Verify committed authorization
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from investment_tracker.independent_audit.post_generation3.phase7_data import verify_generation4_phase7_evaluation_authorization
+          p=Path("data/governance/successor/generation4-phase7-evaluation-authorization.json")
+          a=verify_generation4_phase7_evaluation_authorization(p)
+          assert a.authorization_id=="INDEP-AUDIT-GEN4-PHASE7-EVAL-20260928-GPT56SOL-0001"
+          assert a.phase7_performance_evaluation_authorized is True
+          assert a.production_readiness_approved is False
+          assert a.live_trading_authorized is False
+          assert a.holdout_reuse_authorized is False
+          assert a.candidate_search_authorized is False
+          assert a.parameter_mutation_authorized is False
+          assert a.symbol_substitution_authorized is False
+          assert a.adaptive_walk_forward_authorized is False
+          assert a.annual_reoptimization_authorized is False
+          assert a.recon009_status=="OPEN"
+          assert a.paper_only is True
+          print("COMMITTED_AUTHORIZATION_VALID")
+          PY
