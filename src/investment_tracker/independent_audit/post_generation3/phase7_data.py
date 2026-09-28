@@ -20,6 +20,7 @@ import importlib
 import json
 import os
 import subprocess
+from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 from typing import Any, Literal, Mapping
@@ -690,6 +691,8 @@ def _snapshot_id(
     seed = {
         "provider": PROVIDER,
         "candidate_id": authorization.candidate_id,
+        "evaluation_authorization_id": authorization.authorization_id,
+        "evaluation_contract_sha256": authorization.evaluation_contract_sha256,
         "research_universe": list(request.symbols),
         "requested_start": request.requested_start,
         "requested_end": request.requested_end,
@@ -933,6 +936,12 @@ def acquire_prospective_phase7_data(
     authorization = verify_generation4_phase7_evaluation_authorization(
         evaluation_authorization
     )
+    # A real provider run uses the trusted system clock. The caller-supplied
+    # timestamp is honored only with an injected test client so tests remain
+    # deterministic without allowing a production caller to future-date an
+    # incomplete market session.
+    if client_factory is None:
+        retrieved_at_utc = datetime.now(timezone.utc).isoformat()
     if isinstance(evaluation_authorization, Path):
         try:
             authorization_sha256 = sha256(
