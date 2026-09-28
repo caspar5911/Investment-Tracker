@@ -19,6 +19,7 @@ authorization exists (see the evaluation plan Task 11).
 import importlib
 import json
 import os
+import subprocess
 from hashlib import sha256
 from pathlib import Path
 from typing import Any, Literal, Mapping
@@ -76,7 +77,30 @@ _PRIMARY_FRICTION_BPS = 3
 _WARMUP_SESSION_LIMIT = 210
 _CHECKPOINT_SESSIONS_PRIMARY = 252
 _CHECKPOINT_SESSIONS = (63, 126, 252)
+_FIRST_SCORED_SESSION = "2026-09-28"
 _CANDIDATE_ID = "G2-A|lookback=189|skip=21|top_k=1|rebalance=21"
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+_EVIDENCE_FILES = {
+    "audit_request_sha256": "generation4-phase7-evaluation-independent-audit-request.json",
+    "evaluation_contract_sha256": "generation4-phase7-evaluation-contract.json",
+    "start_artifact_sha256": "generation4-phase7-start.json",
+    "start_contract_sha256": "generation4-phase7-start-contract.json",
+    "entry_authorization_sha256": "generation4-phase7-entry-authorization.json",
+}
+_SOURCE_FILES = {
+    "evaluation_module_sha256": "src/investment_tracker/independent_audit/post_generation3/phase7_evaluation.py",
+    "evaluation_cli_sha256": "src/investment_tracker/independent_audit/post_generation3/phase7_evaluation_cli.py",
+    "durability_module_sha256": "src/investment_tracker/quant/phase7/generation4_durability.py",
+    "data_boundary_module_sha256": "src/investment_tracker/independent_audit/post_generation3/phase7_data.py",
+}
+_GOVERNANCE_FALSE = (
+    "production_readiness_approved", "live_trading_authorized",
+    "holdout_reuse_authorized", "candidate_search_authorized",
+    "parameter_mutation_authorized", "symbol_substitution_authorized",
+    "adaptive_walk_forward_authorized", "annual_reoptimization_authorized",
+    "result_dependent_methodology_change_allowed",
+    "result_dependent_parameter_change_allowed",
+)
 
 
 class Generation4Phase7DataError(RuntimeError):
@@ -103,34 +127,52 @@ class Generation4Phase7EvaluationAuthorization(BaseModel):
 
     schema_version: Literal[AUTHORIZATION_SCHEMA]
     status: Literal[AUTHORIZATION_STATUS]
-    authority: str = Field(min_length=1)
+    authority: Literal["INDEPENDENT_AUDIT"]
     authorization_id: str = Field(min_length=1)
     approved_at_utc: str = Field(min_length=1)
+    audit_request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    frozen_evaluation_implementation_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
+    evaluation_module_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    evaluation_cli_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    durability_module_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    data_boundary_module_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     evaluation_contract_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     start_artifact_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    start_artifact_self_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    start_contract_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    entry_authorization_id: str = Field(min_length=1)
     entry_authorization_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     candidate_id: str = Field(min_length=1)
+    binding_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    implementation_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    split_normalizer_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    dividend_reconciliation_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    successor_evaluator_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     research_universe: tuple[str, ...] = Field(min_length=1)
     forbidden_holdout_symbols: tuple[str, ...] = Field(min_length=1)
     benchmark_symbol: str = Field(min_length=1)
+    initial_cash: float = Field(gt=0)
     friction_cases_bps: tuple[int, ...] = Field(min_length=1)
     primary_friction_bps: int
     prospective_first_scored_session: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
     warmup_session_limit: int = Field(gt=0)
     checkpoint_sessions: tuple[int, ...] = Field(min_length=1)
+    historical_lane_classification: Literal["REUSED_HISTORY_DIAGNOSTIC_ONLY"]
+    dq030_status: Literal["UNRESOLVED"]
     phase7_started: StrictBool
-    production_readiness_approved: StrictBool = False
-    live_trading_authorized: StrictBool = False
-    holdout_reuse_authorized: StrictBool = False
-    candidate_search_authorized: StrictBool = False
-    parameter_mutation_authorized: StrictBool = False
-    symbol_substitution_authorized: StrictBool = False
-    adaptive_walk_forward_authorized: StrictBool = False
-    annual_reoptimization_authorized: StrictBool = False
-    result_dependent_methodology_change_allowed: StrictBool = False
-    result_dependent_parameter_change_allowed: StrictBool = False
-    recon009_status: str = "OPEN"
-    paper_only: StrictBool = True
+    phase7_performance_evaluation_authorized: StrictBool
+    production_readiness_approved: StrictBool
+    live_trading_authorized: StrictBool
+    holdout_reuse_authorized: StrictBool
+    candidate_search_authorized: StrictBool
+    parameter_mutation_authorized: StrictBool
+    symbol_substitution_authorized: StrictBool
+    adaptive_walk_forward_authorized: StrictBool
+    annual_reoptimization_authorized: StrictBool
+    result_dependent_methodology_change_allowed: StrictBool
+    result_dependent_parameter_change_allowed: StrictBool
+    recon009_status: Literal["OPEN"]
+    paper_only: StrictBool
 
 
 def _canonical_json(value: Any) -> bytes:
@@ -151,6 +193,132 @@ def _verify_frozen_identities() -> None:
         raise Generation4Phase7DataError(
             GEN4_PHASE7_DATA_UNIVERSE_INVALID, "frozen_universe_integrity"
         )
+
+
+def _invalid(detail: str) -> Generation4Phase7DataError:
+    return Generation4Phase7DataError(GEN4_PHASE7_DATA_AUTHORIZATION_INVALID, detail)
+
+
+def _read_bound_json(path: Path, detail: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_bytes())
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        raise _invalid(detail) from None
+    if not isinstance(payload, dict):
+        raise _invalid(detail)
+    return payload
+
+
+def _verify_evidence_bindings(
+    authorization: Generation4Phase7EvaluationAuthorization,
+) -> None:
+    from .phase7_evaluation import (
+        Generation4Phase7EvaluationError,
+        verify_generation4_phase7_evaluation_preflight,
+    )
+
+    governance_dir = _REPO_ROOT / "data/governance/successor"
+    evidence_paths = {
+        field: governance_dir / filename for field, filename in _EVIDENCE_FILES.items()
+    }
+    for field, path in evidence_paths.items():
+        try:
+            actual = sha256(path.read_bytes()).hexdigest()
+        except OSError:
+            raise _invalid(field) from None
+        if getattr(authorization, field) != actual:
+            raise _invalid(field)
+
+    request = _read_bound_json(evidence_paths["audit_request_sha256"], "audit_request")
+    contract = _read_bound_json(evidence_paths["evaluation_contract_sha256"], "evaluation_contract")
+    start = _read_bound_json(evidence_paths["start_artifact_sha256"], "start_artifact")
+    entry = _read_bound_json(evidence_paths["entry_authorization_sha256"], "entry_authorization")
+    if request.get("schema_version") != "GENERATION4-PHASE7-EVALUATION-INDEPENDENT-AUDIT-REQUEST-v1":
+        raise _invalid("audit_request.schema_version")
+    if request.get("status") != "READY_FOR_INDEPENDENT_AUDIT" or request.get("authority") != "NONE":
+        raise _invalid("audit_request.status")
+    if request.get("phase7_performance_evaluation_authorized") is not False:
+        raise _invalid("audit_request.phase7_performance_evaluation_authorized")
+    request_only_fields = {
+        "schema_version", "status", "authority", "authorization_id",
+        "approved_at_utc", "audit_request_sha256",
+    }
+    missing_request_fields = (
+        set(Generation4Phase7EvaluationAuthorization.model_fields)
+        - request_only_fields - request.keys()
+    )
+    if missing_request_fields:
+        raise _invalid(f"audit_request.missing:{sorted(missing_request_fields)[0]}")
+    if contract.get("schema_version") != "GENERATION4-PHASE7-EVALUATION-CONTRACT-v1":
+        raise _invalid("evaluation_contract.schema_version")
+
+    # The start self-hash is over canonical JSON without its embedded digest.
+    start_body = {key: value for key, value in start.items() if key != "artifact_sha256"}
+    actual_self_hash = sha256(_canonical_json(start_body)).hexdigest()
+    if start.get("artifact_sha256") != actual_self_hash or authorization.start_artifact_self_hash != actual_self_hash:
+        raise _invalid("start_artifact_self_hash")
+    if entry.get("authorization_id") != authorization.entry_authorization_id:
+        raise _invalid("entry_authorization_id")
+    if start.get("authorization_id") != authorization.entry_authorization_id:
+        raise _invalid("start_artifact.authorization_id")
+
+    # The existing preflight verifies the start/contract chain, frozen candidate,
+    # methodology, universe, boundary constants, and pre-authorization flags.
+    try:
+        verify_generation4_phase7_evaluation_preflight(
+            start_artifact_path=evidence_paths["start_artifact_sha256"],
+            start_contract_path=evidence_paths["start_contract_sha256"],
+            evaluation_contract_path=evidence_paths["evaluation_contract_sha256"],
+        )
+    except Generation4Phase7EvaluationError as exc:
+        raise _invalid(f"preflight:{exc.code}:{exc.detail}") from None
+
+    if request.get("evaluation_contract_sha256") != authorization.evaluation_contract_sha256:
+        raise _invalid("audit_request.evaluation_contract_sha256")
+    if request.get("start_artifact_sha256") != authorization.start_artifact_sha256:
+        raise _invalid("audit_request.start_artifact_sha256")
+    if request.get("start_contract_sha256") != authorization.start_contract_sha256:
+        raise _invalid("audit_request.start_contract_sha256")
+    if request.get("entry_authorization_sha256") != authorization.entry_authorization_sha256:
+        raise _invalid("audit_request.entry_authorization_sha256")
+
+    # Compare every shared identity, boundary, and prohibition against the
+    # independent request and frozen contract. The only deliberate difference
+    # is the auditor's permission to evaluate Phase-7 performance.
+    for field in request.keys() & type(authorization).model_fields.keys():
+        if field in {"schema_version", "status", "authority", "phase7_performance_evaluation_authorized"}:
+            continue
+        actual = getattr(authorization, field)
+        expected = request[field]
+        if actual != (tuple(expected) if isinstance(actual, tuple) else expected):
+            raise _invalid(f"audit_request.{field}")
+    for field in contract.keys() & type(authorization).model_fields.keys():
+        if field in {"schema_version", "status", "authority", "phase7_performance_evaluation_authorized"}:
+            continue
+        actual = getattr(authorization, field)
+        expected = contract[field]
+        if actual != (tuple(expected) if isinstance(actual, tuple) else expected):
+            raise _invalid(f"evaluation_contract.{field}")
+
+    commit = authorization.frozen_evaluation_implementation_commit
+    if commit != contract.get("phase7_evaluation_implementation_commit"):
+        raise _invalid("frozen_evaluation_implementation_commit")
+    for field, relative in _SOURCE_FILES.items():
+        path = _REPO_ROOT / relative
+        try:
+            current_bytes = path.read_bytes()
+            frozen_bytes = subprocess.run(
+                ["git", "-C", str(_REPO_ROOT), "show", f"{commit}:{relative}"],
+                check=True, capture_output=True,
+            ).stdout
+        except (OSError, subprocess.CalledProcessError):
+            raise _invalid(f"frozen_implementation:{field}") from None
+        if current_bytes != frozen_bytes or sha256(current_bytes).hexdigest() != getattr(authorization, field):
+            raise _invalid(field)
+    if contract.get("phase7_evaluation_source_sha256") != authorization.evaluation_module_sha256:
+        raise _invalid("evaluation_contract.phase7_evaluation_source_sha256")
+    if contract.get("phase7_evaluation_cli_source_sha256") != authorization.evaluation_cli_sha256:
+        raise _invalid("evaluation_contract.phase7_evaluation_cli_source_sha256")
 
 
 def verify_generation4_phase7_evaluation_authorization(
@@ -222,18 +390,7 @@ def verify_generation4_phase7_evaluation_authorization(
         raise Generation4Phase7DataError(
             GEN4_PHASE7_DATA_AUTHORIZATION_INVALID, "phase7_started"
         )
-    governance_flags = (
-        authorization.production_readiness_approved,
-        authorization.live_trading_authorized,
-        authorization.holdout_reuse_authorized,
-        authorization.candidate_search_authorized,
-        authorization.parameter_mutation_authorized,
-        authorization.symbol_substitution_authorized,
-        authorization.adaptive_walk_forward_authorized,
-        authorization.annual_reoptimization_authorized,
-        authorization.result_dependent_methodology_change_allowed,
-        authorization.result_dependent_parameter_change_allowed,
-    )
+    governance_flags = tuple(getattr(authorization, field) for field in _GOVERNANCE_FALSE)
     if any(governance_flags):
         raise Generation4Phase7DataError(
             GEN4_PHASE7_DATA_AUTHORIZATION_INVALID, "governance_flags"
@@ -244,6 +401,13 @@ def verify_generation4_phase7_evaluation_authorization(
         )
     if not authorization.paper_only:
         raise Generation4Phase7DataError(GEN4_PHASE7_DATA_AUTHORIZATION_INVALID, "paper_only")
+    if not authorization.phase7_performance_evaluation_authorized:
+        raise _invalid("phase7_performance_evaluation_authorized")
+    if authorization.initial_cash != 100_000.0:
+        raise _invalid("initial_cash")
+    if authorization.prospective_first_scored_session != _FIRST_SCORED_SESSION:
+        raise _invalid("prospective_first_scored_session")
+    _verify_evidence_bindings(authorization)
     return authorization
 
 

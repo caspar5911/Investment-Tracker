@@ -43,6 +43,15 @@ from investment_tracker.independent_audit.post_generation3.phase7_data import (
 RESEARCH_UNIVERSE = ("GLD", "IEF", "IWM", "QQQ", "SPY", "TLT", "VNQ", "XLP")
 FORBIDDEN = ("QQQM", "FALN", "IIPR", "PSTL", "EFAS")
 CANDIDATE_ID = "G2-A|lookback=189|skip=21|top_k=1|rebalance=21"
+_BOUND_EVIDENCE = None
+
+
+@pytest.fixture(autouse=True)
+def _synthetic_authorization_evidence(bound_evidence):
+    global _BOUND_EVIDENCE
+    _BOUND_EVIDENCE = bound_evidence
+    yield
+    _BOUND_EVIDENCE = None
 
 
 def _canonical(value):
@@ -87,40 +96,7 @@ def _spy_client_factory(frames):
 
 
 def _authorization(**overrides):
-    payload = {
-        "schema_version": "GENERATION4-PHASE7-EVALUATION-AUTHORIZATION-v1",
-        "status": "GENERATION4_PHASE7_EVALUATION_AUTHORIZED",
-        "authority": "INDEPENDENT_AUDIT",
-        "authorization_id": "SYN-GEN4-EVAL-AUTH-0001",
-        "approved_at_utc": "2026-09-26T00:00:00Z",
-        "evaluation_contract_sha256": "a" * 64,
-        "start_artifact_sha256": "b" * 64,
-        "entry_authorization_sha256": "c" * 64,
-        "candidate_id": CANDIDATE_ID,
-        "research_universe": list(RESEARCH_UNIVERSE),
-        "forbidden_holdout_symbols": list(FORBIDDEN),
-        "benchmark_symbol": "SPY",
-        "friction_cases_bps": [0, 3, 10, 25, 50],
-        "primary_friction_bps": 3,
-        "prospective_first_scored_session": "2026-09-28",
-        "warmup_session_limit": 210,
-        "checkpoint_sessions": [63, 126, 252],
-        "phase7_started": True,
-        "production_readiness_approved": False,
-        "live_trading_authorized": False,
-        "holdout_reuse_authorized": False,
-        "candidate_search_authorized": False,
-        "parameter_mutation_authorized": False,
-        "symbol_substitution_authorized": False,
-        "adaptive_walk_forward_authorized": False,
-        "annual_reoptimization_authorized": False,
-        "result_dependent_methodology_change_allowed": False,
-        "result_dependent_parameter_change_allowed": False,
-        "recon009_status": "OPEN",
-        "paper_only": True,
-    }
-    payload.update(overrides)
-    return payload
+    return _BOUND_EVIDENCE.auth(**overrides)
 
 
 def _request(**overrides):
