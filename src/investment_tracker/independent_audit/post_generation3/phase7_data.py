@@ -24,6 +24,8 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any, Literal, Mapping
 
+import exchange_calendars as xcals
+import numpy as np
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from pydantic import ValidationError
@@ -43,6 +45,9 @@ GEN4_PHASE7_DATA_HOLDOUT_FORBIDDEN = "GEN4_PHASE7_DATA_HOLDOUT_FORBIDDEN"
 GEN4_PHASE7_DATA_WARMUP_INVALID = "GEN4_PHASE7_DATA_WARMUP_INVALID"
 GEN4_PHASE7_DATA_CHECKPOINT_INVALID = "GEN4_PHASE7_DATA_CHECKPOINT_INVALID"
 GEN4_PHASE7_DATA_RANGE_INVALID = "GEN4_PHASE7_DATA_RANGE_INVALID"
+GEN4_PHASE7_DATA_SESSION_COUNT_MISMATCH = "GEN4_PHASE7_DATA_SESSION_COUNT_MISMATCH"
+GEN4_PHASE7_DATA_SESSION_INCOMPLETE = "GEN4_PHASE7_DATA_SESSION_INCOMPLETE"
+GEN4_PHASE7_DATA_SESSION_ALIGNMENT_INVALID = "GEN4_PHASE7_DATA_SESSION_ALIGNMENT_INVALID"
 GEN4_PHASE7_DATA_OUTPUT_EXISTS = "GEN4_PHASE7_DATA_OUTPUT_EXISTS"
 GEN4_PHASE7_DATA_SDK_UNAVAILABLE = "GEN4_PHASE7_DATA_SDK_UNAVAILABLE"
 GEN4_PHASE7_DATA_WRITE_FAILED = "GEN4_PHASE7_DATA_WRITE_FAILED"
@@ -427,7 +432,81 @@ def verify_generation4_phase7_evaluation_authorization(
     return authorization
 
 
-def _validate_request(raw: Mapping[str, Any] | Any) -> Generation4Phase7DataRequest:
+def _calendar_window(
+    *,
+    requested_start: str,
+    requested_end: str,
+    scored_start: str,
+    retrieved_at_utc: str,
+) -> tuple[pd.DatetimeIndex, int, int]:
+    """Resolve the exact completed XNYS sessions covered by a data request."""
+    try:
+        start = pd.Timestamp(requested_start, tz="UTC")
+        end = pd.Timestamp(requested_end, tz="UTC")
+        scored = pd.Timestamp(scored_start, tz="UTC")
+        retrieved = pd.Timestamp(retrieved_at_utc)
+    except (TypeError, ValueError):
+        raise Generation4Phase7DataError(GEN4_PHASE7_DATA_RANGE_INVALID) from None
+    if retrieved.tzinfo is None:
+        raise Generation4Phase7DataError(
+            GEN4_PHASE7_DATA_RANGE_INVALID, "retrieved_at_utc"
+        )
+    retrieved = retrieved.tz_convert("UTC")
+    try:
+        calendar = xcals.get_calendar("XNYS")
+        sessions = calendar.sessions_in_range(start, end)
+    except (TypeError, ValueError):
+        raise Generation4Phase7DataError(GEN4_PHASE7_DATA_RANGE_INVALID) from None
+    if (
+        sessions.empty
+        or sessions[0] != start
+        or sessions[-1] != end
+        or scored not in sessions
+    ):
+        raise Generation4Phase7DataError(
+            GEN4_PHASE7_DATA_RANGE_INVALID, "exact_xnys_session_range"
+        )
+    if retrieved < calendar.session_close(end):
+        raise Generation4Phase7DataError(
+            GEN4_PHASE7_DATA_SESSION_INCOMPLETE, requested_end
+        )
+    warmup_count = int((sessions < scored).sum())
+    scored_count = int((sessions >= scored).sum())
+    return sessions, warmup_count, scored_count
+
+
+def build_generation4_phase7_data_request(
+    *,
+    authorization: Generation4Phase7EvaluationAuthorization,
+    requested_start: str,
+    requested_end: str,
+    retrieved_at_utc: str,
+) -> dict[str, Any]:
+    """Build a request whose counts reflect the actual completed XNYS range."""
+    sessions, warmup_count, scored_count = _calendar_window(
+        requested_start=requested_start,
+        requested_end=requested_end,
+        scored_start=authorization.prospective_first_scored_session,
+        retrieved_at_utc=retrieved_at_utc,
+    )
+    if not 1 <= warmup_count <= authorization.warmup_session_limit:
+        raise Generation4Phase7DataError(GEN4_PHASE7_DATA_WARMUP_INVALID)
+    if not 1 <= scored_count <= authorization.checkpoint_sessions[-1]:
+        raise Generation4Phase7DataError(GEN4_PHASE7_DATA_CHECKPOINT_INVALID)
+    return {
+        "schema_version": DATA_REQUEST_SCHEMA,
+        "symbols": list(authorization.research_universe),
+        "requested_start": str(sessions[0].date()),
+        "requested_end": str(sessions[-1].date()),
+        "scored_start": authorization.prospective_first_scored_session,
+        "warmup_session_count": warmup_count,
+        "scored_session_count": scored_count,
+    }
+
+
+def _validate_request(
+    raw: Mapping[str, Any] | Any, *, retrieved_at_utc: str
+) -> tuple[Generation4Phase7DataRequest, pd.DatetimeIndex]:
     _verify_frozen_identities()
     try:
         request = Generation4Phase7DataRequest.model_validate(raw)
@@ -451,7 +530,22 @@ def _validate_request(raw: Mapping[str, Any] | Any) -> Generation4Phase7DataRequ
         raise Generation4Phase7DataError(GEN4_PHASE7_DATA_CHECKPOINT_INVALID)
     if not request.requested_start < request.scored_start <= request.requested_end:
         raise Generation4Phase7DataError(GEN4_PHASE7_DATA_RANGE_INVALID)
-    return request
+
+    sessions, warmup_count, scored_count = _calendar_window(
+        requested_start=request.requested_start,
+        requested_end=request.requested_end,
+        scored_start=request.scored_start,
+        retrieved_at_utc=retrieved_at_utc,
+    )
+    if (
+        request.warmup_session_count != warmup_count
+        or request.scored_session_count != scored_count
+    ):
+        raise Generation4Phase7DataError(
+            GEN4_PHASE7_DATA_SESSION_COUNT_MISMATCH,
+            f"expected_warmup={warmup_count},expected_scored={scored_count}",
+        )
+    return request, sessions
 
 
 class Phase7QuoteClient:
@@ -498,7 +592,7 @@ class Phase7QuoteClient:
             raise Generation4Phase7DataError(
                 GEN4_PHASE7_DATA_SDK_UNAVAILABLE, "no_bars_returned"
             )
-        return pd.concat(chunks)
+        return pd.concat(chunks, ignore_index=True)
 
     def close(self) -> None:
         self._quote_context.close()
@@ -540,8 +634,91 @@ def _snapshot_id(
     return "gen4-phase7-snapshot-" + digest[:32]
 
 
+def _normalize_provider_frame(
+    frame: pd.DataFrame,
+    *,
+    expected_sessions: pd.DatetimeIndex,
+    symbol: str,
+) -> pd.DataFrame:
+    """Normalize raw provider bars to a canonical UTC session index."""
+    if not isinstance(frame, pd.DataFrame) or frame.empty:
+        raise Generation4Phase7DataError(
+            GEN4_PHASE7_DATA_SESSION_ALIGNMENT_INVALID, f"{symbol}:empty"
+        )
+    try:
+        if "time_key" in frame.columns:
+            sessions = pd.DatetimeIndex(
+                pd.to_datetime(
+                    frame["time_key"].astype(str).str.slice(0, 10),
+                    errors="raise",
+                    utc=True,
+                )
+            ).normalize()
+        else:
+            sessions = pd.DatetimeIndex(
+                pd.to_datetime(frame.index, errors="raise", utc=True)
+            ).normalize()
+    except (TypeError, ValueError):
+        raise Generation4Phase7DataError(
+            GEN4_PHASE7_DATA_SESSION_ALIGNMENT_INVALID, f"{symbol}:session_parse"
+        ) from None
+
+    if (
+        sessions.has_duplicates
+        or not sessions.is_monotonic_increasing
+        or not sessions.equals(expected_sessions)
+    ):
+        raise Generation4Phase7DataError(
+            GEN4_PHASE7_DATA_SESSION_ALIGNMENT_INVALID, symbol
+        )
+
+    required = {"open", "close"}
+    if not required.issubset(frame.columns):
+        raise Generation4Phase7DataError(
+            GEN4_PHASE7_DATA_SESSION_ALIGNMENT_INVALID, f"{symbol}:columns"
+        )
+    selected = [
+        column
+        for column in ("open", "high", "low", "close", "volume")
+        if column in frame.columns
+    ]
+    result = frame[selected].copy()
+    try:
+        for column in selected:
+            result[column] = pd.to_numeric(result[column], errors="raise")
+    except (TypeError, ValueError):
+        raise Generation4Phase7DataError(
+            GEN4_PHASE7_DATA_SESSION_ALIGNMENT_INVALID, f"{symbol}:numeric"
+        ) from None
+    numeric = result[selected].to_numpy(dtype=float)
+    if not np.isfinite(numeric).all():
+        raise Generation4Phase7DataError(
+            GEN4_PHASE7_DATA_SESSION_ALIGNMENT_INVALID, f"{symbol}:nonfinite"
+        )
+    if (result[["open", "close"]] <= 0.0).any().any():
+        raise Generation4Phase7DataError(
+            GEN4_PHASE7_DATA_SESSION_ALIGNMENT_INVALID, f"{symbol}:price"
+        )
+    if "volume" in result and (result["volume"] < 0.0).any():
+        raise Generation4Phase7DataError(
+            GEN4_PHASE7_DATA_SESSION_ALIGNMENT_INVALID, f"{symbol}:volume"
+        )
+    if {"high", "low"}.issubset(result.columns):
+        if (
+            (result["low"] > result["high"]).any()
+            or (result["low"] > result[["open", "close"]].min(axis=1)).any()
+            or (result["high"] < result[["open", "close"]].max(axis=1)).any()
+        ):
+            raise Generation4Phase7DataError(
+                GEN4_PHASE7_DATA_SESSION_ALIGNMENT_INVALID, f"{symbol}:ohlc"
+            )
+    result.index = expected_sessions
+    result.index.name = "session"
+    return result
+
+
 def _frame_bytes(frame: pd.DataFrame) -> bytes:
-    return frame.to_csv().encode("utf-8")
+    return frame.to_csv(index=True, index_label="session", date_format="%Y-%m-%d").encode("utf-8")
 
 
 def _build_snapshot(
@@ -641,7 +818,9 @@ def acquire_prospective_phase7_data(
         evaluation_authorization
     )
     # Gate 2: the request (universe, holdout, unknown, ranges) before provider.
-    validated_request = _validate_request(request)
+    validated_request, expected_sessions = _validate_request(
+        request, retrieved_at_utc=retrieved_at_utc
+    )
 
     snapshot_dir = (
         Path(output_dir)
@@ -666,10 +845,16 @@ def acquire_prospective_phase7_data(
     finally:
         client.close()
 
+    normalized_frames = {
+        symbol: _normalize_provider_frame(
+            frames[symbol], expected_sessions=expected_sessions, symbol=symbol
+        )
+        for symbol in validated_request.symbols
+    }
     manifest, file_payloads = _build_snapshot(
         authorization,
         validated_request,
-        frames,
+        normalized_frames,
         retrieved_at_utc,
         snapshot_id=snapshot_dir.name,
     )
