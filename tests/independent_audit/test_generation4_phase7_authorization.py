@@ -1,6 +1,7 @@
 """The authorization binds frozen evidence before either data gate opens."""
 
 import json
+import subprocess
 from hashlib import sha256
 from pathlib import Path
 
@@ -211,6 +212,50 @@ def test_start_artifact_self_hash_mismatch_rejected_even_with_updated_outer_hash
     payload["artifact_sha256"] = "0" * 64
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     auth = _rebind_after_start_change(bound_evidence)
+    _reject_before_provider(bound_evidence, tmp_path, auth)
+
+
+def test_rebound_start_timestamp_cannot_postdate_scored_boundary(bound_evidence, tmp_path):
+    paths = bound_evidence.paths
+    start = json.loads(paths["start_artifact"].read_text(encoding="utf-8"))
+    start["started_at_utc"] = "2026-10-01T00:00:00Z"
+    start_body = {key: value for key, value in start.items() if key != "artifact_sha256"}
+    start["artifact_sha256"] = sha256(
+        json.dumps(
+            start_body, sort_keys=True, separators=(",", ":"),
+            ensure_ascii=False, allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    paths["start_artifact"].write_text(json.dumps(start, indent=2) + "\n", encoding="utf-8")
+    start_file_sha = sha256(paths["start_artifact"].read_bytes()).hexdigest()
+    contract = json.loads(paths["evaluation_contract"].read_text(encoding="utf-8"))
+    request = json.loads(paths["audit_request"].read_text(encoding="utf-8"))
+    contract["start_artifact_sha256"] = start_file_sha
+    contract["start_artifact_self_hash"] = start["artifact_sha256"]
+    request["start_artifact_sha256"] = start_file_sha
+    request["start_artifact_self_hash"] = start["artifact_sha256"]
+    auth = _rebind_contract_and_request(
+        bound_evidence, contract, request,
+        start_artifact_sha256=start_file_sha,
+        start_artifact_self_hash=start["artifact_sha256"],
+    )
+    _reject_before_provider(bound_evidence, tmp_path, auth)
+
+
+def test_frozen_implementation_identity_must_be_a_commit_object(bound_evidence, tmp_path):
+    tree_oid = subprocess.run(
+        ["git", "-C", str(bound_evidence.root), "rev-parse", "HEAD^{tree}"],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    paths = bound_evidence.paths
+    contract = json.loads(paths["evaluation_contract"].read_text(encoding="utf-8"))
+    request = json.loads(paths["audit_request"].read_text(encoding="utf-8"))
+    contract["phase7_evaluation_implementation_commit"] = tree_oid
+    request["frozen_evaluation_implementation_commit"] = tree_oid
+    auth = _rebind_contract_and_request(
+        bound_evidence, contract, request,
+        frozen_evaluation_implementation_commit=tree_oid,
+    )
     _reject_before_provider(bound_evidence, tmp_path, auth)
 
 

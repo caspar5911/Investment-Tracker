@@ -78,6 +78,7 @@ _WARMUP_SESSION_LIMIT = 210
 _CHECKPOINT_SESSIONS_PRIMARY = 252
 _CHECKPOINT_SESSIONS = (63, 126, 252)
 _FIRST_SCORED_SESSION = "2026-09-28"
+_STARTED_AT_UTC = "2026-09-26T11:42:49Z"
 _CANDIDATE_ID = "G2-A|lookback=189|skip=21|top_k=1|rebalance=21"
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _EVIDENCE_FILES = {
@@ -257,6 +258,8 @@ def _verify_evidence_bindings(
     actual_self_hash = sha256(_canonical_json(start_body)).hexdigest()
     if start.get("artifact_sha256") != actual_self_hash or authorization.start_artifact_self_hash != actual_self_hash:
         raise _invalid("start_artifact_self_hash")
+    if start.get("started_at_utc") != _STARTED_AT_UTC:
+        raise _invalid("start_artifact.started_at_utc")
     if entry.get("authorization_id") != authorization.entry_authorization_id:
         raise _invalid("entry_authorization_id")
     if start.get("authorization_id") != authorization.entry_authorization_id:
@@ -302,6 +305,15 @@ def _verify_evidence_bindings(
 
     commit = authorization.frozen_evaluation_implementation_commit
     if commit != contract.get("phase7_evaluation_implementation_commit"):
+        raise _invalid("frozen_evaluation_implementation_commit")
+    try:
+        object_type = subprocess.run(
+            ["git", "-C", str(_REPO_ROOT), "cat-file", "-t", commit],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        raise _invalid("frozen_evaluation_implementation_commit") from None
+    if object_type != "commit":
         raise _invalid("frozen_evaluation_implementation_commit")
     for field, relative in _SOURCE_FILES.items():
         path = _REPO_ROOT / relative
