@@ -206,6 +206,10 @@ def _invalid(detail: str) -> Generation4Phase7DataError:
     return Generation4Phase7DataError(GEN4_PHASE7_DATA_AUTHORIZATION_INVALID, detail)
 
 
+def _trusted_now_utc() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 def _read_bound_json(path: Path, detail: str) -> dict[str, Any]:
     try:
         payload = json.loads(path.read_bytes())
@@ -941,7 +945,7 @@ def acquire_prospective_phase7_data(
     # deterministic without allowing a production caller to future-date an
     # incomplete market session.
     if client_factory is None:
-        retrieved_at_utc = datetime.now(timezone.utc).isoformat()
+        retrieved_at_utc = _trusted_now_utc()
     if isinstance(evaluation_authorization, Path):
         try:
             authorization_sha256 = sha256(
