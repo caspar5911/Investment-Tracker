@@ -62,7 +62,12 @@ def _canonical(value):
 
 
 def _frames():
-    index = xcals.get_calendar("XNYS").sessions_in_range("2026-09-23", "2026-09-30")
+    calendar = xcals.get_calendar("XNYS")
+    all_sessions = calendar.sessions_in_range("2025-01-01", "2026-09-30")
+    scored_pos = all_sessions.get_loc(pd.Timestamp("2026-09-28"))
+    index = all_sessions[scored_pos - 210 : scored_pos + 3]
+    if index.tz is None:
+        index = index.tz_localize("UTC")
     out = {}
     for i, symbol in enumerate(RESEARCH_UNIVERSE):
         close = [100.0 + 0.5 * (i + 1) * step for step in range(1, len(index) + 1)]
@@ -104,10 +109,10 @@ def _request(**overrides):
     payload = {
         "schema_version": "GENERATION4-PHASE7-DATA-REQUEST-v1",
         "symbols": list(RESEARCH_UNIVERSE),
-        "requested_start": "2026-09-23",
+        "requested_start": str(_frames()[RESEARCH_UNIVERSE[0]].index[0].date()),
         "requested_end": "2026-09-30",
         "scored_start": "2026-09-28",
-        "warmup_session_count": 3,
+        "warmup_session_count": 210,
         "scored_session_count": 3,
     }
     payload.update(overrides)
