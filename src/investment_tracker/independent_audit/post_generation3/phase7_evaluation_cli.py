@@ -253,9 +253,16 @@ def _load_corporate_actions(
 
 def _evaluate_checkpoint_command(args: argparse.Namespace) -> dict[str, Any]:
     # Fail closed on the authorization BEFORE any snapshot data is read.
+    authorization_path = Path(args.evaluation_authorization)
     authorization = verify_generation4_phase7_evaluation_authorization(
-        Path(args.evaluation_authorization)
+        authorization_path
     )
+    try:
+        authorization_sha256 = sha256(authorization_path.read_bytes()).hexdigest()
+    except OSError:
+        raise Generation4Phase7EvaluationError(
+            GEN4_PHASE7_EVAL_EVIDENCE_INVALID, "evaluation_authorization"
+        ) from None
     snapshot_dir = Path(args.snapshot)
     manifest = _load_json(
         snapshot_dir / "manifest.json",
@@ -271,6 +278,19 @@ def _evaluate_checkpoint_command(args: argparse.Namespace) -> dict[str, Any]:
         raise Generation4Phase7EvaluationError(
             GEN4_PHASE7_EVAL_BINDING_MISMATCH, "candidate_id"
         )
+    bound_manifest = {
+        "evaluation_authorization_id": authorization.authorization_id,
+        "evaluation_authorization_sha256": authorization_sha256,
+        "audit_request_sha256": authorization.audit_request_sha256,
+        "evaluation_contract_sha256": authorization.evaluation_contract_sha256,
+        "start_artifact_sha256": authorization.start_artifact_sha256,
+        "frozen_evaluation_implementation_commit": authorization.frozen_evaluation_implementation_commit,
+    }
+    for field, expected in bound_manifest.items():
+        if manifest.get(field) != expected:
+            raise Generation4Phase7EvaluationError(
+                GEN4_PHASE7_EVAL_BINDING_MISMATCH, field
+            )
     if manifest.get("scored_start") != authorization.prospective_first_scored_session:
         raise Generation4Phase7EvaluationError(
             GEN4_PHASE7_EVAL_BINDING_MISMATCH, "scored_start"
@@ -321,6 +341,10 @@ def _evaluate_checkpoint_command(args: argparse.Namespace) -> dict[str, Any]:
         splits=splits,
         dividends=dividends,
         corporate_action_reconciliation=action_evidence,
+        evidence_bindings={
+            **bound_manifest,
+            "snapshot_manifest_sha256": manifest["manifest_sha256"],
+        },
         scored_start=scored_start,
         checkpoint_cutoff=CHECKPOINT_SESSIONS_PRIMARY,
     )
