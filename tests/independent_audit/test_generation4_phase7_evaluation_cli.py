@@ -471,6 +471,9 @@ def test_acquire_phase7_data_valid_auth_uses_provider_once(
     frames = _frames()
     factory, created = _spy_client_factory(frames)
     monkeypatch.setattr(phase7_data, "_default_client_factory", factory)
+    monkeypatch.setattr(
+        phase7_data, "_trusted_now_utc", lambda: "2026-10-01T00:00:00+00:00"
+    )
     auth_file = _write(tmp_path / "auth.json", _authorization())
     rc = phase7_evaluation_cli.main(
         [
