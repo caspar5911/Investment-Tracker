@@ -494,8 +494,11 @@ def build_generation4_phase7_data_request(
         scored_start=authorization.prospective_first_scored_session,
         retrieved_at_utc=retrieved_at_utc,
     )
-    if not 1 <= warmup_count <= authorization.warmup_session_limit:
-        raise Generation4Phase7DataError(GEN4_PHASE7_DATA_WARMUP_INVALID)
+    if warmup_count != authorization.warmup_session_limit:
+        raise Generation4Phase7DataError(
+            GEN4_PHASE7_DATA_WARMUP_INVALID,
+            f"required={authorization.warmup_session_limit},actual={warmup_count}",
+        )
     if not 1 <= scored_count <= authorization.checkpoint_sessions[-1]:
         raise Generation4Phase7DataError(GEN4_PHASE7_DATA_CHECKPOINT_INVALID)
     return {
@@ -542,6 +545,11 @@ def _validate_request(
         scored_start=request.scored_start,
         retrieved_at_utc=retrieved_at_utc,
     )
+    if warmup_count != _WARMUP_SESSION_LIMIT:
+        raise Generation4Phase7DataError(
+            GEN4_PHASE7_DATA_WARMUP_INVALID,
+            f"required={_WARMUP_SESSION_LIMIT},actual={warmup_count}",
+        )
     if (
         request.warmup_session_count != warmup_count
         or request.scored_session_count != scored_count
