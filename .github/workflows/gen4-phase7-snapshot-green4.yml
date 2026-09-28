@@ -1,0 +1,33 @@
+name: gen4-phase7-snapshot-green4
+
+on:
+  push:
+    branches:
+      - audit/gen4-phase7-snapshot-green4-20260928
+    paths:
+      - ".github/workflows/gen4-phase7-snapshot-green4.yml"
+
+jobs:
+  green:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: e7eaab9ba825e488bdf75f03cde0c0da8774ad0f
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev,quant,audit]'
+      - name: Functional Phase 7 suites
+        run: |
+          python -m pytest -q             tests/independent_audit/test_generation4_phase7_snapshot_integrity.py             tests/independent_audit/test_generation4_phase7_data_boundary.py             tests/independent_audit/test_generation4_phase7_authorization.py             tests/independent_audit/test_generation4_phase7_evaluation_cli.py             tests/independent_audit/test_generation4_phase7_evaluation.py             tests/quant/test_generation4_phase7_durability.py
+      - name: Compile
+        run: |
+          python -m compileall -q src/investment_tracker/independent_audit/post_generation3 src/investment_tracker/quant/phase7
+      - name: Static safety
+        shell: bash
+        run: |
+          ! grep -R -nE 'OpenTradeContext|place_order|modify_order|cancel_order|unlock_trade|TrdEnv'             src/investment_tracker/independent_audit/post_generation3             src/investment_tracker/quant/phase7/generation4_durability.py
