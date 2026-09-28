@@ -191,13 +191,20 @@ def test_prospective_checkpoint_replays_unadjusted_bars_with_actions(monkeypatch
         0.5,
         "div-id",
     )
-    seen = {"target_bars": None, "replay_bars": [], "splits": [], "dividends": []}
+    seen = {
+        "target_bars": None,
+        "target_kwargs": None,
+        "replay_bars": [],
+        "splits": [],
+        "dividends": [],
+    }
 
-    monkeypatch.setattr(
-        dur,
-        "build_fixed_targets",
-        lambda bars: seen.__setitem__("target_bars", bars) or (),
-    )
+    def fake_targets(bars, **kwargs):
+        seen["target_bars"] = bars
+        seen["target_kwargs"] = kwargs
+        return ()
+
+    monkeypatch.setattr(dur, "build_fixed_targets", fake_targets)
 
     class Replay:
         def __init__(self, bars):
@@ -234,6 +241,9 @@ def test_prospective_checkpoint_replays_unadjusted_bars_with_actions(monkeypatch
     report = dur.prospective_checkpoint_report(snapshot)
     assert report["status"] == dur.PHASE7_PROSPECTIVE_EVIDENCE_PENDING
     assert seen["target_bars"] is signal_bars
+    assert seen["target_kwargs"]["due_from"] == pd.Timestamp("2026-09-28", tz="UTC")
+    assert seen["target_kwargs"]["due_until"] == pd.Timestamp("2026-09-30", tz="UTC")
+    assert seen["target_kwargs"]["align_start"] == pd.Timestamp("2026-09-28", tz="UTC")
     assert seen["replay_bars"]
     assert all(value is execution_bars for value in seen["replay_bars"])
     assert all(value == (split,) for value in seen["splits"])
