@@ -1,0 +1,187 @@
+name: gen4-phase7-evaluation-independent-audit-remediated
+
+on:
+  push:
+    branches:
+      - audit/gen4-phase7-eval-remediated-20260928
+    paths:
+      - ".github/workflows/gen4-phase7-evaluation-independent-audit-remediated.yml"
+
+jobs:
+  independent-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact audited handoff
+        uses: actions/checkout@v4
+        with:
+          ref: 3b2b95890530d65ba23f5c9d642d9e27c21d5f92
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev,quant,audit]'
+
+      - name: Verify exact audited state
+        run: |
+          test "$(git rev-parse HEAD)" = "3b2b95890530d65ba23f5c9d642d9e27c21d5f92"
+          test ! -e data/governance/successor/generation4-phase7-evaluation-authorization.json
+          test "$(git cat-file -t 6343733b1a439ff73f7dc1246b5063ffde3cb0ec)" = "commit"
+
+      - name: Required focused and remediation tests
+        run: |
+          python -m pytest -q             tests/independent_audit/test_generation4_phase7_entry.py             tests/independent_audit/test_generation4_phase7_start.py             tests/independent_audit/test_generation4_phase7_evaluation.py             tests/independent_audit/test_generation4_phase7_data_boundary.py             tests/independent_audit/test_generation4_phase7_evaluation_cli.py             tests/independent_audit/test_generation4_phase7_evaluation_contract.py             tests/independent_audit/test_generation4_phase7_authorization.py             tests/quant/test_generation4_phase7_durability.py
+
+      - name: Compile
+        run: |
+          python -m compileall -q src/investment_tracker/independent_audit/post_generation3 src/investment_tracker/quant/phase7
+
+      - name: Verify byte bindings and frozen git tree
+        run: |
+          python - <<'PY'
+          import hashlib, json, subprocess
+          from pathlib import Path
+
+          request_path=Path("data/governance/successor/generation4-phase7-evaluation-independent-audit-request.json")
+          contract_path=Path("data/governance/successor/generation4-phase7-evaluation-contract.json")
+          start_path=Path("data/governance/successor/generation4-phase7-start.json")
+          start_contract_path=Path("data/governance/successor/generation4-phase7-start-contract.json")
+          entry_auth_path=Path("data/governance/successor/generation4-phase7-entry-authorization.json")
+          req=json.loads(request_path.read_text())
+          con=json.loads(contract_path.read_text())
+
+          assert hashlib.sha256(request_path.read_bytes()).hexdigest()=="2b74f12e5e38c82f44819f4e17b37d51b752add875462e591d78cd928f8694cf"
+          assert hashlib.sha256(contract_path.read_bytes()).hexdigest()=="64e859a946e516ac14e87ddccae91d64d649e6c659c357d7e474e0fe3b510753"
+          assert hashlib.sha256(start_path.read_bytes()).hexdigest()=="486f3af558e28da9143d7435dc1a1957dc9c2daf4e34005a3e369af9a258c414"
+          assert hashlib.sha256(start_contract_path.read_bytes()).hexdigest()=="beef9982ac1d1cf33a451fab984bb09f8b60605a18297e5823079d7b980878e0"
+          assert hashlib.sha256(entry_auth_path.read_bytes()).hexdigest()=="ba9a6910ad7afdf579af5eb81825917de75ef86cb443beb8468c2e40a459852b"
+
+          start=json.loads(start_path.read_text())
+          body={k:v for k,v in start.items() if k!="artifact_sha256"}
+          canon=json.dumps(body,sort_keys=True,separators=(",",":"),ensure_ascii=False,allow_nan=False).encode()
+          assert hashlib.sha256(canon).hexdigest()=="d1257bd7a683b8e372c71d0f1da90b7366be17ba3c1e2587205601dfeaf65599"
+          assert start["artifact_sha256"]=="d1257bd7a683b8e372c71d0f1da90b7366be17ba3c1e2587205601dfeaf65599"
+          assert start["started_at_utc"]=="2026-09-26T11:42:49Z"
+
+          frozen="6343733b1a439ff73f7dc1246b5063ffde3cb0ec"
+          files={
+            "evaluation_module_sha256":"src/investment_tracker/independent_audit/post_generation3/phase7_evaluation.py",
+            "evaluation_cli_sha256":"src/investment_tracker/independent_audit/post_generation3/phase7_evaluation_cli.py",
+            "durability_module_sha256":"src/investment_tracker/quant/phase7/generation4_durability.py",
+            "data_boundary_module_sha256":"src/investment_tracker/independent_audit/post_generation3/phase7_data.py",
+          }
+          for field,path in files.items():
+              current=Path(path).read_bytes()
+              frozen_bytes=subprocess.run(["git","show",f"{frozen}:{path}"],check=True,capture_output=True).stdout
+              assert current==frozen_bytes, field
+              assert hashlib.sha256(current).hexdigest()==req[field], field
+
+          assert req["frozen_evaluation_implementation_commit"]==frozen
+          assert con["phase7_evaluation_implementation_commit"]==frozen
+          assert req["prospective_first_scored_session"]=="2026-09-28"
+          assert req["research_universe"]==["GLD","IEF","IWM","QQQ","SPY","TLT","VNQ","XLP"]
+          assert req["forbidden_holdout_symbols"]==["QQQM","FALN","IIPR","PSTL","EFAS"]
+          assert req["benchmark_symbol"]=="SPY"
+          assert req["initial_cash"]==100000.0
+          assert req["friction_cases_bps"]==[0,3,10,25,50]
+          assert req["primary_friction_bps"]==3
+          assert req["warmup_session_limit"]==210
+          assert req["checkpoint_sessions"]==[63,126,252]
+          assert req["historical_lane_classification"]=="REUSED_HISTORY_DIAGNOSTIC_ONLY"
+          assert req["dq030_status"]=="UNRESOLVED"
+          assert req["phase7_started"] is True
+          assert req["phase7_performance_evaluation_authorized"] is False
+          for f in ["production_readiness_approved","live_trading_authorized","holdout_reuse_authorized","candidate_search_authorized","parameter_mutation_authorized","symbol_substitution_authorized","adaptive_walk_forward_authorized","annual_reoptimization_authorized","result_dependent_methodology_change_allowed","result_dependent_parameter_change_allowed"]:
+              assert req[f] is False, f
+          assert req["recon009_status"]=="OPEN"
+          assert req["paper_only"] is True
+          print("BYTE_BINDINGS_PASS")
+          PY
+
+      - name: Read-only preflight
+        run: |
+          python -m investment_tracker.independent_audit.post_generation3.phase7_evaluation_cli             verify-evaluation-preflight             --start-artifact data/governance/successor/generation4-phase7-start.json             --start-contract data/governance/successor/generation4-phase7-start-contract.json             --evaluation-contract data/governance/successor/generation4-phase7-evaluation-contract.json             | tee /tmp/preflight.json
+          python - <<'PY'
+          import json
+          v=json.load(open("/tmp/preflight.json"))
+          assert v["status"]=="GENERATION4_PHASE7_EVALUATION_PREFLIGHT_READY"
+          assert v["phase7_started"] is True
+          assert v["phase7_performance_evaluation_authorized"] is False
+          assert v["production_readiness_approved"] is False
+          assert v["live_trading_authorized"] is False
+          assert v["paper_only"] is True
+          assert v["recon009_status"]=="OPEN"
+          assert not ({"total_return","cagr","sharpe","sortino","performance"} & set(v))
+          PY
+
+      - name: Resolve XNYS boundary
+        run: |
+          python - <<'PY'
+          import json, exchange_calendars as xcals
+          cal=xcals.get_calendar("XNYS")
+          sessions=cal.sessions_in_range("2026-01-01","2026-10-05")
+          values=[str(x.date()) for x in sessions]
+          json.dump(values,open("/tmp/sessions.json","w"))
+          assert "2026-09-28" in values
+          PY
+          python -m investment_tracker.independent_audit.post_generation3.phase7_evaluation_cli             resolve-prospective-boundary             --start-artifact data/governance/successor/generation4-phase7-start.json             --sessions /tmp/sessions.json             | tee /tmp/boundary.json
+          python - <<'PY'
+          import json
+          v=json.load(open("/tmp/boundary.json"))
+          assert v["first_scored_session"]=="2026-09-28"
+          assert v["warmup_session_limit"]==210
+          assert v["warmup_excluded_from_scored_pnl"] is True
+          PY
+
+      - name: Prove missing authorization gates both commands
+        shell: bash
+        run: |
+          set +e
+          a=$(python -m investment_tracker.independent_audit.post_generation3.phase7_evaluation_cli acquire-phase7-data             --evaluation-authorization /tmp/missing.json --output-dir /tmp/no-write             --requested-start 2026-01-01 --requested-end 2026-12-31 --retrieved-at-utc 2026-09-28T13:48:00Z 2>&1)
+          rc1=$?
+          echo "$a"
+          test "$rc1" -eq 1
+          echo "$a" | grep -q 'GEN4_PHASE7_DATA_AUTHORIZATION_MISSING'
+          test ! -e /tmp/no-write
+
+          b=$(python -m investment_tracker.independent_audit.post_generation3.phase7_evaluation_cli evaluate-phase7-checkpoint             --evaluation-authorization /tmp/missing.json --snapshot /tmp/no-snapshot 2>&1)
+          rc2=$?
+          echo "$b"
+          test "$rc2" -eq 1
+          echo "$b" | grep -q 'GEN4_PHASE7_DATA_AUTHORIZATION_MISSING'
+
+      - name: Prove fully content-bound authorization validates
+        run: |
+          python - <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          from investment_tracker.independent_audit.post_generation3.phase7_data import verify_generation4_phase7_evaluation_authorization
+          reqp=Path("data/governance/successor/generation4-phase7-evaluation-independent-audit-request.json")
+          req=json.loads(reqp.read_text())
+          auth={k:v for k,v in req.items() if k not in {"schema_version","status","authority","generation"}}
+          auth.update({
+            "schema_version":"GENERATION4-PHASE7-EVALUATION-AUTHORIZATION-v1",
+            "status":"GENERATION4_PHASE7_EVALUATION_AUTHORIZED",
+            "authority":"INDEPENDENT_AUDIT",
+            "authorization_id":"INDEP-AUDIT-GEN4-PHASE7-EVAL-SYNTHETIC-CI",
+            "approved_at_utc":"2026-09-28T13:48:00Z",
+            "audit_request_sha256":hashlib.sha256(reqp.read_bytes()).hexdigest(),
+            "phase7_performance_evaluation_authorized":True,
+          })
+          parsed=verify_generation4_phase7_evaluation_authorization(auth)
+          assert parsed.phase7_performance_evaluation_authorized is True
+          assert parsed.production_readiness_approved is False
+          assert parsed.live_trading_authorized is False
+          print("CONTENT_BOUND_AUTHORIZATION_VALIDATES")
+          PY
+
+      - name: Static safety
+        shell: bash
+        run: |
+          ! grep -R -nE 'OpenTradeContext|place_order|modify_order|cancel_order|unlock_trade|TrdEnv'             src/investment_tracker/independent_audit/post_generation3             src/investment_tracker/quant/phase7/generation4_durability.py
+          test ! -e data/governance/successor/generation4-phase7-evaluation-authorization.json
+          echo "GEN4_PHASE7_REMEDIATED_INDEPENDENT_AUDIT_PASS"
