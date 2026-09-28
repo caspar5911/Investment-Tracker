@@ -18,6 +18,7 @@ import json
 from hashlib import sha256
 from pathlib import Path
 
+import exchange_calendars as xcals
 import pandas as pd
 import pytest
 
@@ -225,7 +226,9 @@ def _valid_paths(tmp_path: Path) -> dict[str, Path]:
 
 
 def _frames():
-    index = pd.bdate_range("2024-01-01", periods=6, tz="UTC")
+    index = xcals.get_calendar("XNYS").sessions_in_range("2026-09-23", "2026-09-30")
+    if index.tz is None:
+        index = index.tz_localize("UTC")
     out = {}
     for i, symbol in enumerate(RESEARCH_UNIVERSE):
         close = [100.0 + 0.5 * (i + 1) * step for step in range(1, len(index) + 1)]
@@ -267,11 +270,11 @@ def _request(**overrides):
     payload = {
         "schema_version": "GENERATION4-PHASE7-DATA-REQUEST-v1",
         "symbols": list(RESEARCH_UNIVERSE),
-        "requested_start": "2026-03-02",
+        "requested_start": "2026-09-23",
         "requested_end": "2026-09-30",
         "scored_start": "2026-09-28",
-        "warmup_session_count": 120,
-        "scored_session_count": 25,
+        "warmup_session_count": 3,
+        "scored_session_count": 3,
     }
     payload.update(overrides)
     return payload
@@ -398,11 +401,11 @@ def test_acquire_phase7_data_missing_auth_fails_before_provider(
             "--output-dir",
             str(tmp_path / "out"),
             "--requested-start",
-            "2026-03-02",
+            "2026-09-23",
             "--requested-end",
             "2026-09-30",
             "--retrieved-at-utc",
-            "2026-09-26T12:00:00Z",
+            "2026-10-01T00:00:00Z",
         ]
     )
     assert rc == 1
@@ -426,11 +429,11 @@ def test_acquire_phase7_data_invalid_auth_fails_before_provider(
             "--output-dir",
             str(tmp_path / "out"),
             "--requested-start",
-            "2026-03-02",
+            "2026-09-23",
             "--requested-end",
             "2026-09-30",
             "--retrieved-at-utc",
-            "2026-09-26T12:00:00Z",
+            "2026-10-01T00:00:00Z",
         ]
     )
     assert rc == 1
@@ -454,11 +457,11 @@ def test_acquire_phase7_data_valid_auth_uses_provider_once(
             "--output-dir",
             str(tmp_path / "out"),
             "--requested-start",
-            "2026-03-02",
+            "2026-09-23",
             "--requested-end",
             "2026-09-30",
             "--retrieved-at-utc",
-            "2026-09-26T12:00:00Z",
+            "2026-10-01T00:00:00Z",
         ]
     )
     assert rc == 0
@@ -503,7 +506,7 @@ def test_evaluate_phase7_checkpoint_valid_auth_renders_pending_report(
         evaluation_authorization=_authorization(),
         request=_request(),
         output_dir=tmp_path / "snap",
-        retrieved_at_utc="2026-09-26T12:00:00Z",
+        retrieved_at_utc="2026-10-01T00:00:00Z",
         client_factory=factory,
     )
     snapshot_dir = tmp_path / "snap" / "snapshots" / manifest["snapshot_id"]
@@ -559,11 +562,11 @@ def test_no_command_accepts_arbitrary_symbols_or_parameters():
             "--output-dir",
             "b",
             "--requested-start",
-            "2026-03-02",
+            "2026-09-23",
             "--requested-end",
             "2026-09-30",
             "--retrieved-at-utc",
-            "2026-09-26T12:00:00Z",
+            "2026-10-01T00:00:00Z",
         ]
     )
     parser.parse_args(
@@ -588,11 +591,11 @@ def test_acquire_command_rejects_arbitrary_symbol_flag():
                 "--output-dir",
                 "b",
                 "--requested-start",
-                "2026-03-02",
+                "2026-09-23",
                 "--requested-end",
                 "2026-09-30",
                 "--retrieved-at-utc",
-                "2026-09-26T12:00:00Z",
+                "2026-10-01T00:00:00Z",
                 "--symbols",
                 "GLD",
             ]
