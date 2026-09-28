@@ -39,6 +39,7 @@ from .phase7_data import (
     SNAPSHOT_SCHEMA,
     Generation4Phase7DataError,
     acquire_prospective_phase7_data,
+    build_generation4_phase7_data_request,
     verify_generation4_phase7_evaluation_authorization,
 )
 from .phase7_evaluation import (
@@ -112,15 +113,12 @@ def _acquire_command(args: argparse.Namespace) -> dict[str, Any]:
     authorization = verify_generation4_phase7_evaluation_authorization(
         Path(args.evaluation_authorization)
     )
-    request: dict[str, Any] = {
-        "schema_version": DATA_REQUEST_SCHEMA,
-        "symbols": list(authorization.research_universe),
-        "requested_start": args.requested_start,
-        "requested_end": args.requested_end,
-        "scored_start": authorization.prospective_first_scored_session,
-        "warmup_session_count": authorization.warmup_session_limit,
-        "scored_session_count": authorization.checkpoint_sessions[-1],
-    }
+    request = build_generation4_phase7_data_request(
+        authorization=authorization,
+        requested_start=args.requested_start,
+        requested_end=args.requested_end,
+        retrieved_at_utc=args.retrieved_at_utc,
+    )
     return acquire_prospective_phase7_data(
         evaluation_authorization=Path(args.evaluation_authorization),
         request=request,
