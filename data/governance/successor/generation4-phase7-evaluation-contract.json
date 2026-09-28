@@ -20,11 +20,11 @@
   "phase7_start_implementation_commit": "356ee53a7652b33f2ea91bf8779bd174fa794fda",
   "phase7_start_source_sha256": "552873e9a724425247ebdc4b79be5c9ade4006b5b9a42ff30f87d3df381996fe",
   "phase7_start_cli_source_sha256": "501de31d6ee87ce48d3edf112f4168274246f04fc7e42e90f5464f13528f40f2",
-  "phase7_evaluation_implementation_commit": "6343733b1a439ff73f7dc1246b5063ffde3cb0ec",
+  "phase7_evaluation_implementation_commit": "5149ac70d2561abff4b2cc6d2b8c75dbedfa3bd2",
   "phase7_evaluation_source_sha256": "4cdeb100013da639a5084a5bbd46e3a69aba0ee2c6dc908a6cf523ff69630209",
-  "phase7_evaluation_cli_source_sha256": "7c90ac633c4255268bd5bc22a9813b1fc8f7d03f06cb9e25940ec5830b1d986d",
-  "phase7_durability_source_sha256": "373517dd633026144e674340f7666ef6b7a688882d791ff075172ff9f277bbbd",
-  "phase7_data_boundary_source_sha256": "0ca8eeb8728ea7c47f94a6ee1f4f17b7b08573b503158bced971bffd8891ac8f",
+  "phase7_evaluation_cli_source_sha256": "603bbddd2109a1723a62933aa2fb73e389f80b164f29e9a884b8156f48b9e309",
+  "phase7_durability_source_sha256": "fab05d27ae986929c55963fe0e178233d642804d701bdc0248de6b001cb09335",
+  "phase7_data_boundary_source_sha256": "93f4793647fc0420dbae5ca1938f059ef33677642f3dad16e3ce953ea8d35627",
   "research_universe": [
     "GLD",
     "IEF",
@@ -43,12 +43,22 @@
     "EFAS"
   ],
   "benchmark_symbol": "SPY",
-  "initial_cash": 100000.0,
-  "friction_cases_bps": [0, 3, 10, 25, 50],
+  "initial_cash": 100000,
+  "friction_cases_bps": [
+    0,
+    3,
+    10,
+    25,
+    50
+  ],
   "primary_friction_bps": 3,
   "prospective_first_scored_session": "2026-09-28",
   "warmup_session_limit": 210,
-  "checkpoint_sessions": [63, 126, 252],
+  "checkpoint_sessions": [
+    63,
+    126,
+    252
+  ],
   "historical_lane_classification": "REUSED_HISTORY_DIAGNOSTIC_ONLY",
   "dq030_status": "UNRESOLVED",
   "phase7_started": true,
