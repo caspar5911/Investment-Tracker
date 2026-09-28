@@ -152,7 +152,7 @@ def test_raw_time_key_is_canonicalized_before_snapshot_write(bound_evidence, tmp
     assert manifest["warmup_session_count"] == 210
     assert manifest["scored_session_count"] == 3
     snapshot = tmp_path / "out" / "snapshots" / manifest["snapshot_id"]
-    saved = pd.read_csv(snapshot / "bars" / "SPY.csv", index_col=0)
+    saved = pd.read_csv(snapshot / "bars" / "qfq" / "SPY.csv", index_col=0)
     assert list(saved.index) == [str(value.date()) for value in _sessions()]
     assert "time_key" not in saved.columns
     assert "code" not in saved.columns
