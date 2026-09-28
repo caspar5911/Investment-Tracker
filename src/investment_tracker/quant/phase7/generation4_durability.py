@@ -37,6 +37,9 @@ from investment_tracker.quant.generation2.accounting import (
     DECISION_ACCOUNTING_SCHEMA,
     DecisionReplayResult,
     DecisionState,
+    DecisionTarget,
+    DividendEvent,
+    SplitEvent,
     replay_decision_targets,
 )
 from investment_tracker.quant.generation2.campaign import assert_frozen_candidate
@@ -688,16 +691,20 @@ def historical_durability_report(dataset: ReusedHistoryDataset) -> dict[str, Any
 class ProspectiveCheckpoint:
     """Caller-supplied prospective checkpoint inputs.
 
-    ``bars`` spans the causal warmup (<=210 sessions) plus the scored sessions
-    accumulated since the frozen Phase-7 start. ``scored_start`` is the frozen
-    first eligible session strictly after the start timestamp; sessions at or
-    after it are scored and warmup P&L is excluded. ``checkpoint_cutoff`` caps
-    how many scored sessions are evaluated. No provider is accessed here.
+    ``bars`` are the QFQ signal bars. ``execution_bars`` are the
+    unadjusted execution/accounting bars. Split and dividend events are the
+    reconciled corporate-action ledger. This matches the frozen Phase-6
+    convention: adjusted history for signals, raw prices plus explicit
+    corporate actions for fills/P&L.
     """
 
     bars: dict[str, pd.DataFrame]
     scored_start: pd.Timestamp
     checkpoint_cutoff: int = CHECKPOINT_SESSIONS_PRIMARY
+    execution_bars: dict[str, pd.DataFrame] | None = None
+    splits: tuple[SplitEvent, ...] = ()
+    dividends: tuple[DividendEvent, ...] = ()
+    corporate_action_reconciliation: tuple[Mapping[str, Any], ...] = ()
 
 
 def _checkpoint_label(scored_count: int) -> str:
@@ -728,34 +735,65 @@ def _prospective_governance_flags() -> dict[str, Any]:
     }
 
 
+def _prospective_benchmark_total_return(
+    execution_bars: dict[str, pd.DataFrame],
+    *,
+    scored_start: pd.Timestamp,
+    scored_sessions: Sequence[pd.Timestamp],
+    splits: Sequence[SplitEvent],
+    dividends: Sequence[DividendEvent],
+) -> dict[str, Any]:
+    spy = execution_bars[BENCHMARK_SYMBOL]
+    all_sessions = tuple(pd.DatetimeIndex(spy["close"].index))
+    try:
+        scored_index = all_sessions.index(scored_start)
+    except ValueError:
+        return _unknown(GEN4_PHASE7_DURABILITY_ALIGNMENT_INVALID)
+    if scored_index <= 0:
+        return _unknown("INSUFFICIENT_DATA")
+    benchmark_target = DecisionTarget(
+        "GEN4-PHASE7-BENCHMARK",
+        all_sessions[scored_index - 1],
+        scored_start,
+        {BENCHMARK_SYMBOL: 1.0},
+    )
+    replay = replay_decision_targets(
+        {BENCHMARK_SYMBOL: spy},
+        [benchmark_target],
+        splits=tuple(item for item in splits if item.symbol == BENCHMARK_SYMBOL),
+        dividends=tuple(
+            item for item in dividends if item.symbol == BENCHMARK_SYMBOL
+        ),
+        friction_bps=PRIMARY_FRICTION_BPS,
+        initial_cash=INITIAL_CASH,
+        symbols=(BENCHMARK_SYMBOL,),
+    )
+    sessions, equity = scored_equity_window(replay, scored_start)
+    sessions = tuple(sessions)[: len(scored_sessions)]
+    equity = tuple(equity)[: len(scored_sessions)]
+    if tuple(sessions) != tuple(scored_sessions):
+        return _unknown(GEN4_PHASE7_DURABILITY_ALIGNMENT_INVALID)
+    return scored_total_return(sessions, equity)
+
+
 def prospective_checkpoint_report(snapshot: ProspectiveCheckpoint) -> dict[str, Any]:
-    """Build the prospective Phase-7 checkpoint report.
-
-    The result status is evidence-oriented, not a production verdict:
-
-    - fewer than 252 scored sessions -> ``PHASE7_PROSPECTIVE_EVIDENCE_PENDING``;
-    - 252+ scored sessions with every required non-DQ metric available ->
-      ``PHASE7_PROSPECTIVE_EVIDENCE_COMPLETE``;
-    - required evidence missing, inconsistent, or unreconcilable ->
-      ``PHASE7_UNKNOWN_ABSTAIN``.
-
-    A complete result does not imply profitability, production readiness, or
-    live-trading approval; those flags stay false. No missing future session is
-    ever synthesized or estimated. No provider is accessed here.
-    """
-    bars = snapshot.bars
-    validate_research_universe(bars)
+    """Build the fixed, corporate-action-aware prospective checkpoint report."""
+    signal_bars = snapshot.bars
+    execution_bars = (
+        snapshot.execution_bars if snapshot.execution_bars is not None else signal_bars
+    )
+    validate_research_universe(signal_bars)
+    validate_research_universe(execution_bars)
     cutoff = int(snapshot.checkpoint_cutoff)
     if cutoff <= 0:
         raise Generation4DurabilityError(
             GEN4_PHASE7_DURABILITY_METRIC_INVALID, "checkpoint cutoff must be positive"
         )
     scored_start = pd.Timestamp(snapshot.scored_start)
+    splits = tuple(snapshot.splits)
+    dividends = tuple(snapshot.dividends)
 
-    # The scored session calendar is the SPY benchmark calendar from the frozen
-    # scored start forward, capped at the checkpoint. The count reflects only
-    # sessions actually present: no missing session is synthesized.
-    spy_index = sorted(pd.DatetimeIndex(bars[BENCHMARK_SYMBOL]["close"].index))
+    spy_index = sorted(pd.DatetimeIndex(execution_bars[BENCHMARK_SYMBOL]["close"].index))
     scored_calendar = [session for session in spy_index if session >= scored_start][:cutoff]
     scored_count = len(scored_calendar)
     report: dict[str, Any] = {
@@ -765,6 +803,11 @@ def prospective_checkpoint_report(snapshot: ProspectiveCheckpoint) -> dict[str, 
         "scored_session_count": int(scored_count),
         "checkpoint_label": _checkpoint_label(scored_count),
         "scored_start": scored_start.isoformat(),
+        "signal_price_convention": "QFQ",
+        "execution_price_convention": "UNADJUSTED",
+        "corporate_action_reconciliation": list(
+            snapshot.corporate_action_reconciliation
+        ),
     }
     report.update(_prospective_governance_flags())
 
@@ -780,17 +823,18 @@ def prospective_checkpoint_report(snapshot: ProspectiveCheckpoint) -> dict[str, 
         )
         return report
 
-    # Exact alignment: every scored session must be present in every
-    # non-benchmark strategy frame. A gap in any frame makes the evidence
-    # unreconcilable -> ABSTAIN (no rows are dropped to paper over the gap).
     misaligned: dict[str, list[str]] = {}
-    for symbol in RESEARCH_UNIVERSE:
-        if symbol == BENCHMARK_SYMBOL:
-            continue
-        index = set(pd.DatetimeIndex(bars[symbol]["close"].index))
-        missing = [session for session in scored_calendar if session not in index]
-        if missing:
-            misaligned[symbol] = [session.isoformat() for session in missing]
+    for universe_name, universe_bars in (
+        ("signal", signal_bars),
+        ("execution", execution_bars),
+    ):
+        for symbol in RESEARCH_UNIVERSE:
+            index = set(pd.DatetimeIndex(universe_bars[symbol]["close"].index))
+            missing = [session for session in scored_calendar if session not in index]
+            if missing:
+                misaligned[f"{universe_name}:{symbol}"] = [
+                    session.isoformat() for session in missing
+                ]
     if misaligned:
         report.update(
             status=PHASE7_UNKNOWN_ABSTAIN,
@@ -804,13 +848,16 @@ def prospective_checkpoint_report(snapshot: ProspectiveCheckpoint) -> dict[str, 
         )
         return report
 
-    # Aligned: replay the fixed candidate over the whole window (warmup gives
-    # causal context) and slice the scored P&L out of one continuous replay per
-    # friction case; the portfolio state is never reset at a subperiod boundary.
-    targets = build_fixed_targets(bars)
+    targets = build_fixed_targets(signal_bars)
     replays = {
         bps: replay_decision_targets(
-            bars, tuple(targets), friction_bps=bps, initial_cash=INITIAL_CASH
+            execution_bars,
+            tuple(targets),
+            splits=splits,
+            dividends=dividends,
+            friction_bps=bps,
+            initial_cash=INITIAL_CASH,
+            symbols=RESEARCH_UNIVERSE,
         )
         for bps in FRICTION_CASES_BPS
     }
@@ -844,7 +891,13 @@ def prospective_checkpoint_report(snapshot: ProspectiveCheckpoint) -> dict[str, 
         }
 
     primary_total = cases[str(PRIMARY_FRICTION_BPS)]["total_return"]
-    benchmark = benchmark_total_return(bars, scored_sessions)
+    benchmark = _prospective_benchmark_total_return(
+        execution_bars,
+        scored_start=scored_start,
+        scored_sessions=scored_sessions,
+        splits=splits,
+        dividends=dividends,
+    )
     if primary_total["status"] == "AVAILABLE" and benchmark["status"] == "AVAILABLE":
         excess_spy = excess_return(primary_total, benchmark)
     else:
@@ -852,7 +905,7 @@ def prospective_checkpoint_report(snapshot: ProspectiveCheckpoint) -> dict[str, 
     if primary_total["status"] == "AVAILABLE":
         excess_cash = {
             "status": "AVAILABLE",
-            "value": float(primary_total["value"]) - 0.0,
+            "value": float(primary_total["value"]),
             "reason": "OK",
         }
     else:
