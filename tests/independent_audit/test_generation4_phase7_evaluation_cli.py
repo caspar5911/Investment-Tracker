@@ -243,11 +243,31 @@ class _FakeQuoteClient:
     def __init__(self, frames):
         self._frames = frames
         self.fetched = []
+        self.unadjusted_fetched = []
         self.closed = False
 
     def fetch_daily_bars(self, symbol, start, end):
         self.fetched.append(symbol)
         return self._frames[symbol]
+
+    def fetch_unadjusted_daily_bars(self, symbol, start, end):
+        self.unadjusted_fetched.append(symbol)
+        return self._frames[symbol]
+
+    def fetch_rehab(self, symbol):
+        return pd.DataFrame(
+            columns=[
+                "ex_div_date", "per_cash_div", "special_dividend",
+                "per_share_div_ratio", "per_share_trans_ratio",
+                "allotment_ratio", "stk_spo_ratio", "spin_off_ratio",
+            ]
+        )
+
+    def fetch_dividends(self, symbol):
+        return {"dividend_list": []}
+
+    def fetch_splits(self, symbol):
+        return {"split_list": []}
 
     def close(self):
         self.closed = True
