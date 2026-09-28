@@ -117,10 +117,7 @@ def test_snapshot_persists_qfq_unadjusted_and_corporate_action_sources(
 ):
     # Keep this test focused on evidence shape; session-integrity coverage is
     # separately exercised by test_generation4_phase7_snapshot_integrity.py.
-    expected_sessions = pd.bdate_range("2025-11-26", periods=213, tz="UTC")
-    expected_sessions = expected_sessions[:-3].append(
-        pd.DatetimeIndex(["2026-09-28", "2026-09-29", "2026-09-30"], tz="UTC")
-    )
+    expected_sessions = _sessions()
     monkeypatch.setattr(
         "investment_tracker.independent_audit.post_generation3.phase7_data._calendar_window",
         lambda **kwargs: (expected_sessions, 210, 3),
@@ -222,8 +219,8 @@ def test_prospective_checkpoint_replays_unadjusted_bars_with_actions(monkeypatch
     monkeypatch.setattr(dur, "exposure_invariant_passes", lambda replay: True)
     monkeypatch.setattr(
         dur,
-        "benchmark_total_return",
-        lambda bars, sessions, **kwargs: {"status": "AVAILABLE", "value": 0.0, "reason": "OK"},
+        "_prospective_benchmark_total_return",
+        lambda *args, **kwargs: {"status": "AVAILABLE", "value": 0.0, "reason": "OK"},
     )
 
     snapshot = dur.ProspectiveCheckpoint(
