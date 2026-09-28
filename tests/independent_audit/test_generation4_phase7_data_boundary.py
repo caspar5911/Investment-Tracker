@@ -79,11 +79,31 @@ class _FakeQuoteClient:
     def __init__(self, frames):
         self._frames = frames
         self.fetched = []
+        self.unadjusted_fetched = []
         self.closed = False
 
     def fetch_daily_bars(self, symbol, start, end):
         self.fetched.append(symbol)
         return self._frames[symbol]
+
+    def fetch_unadjusted_daily_bars(self, symbol, start, end):
+        self.unadjusted_fetched.append(symbol)
+        return self._frames[symbol]
+
+    def fetch_rehab(self, symbol):
+        return pd.DataFrame(
+            columns=[
+                "ex_div_date", "per_cash_div", "special_dividend",
+                "per_share_div_ratio", "per_share_trans_ratio",
+                "allotment_ratio", "stk_spo_ratio", "spin_off_ratio",
+            ]
+        )
+
+    def fetch_dividends(self, symbol):
+        return {"dividend_list": []}
+
+    def fetch_splits(self, symbol):
+        return {"split_list": []}
 
     def close(self):
         self.closed = True
@@ -216,6 +236,7 @@ def test_exact_research_universe_is_accepted(tmp_path, capsys):
     manifest, created = _run(tmp_path)
     assert created["count"] == 1
     assert created["clients"][0].fetched == list(RESEARCH_UNIVERSE)
+    assert created["clients"][0].unadjusted_fetched == list(RESEARCH_UNIVERSE)
     assert created["clients"][0].closed is True
 
 
@@ -418,18 +439,26 @@ def test_append_only_snapshot_is_written(tmp_path):
 
     # Every requested symbol has a bars file with a recorded content hash.
     for symbol in RESEARCH_UNIVERSE:
-        bars_path = snapshot_dir / "bars" / f"{symbol}.csv"
-        assert bars_path.exists()
-        recorded = manifest["symbols"][symbol]["sha256"]
-        assert recorded == sha256(bars_path.read_bytes()).hexdigest()
+        qfq_path = snapshot_dir / "bars" / "qfq" / f"{symbol}.csv"
+        raw_path = snapshot_dir / "bars" / "unadjusted" / f"{symbol}.csv"
+        assert qfq_path.exists()
+        assert raw_path.exists()
+        assert manifest["symbols"][symbol]["qfq_sha256"] == sha256(qfq_path.read_bytes()).hexdigest()
+        assert manifest["symbols"][symbol]["unadjusted_sha256"] == sha256(raw_path.read_bytes()).hexdigest()
 
     # File hash table lists all bars files with matching hashes.
     recorded_files = {entry["path"]: entry["sha256"] for entry in manifest["files"]}
     for symbol in RESEARCH_UNIVERSE:
-        relative = f"bars/{symbol}.csv"
-        assert relative in recorded_files
-        actual = (snapshot_dir / relative).read_bytes()
-        assert recorded_files[relative] == sha256(actual).hexdigest()
+        for relative in (
+            f"bars/qfq/{symbol}.csv",
+            f"bars/unadjusted/{symbol}.csv",
+            f"corporate_actions/rehab/{symbol}.csv",
+            f"corporate_actions/dividends/{symbol}.json",
+            f"corporate_actions/splits/{symbol}.json",
+        ):
+            assert relative in recorded_files
+            actual = (snapshot_dir / relative).read_bytes()
+            assert recorded_files[relative] == sha256(actual).hexdigest()
 
     # Manifest self-hash is consistent over the manifest body.
     body = {k: v for k, v in manifest.items() if k != "manifest_sha256"}
@@ -441,7 +470,7 @@ def test_existing_snapshot_is_never_overwritten(tmp_path):
     snapshot_dir = Path(tmp_path) / "out" / "snapshots" / first["snapshot_id"]
     manifest_before = (snapshot_dir / "manifest.json").read_bytes()
     bars_before = {
-        symbol: (snapshot_dir / "bars" / f"{symbol}.csv").read_bytes()
+        symbol: (snapshot_dir / "bars" / "qfq" / f"{symbol}.csv").read_bytes()
         for symbol in RESEARCH_UNIVERSE
     }
 
@@ -452,4 +481,4 @@ def test_existing_snapshot_is_never_overwritten(tmp_path):
     # Nothing was changed on the second (refused) run.
     assert (snapshot_dir / "manifest.json").read_bytes() == manifest_before
     for symbol in RESEARCH_UNIVERSE:
-        assert (snapshot_dir / "bars" / f"{symbol}.csv").read_bytes() == bars_before[symbol]
+        assert (snapshot_dir / "bars" / "qfq" / f"{symbol}.csv").read_bytes() == bars_before[symbol]
