@@ -21,11 +21,16 @@ frozen durable module.
 from __future__ import annotations
 
 import argparse
+from hashlib import sha256
 import json
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
+
+from investment_tracker.independent_audit.successor.evaluate_dividend_v3 import (
+    _corporate_actions,
+)
 
 from ...quant.phase7.generation4_durability import (
     BENCHMARK_SYMBOL,
@@ -127,23 +132,127 @@ def _acquire_command(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
-def _load_bars(snapshot_dir: Path, symbols: list[str]) -> dict[str, pd.DataFrame]:
-    bars: dict[str, pd.DataFrame] = {}
-    bars_dir = snapshot_dir / "bars"
-    for symbol in symbols:
-        try:
-            frame = pd.read_csv(bars_dir / f"{symbol}.csv", index_col=0)
-        except (OSError, ValueError, pd.errors.ParserError):
+def _canonical_json(value: Any) -> bytes:
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def _snapshot_file_table(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    body = {key: value for key, value in manifest.items() if key != "manifest_sha256"}
+    if manifest.get("manifest_sha256") != sha256(_canonical_json(body)).hexdigest():
+        raise Generation4Phase7EvaluationError(
+            GEN4_PHASE7_EVAL_BINDING_MISMATCH, "manifest_sha256"
+        )
+    files = manifest.get("files")
+    if not isinstance(files, list):
+        raise Generation4Phase7EvaluationError(
+            GEN4_PHASE7_EVAL_EVIDENCE_INVALID, "manifest_files"
+        )
+    table: dict[str, dict[str, Any]] = {}
+    for item in files:
+        if (
+            not isinstance(item, dict)
+            or not isinstance(item.get("path"), str)
+            or not isinstance(item.get("sha256"), str)
+            or not isinstance(item.get("bytes"), int)
+            or item["path"] in table
+        ):
             raise Generation4Phase7EvaluationError(
-                GEN4_PHASE7_EVAL_EVIDENCE_INVALID, f"bars:{symbol}"
+                GEN4_PHASE7_EVAL_EVIDENCE_INVALID, "manifest_files"
+            )
+        table[item["path"]] = item
+    return table
+
+
+def _read_snapshot_bytes(
+    snapshot_dir: Path,
+    relative: str,
+    file_table: dict[str, dict[str, Any]],
+) -> bytes:
+    entry = file_table.get(relative)
+    if entry is None:
+        raise Generation4Phase7EvaluationError(
+            GEN4_PHASE7_EVAL_EVIDENCE_INVALID, f"manifest_missing:{relative}"
+        )
+    path = snapshot_dir / relative
+    try:
+        payload = path.read_bytes()
+    except OSError:
+        raise Generation4Phase7EvaluationError(
+            GEN4_PHASE7_EVAL_EVIDENCE_INVALID, relative
+        ) from None
+    if len(payload) != entry["bytes"] or sha256(payload).hexdigest() != entry["sha256"]:
+        raise Generation4Phase7EvaluationError(
+            GEN4_PHASE7_EVAL_BINDING_MISMATCH, f"file_hash:{relative}"
+        )
+    return payload
+
+
+def _load_bars(
+    snapshot_dir: Path,
+    symbols: list[str],
+    *,
+    kind: str,
+    file_table: dict[str, dict[str, Any]],
+) -> dict[str, pd.DataFrame]:
+    bars: dict[str, pd.DataFrame] = {}
+    for symbol in symbols:
+        relative = f"bars/{kind}/{symbol}.csv"
+        payload = _read_snapshot_bytes(snapshot_dir, relative, file_table)
+        try:
+            from io import BytesIO
+
+            frame = pd.read_csv(BytesIO(payload), index_col=0)
+        except (ValueError, pd.errors.ParserError):
+            raise Generation4Phase7EvaluationError(
+                GEN4_PHASE7_EVAL_EVIDENCE_INVALID, f"bars:{kind}:{symbol}"
             ) from None
         frame.index = pd.to_datetime(frame.index, utc=True)
         bars[symbol] = frame
     return bars
 
 
+def _load_corporate_actions(
+    snapshot_dir: Path,
+    symbols: list[str],
+    scored_sessions: pd.DatetimeIndex,
+    file_table: dict[str, dict[str, Any]],
+) -> tuple[tuple[Any, ...], tuple[Any, ...], tuple[dict[str, Any], ...]]:
+    entries: dict[str, bytes] = {}
+    for symbol in symbols:
+        for relative in (
+            f"corporate_actions/rehab/{symbol}.csv",
+            f"corporate_actions/dividends/{symbol}.json",
+            f"corporate_actions/splits/{symbol}.json",
+        ):
+            entries[relative] = _read_snapshot_bytes(
+                snapshot_dir, relative, file_table
+            )
+    splits: list[Any] = []
+    dividends: list[Any] = []
+    evidence: list[dict[str, Any]] = []
+    try:
+        for symbol in symbols:
+            symbol_splits, symbol_dividends, symbol_evidence = _corporate_actions(
+                entries, symbol, scored_sessions
+            )
+            splits.extend(symbol_splits)
+            dividends.extend(symbol_dividends)
+            evidence.append(symbol_evidence)
+    except Exception as exc:
+        raise Generation4Phase7EvaluationError(
+            GEN4_PHASE7_EVAL_EVIDENCE_INVALID, f"corporate_actions:{exc}"
+        ) from None
+    return tuple(splits), tuple(dividends), tuple(evidence)
+
+
 def _evaluate_checkpoint_command(args: argparse.Namespace) -> dict[str, Any]:
-    # Fail closed on the authorization BEFORE any data is read.
+    # Fail closed on the authorization BEFORE any snapshot data is read.
     authorization = verify_generation4_phase7_evaluation_authorization(
         Path(args.evaluation_authorization)
     )
@@ -162,10 +271,7 @@ def _evaluate_checkpoint_command(args: argparse.Namespace) -> dict[str, Any]:
         raise Generation4Phase7EvaluationError(
             GEN4_PHASE7_EVAL_BINDING_MISMATCH, "candidate_id"
         )
-    if (
-        manifest.get("scored_start")
-        != authorization.prospective_first_scored_session
-    ):
+    if manifest.get("scored_start") != authorization.prospective_first_scored_session:
         raise Generation4Phase7EvaluationError(
             GEN4_PHASE7_EVAL_BINDING_MISMATCH, "scored_start"
         )
@@ -173,14 +279,49 @@ def _evaluate_checkpoint_command(args: argparse.Namespace) -> dict[str, Any]:
         raise Generation4Phase7EvaluationError(
             GEN4_PHASE7_EVAL_BINDING_MISMATCH, "benchmark_symbol"
         )
-    if set(manifest.get("symbols", {}).keys()) != set(authorization.research_universe):
+    if tuple(manifest.get("symbols", {}).keys()) != tuple(authorization.research_universe):
         raise Generation4Phase7EvaluationError(
             GEN4_PHASE7_EVAL_BINDING_MISMATCH, "research_universe"
         )
-    bars = _load_bars(snapshot_dir, list(authorization.research_universe))
+    if (
+        manifest.get("signal_price_convention") != "QFQ"
+        or manifest.get("execution_price_convention") != "UNADJUSTED"
+        or manifest.get("corporate_actions_included") is not True
+    ):
+        raise Generation4Phase7EvaluationError(
+            GEN4_PHASE7_EVAL_BINDING_MISMATCH, "accounting_convention"
+        )
+
+    file_table = _snapshot_file_table(manifest)
+    symbols = list(authorization.research_universe)
+    signal_bars = _load_bars(
+        snapshot_dir, symbols, kind="qfq", file_table=file_table
+    )
+    execution_bars = _load_bars(
+        snapshot_dir, symbols, kind="unadjusted", file_table=file_table
+    )
+    scored_start = pd.Timestamp(manifest["scored_start"], tz="UTC")
+    scored_sessions = pd.DatetimeIndex(
+        [
+            value
+            for value in execution_bars[BENCHMARK_SYMBOL].index
+            if value >= scored_start
+        ]
+    )
+    if len(scored_sessions) != int(manifest.get("scored_session_count", -1)):
+        raise Generation4Phase7EvaluationError(
+            GEN4_PHASE7_EVAL_BINDING_MISMATCH, "scored_session_count"
+        )
+    splits, dividends, action_evidence = _load_corporate_actions(
+        snapshot_dir, symbols, scored_sessions, file_table
+    )
     snapshot = ProspectiveCheckpoint(
-        bars=bars,
-        scored_start=pd.Timestamp(manifest["scored_start"], tz="UTC"),
+        bars=signal_bars,
+        execution_bars=execution_bars,
+        splits=splits,
+        dividends=dividends,
+        corporate_action_reconciliation=action_evidence,
+        scored_start=scored_start,
         checkpoint_cutoff=CHECKPOINT_SESSIONS_PRIMARY,
     )
     return prospective_checkpoint_report(snapshot)
