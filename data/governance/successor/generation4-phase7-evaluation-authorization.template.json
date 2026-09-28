@@ -3,5 +3,35 @@
   "status": "DRAFT_TEMPLATE_NOT_AUTHORIZATION",
   "authority": "NONE",
   "note": "Independent Audit must create a separate GENERATION4-PHASE7-EVALUATION-AUTHORIZATION-v1 artifact. This template grants no Phase-7 performance evaluation, production, live-trading, retry, substitution, search, methodology-change, or parameter-change authority.",
-  "required_schema": "GENERATION4-PHASE7-EVALUATION-AUTHORIZATION-v1"
+  "required_schema": "GENERATION4-PHASE7-EVALUATION-AUTHORIZATION-v1",
+  "expected_bindings": {
+    "audit_request_sha256": "5a6debb16d263542dc9da3b883133871c3d1bb6e42fee211f3fb575dcd655f1e",
+    "frozen_evaluation_implementation_commit": "e8ec2c89f6f472e673a5b46dac4d413fe58b3da8",
+    "evaluation_module_sha256": "4cdeb100013da639a5084a5bbd46e3a69aba0ee2c6dc908a6cf523ff69630209",
+    "evaluation_cli_sha256": "7c90ac633c4255268bd5bc22a9813b1fc8f7d03f06cb9e25940ec5830b1d986d",
+    "durability_module_sha256": "373517dd633026144e674340f7666ef6b7a688882d791ff075172ff9f277bbbd",
+    "data_boundary_module_sha256": "d47d22b7802fa4ad8ea2e762e6b4687a2b7edcf9f55dfcbf38048836197a7eb7",
+    "evaluation_contract_sha256": "3ecf2c3f2c7e28c5baa0525c0e7cc417e97745cd3091cf904acfa6400577d27e",
+    "start_artifact_sha256": "486f3af558e28da9143d7435dc1a1957dc9c2daf4e34005a3e369af9a258c414",
+    "start_artifact_self_hash": "d1257bd7a683b8e372c71d0f1da90b7366be17ba3c1e2587205601dfeaf65599",
+    "start_contract_sha256": "beef9982ac1d1cf33a451fab984bb09f8b60605a18297e5823079d7b980878e0",
+    "entry_authorization_id": "INDEP-AUDIT-GEN4-PHASE7-ENTRY-20260926-QWEN-0001",
+    "entry_authorization_sha256": "ba9a6910ad7afdf579af5eb81825917de75ef86cb443beb8468c2e40a459852b"
+  },
+  "authorization_must_keep": {
+    "phase7_started": true,
+    "phase7_performance_evaluation_authorized": true,
+    "production_readiness_approved": false,
+    "live_trading_authorized": false,
+    "holdout_reuse_authorized": false,
+    "candidate_search_authorized": false,
+    "parameter_mutation_authorized": false,
+    "symbol_substitution_authorized": false,
+    "adaptive_walk_forward_authorized": false,
+    "annual_reoptimization_authorized": false,
+    "result_dependent_methodology_change_allowed": false,
+    "result_dependent_parameter_change_allowed": false,
+    "recon009_status": "OPEN",
+    "paper_only": true
+  }
 }

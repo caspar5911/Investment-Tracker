@@ -1,16 +1,19 @@
 # Generation-4 Phase-7 Evaluation Independent Audit Request
 
-Date: 2026-09-26
+Date: 2026-09-28 (remediation handoff)
 
 Repository: `caspar5911/Investment-Tracker`
 
 Branch: `governance/phase6-successor-dividend-normalization-v3`
 
 Frozen evaluation implementation commit:
-`de3aa468d63e5157c935c6af867b0492573510c6`
+`e8ec2c89f6f472e673a5b46dac4d413fe58b3da8`
 
 Machine-readable request:
 `data/governance/successor/generation4-phase7-evaluation-independent-audit-request.json`
+
+Machine-readable request SHA-256:
+`5a6debb16d263542dc9da3b883133871c3d1bb6e42fee211f3fb575dcd655f1e`
 
 Non-authorizing template:
 `data/governance/successor/generation4-phase7-evaluation-authorization.template.json`
@@ -32,7 +35,7 @@ The frozen evaluation implementation is:
 
 - `src/investment_tracker/independent_audit/post_generation3/phase7_evaluation.py`
   at SHA-256
-  `ac5a132cb77880d7919419bdfd0c61645c4810df21ce78657ab9f95ea3f57a55`;
+  `4cdeb100013da639a5084a5bbd46e3a69aba0ee2c6dc908a6cf523ff69630209`;
 - `src/investment_tracker/independent_audit/post_generation3/phase7_evaluation_cli.py`
   at SHA-256
   `7c90ac633c4255268bd5bc22a9813b1fc8f7d03f06cb9e25940ec5830b1d986d`;
@@ -40,7 +43,7 @@ The frozen evaluation implementation is:
   `373517dd633026144e674340f7666ef6b7a688882d791ff075172ff9f277bbbd`;
 - `src/investment_tracker/independent_audit/post_generation3/phase7_data.py`
   at SHA-256
-  `c18c97dadccda476eacb6d8f9b8eb342a395df14cb7e7a20f880538778919016`.
+  `d47d22b7802fa4ad8ea2e762e6b4687a2b7edcf9f55dfcbf38048836197a7eb7`.
 
 The four read-only CLI commands are
 `verify-evaluation-preflight` and `resolve-prospective-boundary`
@@ -50,8 +53,12 @@ commands fail before any provider or data access unless a strict
 `GENERATION4-PHASE7-EVALUATION-AUTHORIZATION-v1` authorization is supplied.
 No arbitrary symbols or parameter overrides are accepted. Any change to any of
 these files requires a new implementation freeze and regenerated bindings.
-The authorization schema is strict and rejects unknown fields. There is no
-coordinator-side authorization writer.
+The authorization schema is strict and rejects unknown fields. Its single
+loader recomputes the audit request, contract, start artifact, start contract,
+entry authorization, and four source byte hashes; verifies the start
+self-hash; checks the frozen Git tree; and checks all bound identities and
+governance flags before either post-authorization command can reach a provider
+or snapshot. There is no coordinator-side authorization writer.
 
 ## Frozen identities
 
@@ -70,7 +77,7 @@ coordinator-side authorization writer.
 ## Binding digests
 
 - Evaluation contract SHA-256:
-  `113f51002c1b10eb3de5d861a8d8c54781d9f97c6deb14e5e9be542b17a8ba6b`
+  `3ecf2c3f2c7e28c5baa0525c0e7cc417e97745cd3091cf904acfa6400577d27e`
 - Start artifact SHA-256:
   `486f3af558e28da9143d7435dc1a1957dc9c2daf4e34005a3e369af9a258c414`
 - Start artifact self-hash:
@@ -112,7 +119,7 @@ The auditor must independently verify all of the following before authorizing:
 - The evaluation contract passes the frozen preflight
   (`verify_generation4_phase7_evaluation_preflight`) and resolves to
   `GENERATION4_PHASE7_EVALUATION_PREFLIGHT_READY`; its SHA-256 matches
-  `113f51002c1b10eb3de5d861a8d8c54781d9f97c6deb14e5e9be542b17a8ba6b`.
+  `3ecf2c3f2c7e28c5baa0525c0e7cc417e97745cd3091cf904acfa6400577d27e`.
 - The exact prospective boundary is `2026-09-28`, the warmup cap is `210`,
   and the checkpoints are `63`, `126`, `252`. The boundary is deterministic
   and no market data was fetched to compute it.
@@ -153,7 +160,7 @@ orders, or grant production/live-trading authority.
 At minimum, run:
 
 ```powershell
-python -m pytest -q tests/independent_audit/test_generation4_phase7_entry.py tests/independent_audit/test_generation4_phase7_start.py tests/independent_audit/test_generation4_phase7_evaluation.py tests/independent_audit/test_generation4_phase7_data_boundary.py tests/independent_audit/test_generation4_phase7_evaluation_cli.py tests/independent_audit/test_generation4_phase7_evaluation_contract.py tests/quant/test_generation4_phase7_durability.py
+python -m pytest -q tests/independent_audit/test_generation4_phase7_entry.py tests/independent_audit/test_generation4_phase7_start.py tests/independent_audit/test_generation4_phase7_evaluation.py tests/independent_audit/test_generation4_phase7_data_boundary.py tests/independent_audit/test_generation4_phase7_evaluation_cli.py tests/independent_audit/test_generation4_phase7_evaluation_contract.py tests/independent_audit/test_generation4_phase7_authorization.py tests/quant/test_generation4_phase7_durability.py
 python -m compileall -q src/investment_tracker/independent_audit/post_generation3
 ```
 
@@ -174,8 +181,9 @@ not write an authorization. If every check passes and you independently decide
 to authorize the evaluation boundary, create a separate JSON file at the
 proposed auditor-owned output path using schema
 `GENERATION4-PHASE7-EVALUATION-AUTHORIZATION-v1`. Bind the actual SHA-256 of
-the committed machine-readable request and every field required by the strict
-model. Keep `phase7_started=true`,
+the committed machine-readable request at SHA-256
+`5a6debb16d263542dc9da3b883133871c3d1bb6e42fee211f3fb575dcd655f1e`
+and every field required by the strict model. Keep `phase7_started=true`,
 `production_readiness_approved=false`, `live_trading_authorized=false`,
 `holdout_reuse_authorized=false`, `recon009_status=OPEN`, and
 `paper_only=true`. Do not edit the template into an authorization.
@@ -187,15 +195,27 @@ Act as the Independent Auditor for the governed, paper-only Generation-4 Phase-7
 
 Repository: C:\Users\Caspar\Desktop\AllFolder\Github Projects\Investment\Investment-Tracker
 Branch: governance/phase6-successor-dividend-normalization-v3
-Frozen evaluation implementation commit: de3aa468d63e5157c935c6af867b0492573510c6
-Approved design: docs/superpowers/plans/2026-09-26-generation4-phase7-evaluation-contract.md
+Frozen evaluation implementation commit: e8ec2c89f6f472e673a5b46dac4d413fe58b3da8
+Approved design: docs/superpowers/specs/2026-09-26-generation4-phase7-evaluation-contract-design.md
+Approved implementation plan: docs/superpowers/plans/2026-09-26-generation4-phase7-evaluation-contract.md
 Machine-readable audit request: data/governance/successor/generation4-phase7-evaluation-independent-audit-request.json
+Machine-readable audit request SHA-256: 5a6debb16d263542dc9da3b883133871c3d1bb6e42fee211f3fb575dcd655f1e
+Evaluation module SHA-256: 4cdeb100013da639a5084a5bbd46e3a69aba0ee2c6dc908a6cf523ff69630209
+Evaluation CLI SHA-256: 7c90ac633c4255268bd5bc22a9813b1fc8f7d03f06cb9e25940ec5830b1d986d
+Durability module SHA-256: 373517dd633026144e674340f7666ef6b7a688882d791ff075172ff9f277bbbd
+Data-boundary module SHA-256: d47d22b7802fa4ad8ea2e762e6b4687a2b7edcf9f55dfcbf38048836197a7eb7
+Evaluation contract SHA-256: 3ecf2c3f2c7e28c5baa0525c0e7cc417e97745cd3091cf904acfa6400577d27e
+Start artifact file SHA-256: 486f3af558e28da9143d7435dc1a1957dc9c2daf4e34005a3e369af9a258c414
+Start artifact self-hash: d1257bd7a683b8e372c71d0f1da90b7366be17ba3c1e2587205601dfeaf65599
+Start contract file SHA-256: beef9982ac1d1cf33a451fab984bb09f8b60605a18297e5823079d7b980878e0
+Entry authorization ID: INDEP-AUDIT-GEN4-PHASE7-ENTRY-20260926-QWEN-0001
+Entry authorization file SHA-256: ba9a6910ad7afdf579af5eb81825917de75ef86cb443beb8468c2e40a459852b
 Non-authorizing template: data/governance/successor/generation4-phase7-evaluation-authorization.template.json
 If and only if independently approved, auditor-owned output: data/governance/successor/generation4-phase7-evaluation-authorization.json
 
-Independently inspect the frozen evaluation implementation, the frozen evaluation contract, the machine-readable request, and the committed public evidence. Verify the exact frozen evaluation implementation commit and all four evaluation source hashes (module, CLI, durability, data boundary); verify the evaluation contract passes the frozen preflight and its SHA-256 is 113f51002c1b10eb3de5d861a8d8c54781d9f97c6deb14e5e9be542b17a8ba6b; verify the start artifact SHA-256, its self-hash, the start contract SHA-256, and the entry authorization ID/SHA-256; verify the exact candidate, binding, strategy implementation, all three methodology identities, exact research universe (GLD, IEF, IWM, QQQ, SPY, TLT, VNQ, XLP), benchmark SPY, initial cash 100000.0, and friction cases 0/3/10/25/50 with primary 3; verify the exact prospective first scored session 2026-09-28 with warmup cap 210 and checkpoints 63/126/252; verify that no final-holdout symbol (QQQM, FALN, IIPR, PSTL, EFAS) is reused; and verify that no adaptive walk-forward, annual reoptimization, candidate search, parameter mutation, symbol substitution, or result-dependent methodology/parameter change is authorized.
+Independently inspect the frozen evaluation implementation, the frozen evaluation contract, the machine-readable request, and the committed public evidence. Verify that the request byte SHA-256 is 5a6debb16d263542dc9da3b883133871c3d1bb6e42fee211f3fb575dcd655f1e. Verify the exact frozen evaluation implementation commit and all four evaluation source hashes (module, CLI, durability, data boundary), including the source bytes at that Git commit. Verify the evaluation contract passes the frozen preflight and its byte SHA-256 is 3ecf2c3f2c7e28c5baa0525c0e7cc417e97745cd3091cf904acfa6400577d27e. Verify the start artifact file SHA-256, its embedded self-hash, the start contract file SHA-256, and the entry authorization ID and file SHA-256. Verify the exact candidate, binding, strategy implementation, all three methodology identities, exact ordered research universe (GLD, IEF, IWM, QQQ, SPY, TLT, VNQ, XLP), benchmark SPY, initial cash 100000.0, and friction cases 0/3/10/25/50 with primary 3. Verify the exact prospective first scored session 2026-09-28 with warmup cap 210 and checkpoints 63/126/252, historical classification REUSED_HISTORY_DIAGNOSTIC_ONLY, and DQ-030 status UNRESOLVED. Verify that no final-holdout symbol (QQQM, FALN, IIPR, PSTL, EFAS) is reused and that every governance prohibition remains false, RECON-009 remains OPEN, and paper_only remains true.
 
-Run the focused tests and compile checks stated in the Markdown request, plus the read-only verify-evaluation-preflight and resolve-prospective-boundary commands against the committed start artifact, start contract, and evaluation contract. Confirm the preflight report is GENERATION4_PHASE7_EVALUATION_PREFLIGHT_READY, the resolved prospective first scored session is 2026-09-28, no metrics are used or produced, and no authority is granted. Confirm no provider call occurred pre-authorization and that the post-authorization commands fail closed without a strict authorization.
+Run the focused tests and compile checks stated in the Markdown request, including test_generation4_phase7_authorization.py, plus the read-only verify-evaluation-preflight and resolve-prospective-boundary commands against the committed start artifact, start contract, and evaluation contract. Confirm the preflight report is GENERATION4_PHASE7_EVALUATION_PREFLIGHT_READY, the resolved prospective first scored session is 2026-09-28, no metrics are used or produced, and no authority is granted. Inspect the RED-to-GREEN drift tests for every protected digest and identity. Confirm no provider call occurred pre-authorization and that both post-authorization commands fail closed before provider creation or snapshot/bar reads without a fully content-bound authorization.
 
 Forbidden: do not read/decrypt any sealed bundle or key; do not rerun acquisition or the Phase-6 final-holdout evaluation; do not call OpenD or any provider; do not access any symbol outside the exact research universe or the forbidden holdout symbols as market data; do not inspect or calculate real Phase-7 performance; do not tune/search candidates; do not change parameters or methodology; do not substitute symbols; do not create trading or production authority.
 
