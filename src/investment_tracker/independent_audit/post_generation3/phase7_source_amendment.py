@@ -99,40 +99,36 @@ def verify_source_amendment(
         from .phase7_data import Generation4Phase7EvaluationAuthorization
 
         _require(_AMENDMENT_PATH.is_file() and not _AMENDMENT_PATH.is_symlink())
-        _require(sha256(_FIRST_CONTRACT_PATH.read_bytes()).hexdigest() == _FIRST_CONTRACT_SHA256)
-        contract = json.loads(_FIRST_CONTRACT_PATH.read_bytes())
+        contract_bytes = _FIRST_CONTRACT_PATH.read_bytes()
+        _require(sha256(contract_bytes).hexdigest() == _FIRST_CONTRACT_SHA256)
+        contract = json.loads(contract_bytes)
         _require(_ORIGINAL_AUTH_PATH.is_file() and not _ORIGINAL_AUTH_PATH.is_symlink())
-        canonical_bytes = _ORIGINAL_AUTH_PATH.read_bytes()
-        _require(
-            sha256(canonical_bytes).hexdigest()
-            == contract["evaluation_authorization_sha256"]
-        )
         if (
             supplied_authorization_path is _CANONICAL_INPUT
             and supplied_authorization_bytes is _CANONICAL_INPUT
         ):
             supplied_authorization_path = _ORIGINAL_AUTH_PATH
-            supplied_authorization_bytes = canonical_bytes
+            supplied_authorization_bytes = _ORIGINAL_AUTH_PATH.read_bytes()
         _require(
             isinstance(supplied_authorization_path, Path)
             and supplied_authorization_path.is_file()
             and not supplied_authorization_path.is_symlink()
             and supplied_authorization_path.absolute() == _ORIGINAL_AUTH_PATH.absolute()
         )
-        _require(
-            type(supplied_authorization_bytes) is bytes
-            and supplied_authorization_bytes == canonical_bytes
-        )
+        _require(type(supplied_authorization_bytes) is bytes)
+        _require(sha256(supplied_authorization_bytes).hexdigest()
+                 == contract["evaluation_authorization_sha256"])
         _require(type(original_authorization) is Generation4Phase7EvaluationAuthorization)
         _require(
-            original_authorization.model_dump(mode="json") == json.loads(canonical_bytes)
+            original_authorization.model_dump(mode="json") == json.loads(supplied_authorization_bytes)
         )
         raw = _AMENDMENT_PATH.read_bytes()
         amendment = json.loads(raw)
         _require(isinstance(amendment, dict) and set(amendment) == _FIELDS)
         body = {key: value for key, value in amendment.items() if key != "artifact_sha256"}
         _require(amendment["artifact_sha256"] == sha256(_canonical_json(body)).hexdigest())
-        request = json.loads(_REQUEST_PATH.read_bytes())
+        request_bytes = _REQUEST_PATH.read_bytes()
+        request = json.loads(request_bytes)
         _require(isinstance(request, dict))
         _require(request.get("schema_version") == "GENERATION4-PHASE7-SOURCE-AMENDMENT-INDEPENDENT-AUDIT-REQUEST-v1")
         _require(request.get("status") == "READY_FOR_INDEPENDENT_AUDIT")
@@ -147,7 +143,7 @@ def verify_source_amendment(
             "schema_version": "GENERATION4-PHASE7-SOURCE-AMENDMENT-AUTHORIZATION-v1",
             "status": "GENERATION4_PHASE7_SOURCE_AMENDMENT_AUTHORIZED",
             "authority": "INDEPENDENT_AUDIT",
-            "audit_request_sha256": sha256(_REQUEST_PATH.read_bytes()).hexdigest(),
+            "audit_request_sha256": sha256(request_bytes).hexdigest(),
             "original_evaluation_authorization_id": contract["evaluation_authorization_id"],
             "original_evaluation_authorization_sha256": contract["evaluation_authorization_sha256"],
             "evaluation_contract_sha256": contract["evaluation_contract_sha256"],

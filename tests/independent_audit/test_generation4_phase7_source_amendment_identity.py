@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from hashlib import sha256
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from investment_tracker.independent_audit.post_generation3.phase7_data import (
     Generation4Phase7EvaluationAuthorization,
     acquire_prospective_phase7_data,
     build_generation4_phase7_data_request,
+    load_and_verify_generation4_phase7_evaluation_authorization,
     verify_generation4_phase7_evaluation_authorization,
 )
 
@@ -171,3 +173,122 @@ def test_invalid_authorization_denied_before_provider_factory(
             client_factory=provider_factory,
         )
     assert exc.value.detail == "source_amendment"
+
+
+def test_acquisition_uses_only_the_bytes_read_during_authorization(
+    synthetic_amendment: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    canonical = amendment._ORIGINAL_AUTH_PATH
+    original_bytes = canonical.read_bytes()
+    original = json.loads(original_bytes)
+    request = build_generation4_phase7_data_request(
+        authorization=Generation4Phase7EvaluationAuthorization.model_validate(original),
+        requested_start="2025-11-24",
+        requested_end="2026-09-28",
+        retrieved_at_utc="2026-09-29T00:00:00Z",
+    )
+    changed = json.dumps({**original, "approved_at_utc": "2026-10-01T00:00:00Z"}).encode()
+    actual_read = Path.read_bytes
+    reads = 0
+    provider_calls = 0
+
+    def raced_read(path: Path) -> bytes:
+        nonlocal reads
+        if path == canonical:
+            reads += 1
+            if reads > 2:
+                return changed
+        return actual_read(path)
+
+    def provider_spy(**kwargs: object) -> None:
+        nonlocal provider_calls
+        provider_calls += 1
+        raise RuntimeError("mock provider reached")
+
+    monkeypatch.setattr(Path, "read_bytes", raced_read)
+    with pytest.raises(RuntimeError, match="mock provider reached"):
+        acquire_prospective_phase7_data(
+            evaluation_authorization=canonical,
+            request=request,
+            output_dir=tmp_path,
+            retrieved_at_utc="2026-09-29T00:00:00Z",
+            client_factory=provider_spy,
+        )
+    assert provider_calls == 1
+    assert reads == 1, f"authorization reads={reads}; mock provider calls={provider_calls}"
+
+
+def test_changed_first_authorization_read_stops_before_provider(
+    synthetic_amendment: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    canonical = amendment._ORIGINAL_AUTH_PATH
+    original = json.loads(canonical.read_bytes())
+    request = build_generation4_phase7_data_request(
+        authorization=Generation4Phase7EvaluationAuthorization.model_validate(original),
+        requested_start="2025-11-24",
+        requested_end="2026-09-28",
+        retrieved_at_utc="2026-09-29T00:00:00Z",
+    )
+    changed = json.dumps({**original, "approved_at_utc": "2026-10-01T00:00:00Z"}).encode()
+    actual_read = Path.read_bytes
+    provider_calls = 0
+
+    def changed_first(path: Path) -> bytes:
+        return changed if path == canonical else actual_read(path)
+
+    def provider_spy(**kwargs: object) -> None:
+        nonlocal provider_calls
+        provider_calls += 1
+        pytest.fail("provider reached with changed authorization")
+
+    monkeypatch.setattr(Path, "read_bytes", changed_first)
+    with pytest.raises(Generation4Phase7DataError):
+        acquire_prospective_phase7_data(
+            evaluation_authorization=canonical,
+            request=request,
+            output_dir=tmp_path,
+            retrieved_at_utc="2026-09-29T00:00:00Z",
+            client_factory=provider_spy,
+        )
+    assert provider_calls == 0
+
+
+def test_acquisition_rejects_mapping_without_file_bytes(
+    synthetic_amendment: Path, tmp_path: Path
+) -> None:
+    original = json.loads(amendment._ORIGINAL_AUTH_PATH.read_bytes())
+
+    def provider_spy(**kwargs: object) -> None:
+        pytest.fail("provider reached with mapping authorization")
+
+    with pytest.raises(Generation4Phase7DataError) as exc:
+        acquire_prospective_phase7_data(
+            evaluation_authorization=original,
+            request={},
+            output_dir=tmp_path,
+            retrieved_at_utc="2026-09-29T00:00:00Z",
+            client_factory=provider_spy,
+        )
+    assert exc.value.detail == "authorization_path_required"
+
+
+def test_copied_verified_result_cannot_bypass_the_loader(
+    synthetic_amendment: Path, tmp_path: Path
+) -> None:
+    verified = load_and_verify_generation4_phase7_evaluation_authorization(
+        amendment._ORIGINAL_AUTH_PATH
+    )
+    copied = replace(verified)
+
+    def provider_spy(**kwargs: object) -> None:
+        pytest.fail("provider reached with unissued verified result")
+
+    with pytest.raises(Generation4Phase7DataError) as exc:
+        acquire_prospective_phase7_data(
+            evaluation_authorization=copied,
+            request={},
+            output_dir=tmp_path,
+            retrieved_at_utc="2026-09-29T00:00:00Z",
+            client_factory=provider_spy,
+        )
+    assert exc.value.detail == "verified_authorization"

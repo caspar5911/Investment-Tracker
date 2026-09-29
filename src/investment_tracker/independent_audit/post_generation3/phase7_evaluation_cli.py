@@ -49,6 +49,7 @@ from .phase7_data import (
     acquire_prospective_phase7_data,
     build_generation4_phase7_data_request,
     verify_generation4_phase7_evaluation_authorization,
+    load_and_verify_generation4_phase7_evaluation_authorization,
 )
 from .phase7_evaluation import (
     GEN4_PHASE7_EVAL_BOUNDARY_INVALID,
@@ -119,17 +120,17 @@ def _resolve_boundary_command(args: argparse.Namespace) -> dict[str, Any]:
 
 def _acquire_command(args: argparse.Namespace) -> dict[str, Any]:
     # Fail closed on the authorization BEFORE the provider exists.
-    authorization = verify_generation4_phase7_evaluation_authorization(
+    verified_authorization = load_and_verify_generation4_phase7_evaluation_authorization(
         Path(args.evaluation_authorization)
     )
     request = build_generation4_phase7_data_request(
-        authorization=authorization,
+        authorization=verified_authorization.authorization,
         requested_start=args.requested_start,
         requested_end=args.requested_end,
         retrieved_at_utc=args.retrieved_at_utc,
     )
     return acquire_prospective_phase7_data(
-        evaluation_authorization=Path(args.evaluation_authorization),
+        evaluation_authorization=verified_authorization,
         request=request,
         output_dir=Path(args.output_dir),
         retrieved_at_utc=args.retrieved_at_utc,

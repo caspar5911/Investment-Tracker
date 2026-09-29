@@ -42,6 +42,7 @@ def environment(bound_evidence, tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     )
     return {
         "auth_path": auth_path,
+        "authorization_sha": sha256(auth_path.read_bytes()).hexdigest(),
         "output_dir": output_dir,
         "authorization": verify_generation4_phase7_evaluation_authorization(auth_path),
     }
@@ -84,7 +85,7 @@ def _write_synthetic_snapshot(
     manifest, payloads = _build_snapshot(
         authorization, request, frames, frames, rehab, dividends, splits, retrieved,
         snapshot_id=snapshot_id,
-        authorization_sha256=sha256(environment["auth_path"].read_bytes()).hexdigest(),
+        authorization_sha256=environment["authorization_sha"],
     )
     snapshot_dir = environment["output_dir"] / "snapshots" / snapshot_id
     _write_snapshot(snapshot_dir, manifest, payloads)
@@ -354,7 +355,7 @@ def test_symlinked_authorization_is_rejected_before_reading_target(
         pytest.skip("symlink creation unavailable")
     monkeypatch.setattr(
         collector,
-        "verify_generation4_phase7_evaluation_authorization",
+        "load_and_verify_generation4_phase7_evaluation_authorization",
         lambda path: pytest.fail("symlinked authorization was read"),
     )
 
@@ -383,11 +384,24 @@ def test_new_completed_session_uses_frozen_request_and_appends_snapshot(
     first_dir, _ = _write_synthetic_snapshot(environment)
     original_manifest = (first_dir / "manifest.json").read_bytes()
     called = []
+    actual_read = Path.read_bytes
+    authorization_reads = 0
+
+    def counted_read(path: Path) -> bytes:
+        nonlocal authorization_reads
+        if path == environment["auth_path"]:
+            authorization_reads += 1
+            if authorization_reads > 1:
+                pytest.fail("collector reread authorization after validation")
+        return actual_read(path)
+
+    monkeypatch.setattr(Path, "read_bytes", counted_read)
 
     def fake_acquire(**kwargs):
         called.append(kwargs)
         request = kwargs["request"]
-        assert kwargs["evaluation_authorization"] == environment["auth_path"]
+        assert kwargs["evaluation_authorization"].canonical_path == environment["auth_path"]
+        assert kwargs["evaluation_authorization"].sha256 == environment["authorization_sha"]
         assert tuple(request["symbols"]) == UNIVERSE
         assert request["requested_start"] == WARMUP_START
         assert request["requested_end"] == "2026-09-29"
@@ -408,6 +422,7 @@ def test_new_completed_session_uses_frozen_request_and_appends_snapshot(
     result = collector.collect_prospective_data()
 
     assert len(called) == 1
+    assert authorization_reads == 1
     assert result["status"] == "PHASE7_COLLECTION_UPDATED"
     assert result["latest_acquired_session"] == "2026-09-29"
     assert result["scored_session_count"] == 2

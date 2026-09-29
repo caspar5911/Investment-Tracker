@@ -124,7 +124,7 @@ def test_snapshot_persists_qfq_unadjusted_and_corporate_action_sources(
     )
     client = _SnapshotClient()
     manifest = acquire_prospective_phase7_data(
-        evaluation_authorization=bound_evidence.authorization,
+        evaluation_authorization=bound_evidence.auth_path(),
         request=_request(),
         output_dir=tmp_path / "out",
         retrieved_at_utc="2026-10-01T00:00:00Z",

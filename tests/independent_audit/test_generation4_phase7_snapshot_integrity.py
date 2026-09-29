@@ -116,7 +116,7 @@ def test_calendar_count_mismatch_rejected_before_provider(bound_evidence, tmp_pa
     factory, created = _factory(_raw_frames())
     with pytest.raises(Generation4Phase7DataError) as excinfo:
         acquire_prospective_phase7_data(
-            evaluation_authorization=bound_evidence.authorization,
+            evaluation_authorization=bound_evidence.auth_path(),
             request=_request(scored=252),
             output_dir=tmp_path / "out",
             retrieved_at_utc=AFTER_CLOSE,
@@ -130,7 +130,7 @@ def test_in_progress_requested_end_rejected_before_provider(bound_evidence, tmp_
     factory, created = _factory(_raw_frames())
     with pytest.raises(Generation4Phase7DataError) as excinfo:
         acquire_prospective_phase7_data(
-            evaluation_authorization=bound_evidence.authorization,
+            evaluation_authorization=bound_evidence.auth_path(),
             request=_request(),
             output_dir=tmp_path / "out",
             retrieved_at_utc="2026-09-30T15:00:00Z",
@@ -143,7 +143,7 @@ def test_in_progress_requested_end_rejected_before_provider(bound_evidence, tmp_
 def test_raw_time_key_is_canonicalized_before_snapshot_write(bound_evidence, tmp_path):
     factory, _ = _factory(_raw_frames())
     manifest = acquire_prospective_phase7_data(
-        evaluation_authorization=bound_evidence.authorization,
+        evaluation_authorization=bound_evidence.auth_path(),
         request=_request(),
         output_dir=tmp_path / "out",
         retrieved_at_utc=AFTER_CLOSE,
@@ -162,7 +162,7 @@ def test_missing_provider_session_rejects_snapshot(bound_evidence, tmp_path):
     factory, created = _factory(_raw_frames(missing_last_for="GLD"))
     with pytest.raises(Generation4Phase7DataError) as excinfo:
         acquire_prospective_phase7_data(
-            evaluation_authorization=bound_evidence.authorization,
+            evaluation_authorization=bound_evidence.auth_path(),
             request=_request(),
             output_dir=tmp_path / "out",
             retrieved_at_utc=AFTER_CLOSE,
@@ -184,8 +184,8 @@ def test_cli_derives_actual_session_counts_instead_of_checkpoint_max(monkeypatch
 
     monkeypatch.setattr(
         phase7_evaluation_cli,
-        "verify_generation4_phase7_evaluation_authorization",
-        lambda path: authorization,
+        "load_and_verify_generation4_phase7_evaluation_authorization",
+        lambda path: SimpleNamespace(authorization=authorization),
     )
 
     def fake_acquire(**kwargs):

@@ -8,6 +8,7 @@ import subprocess
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
@@ -39,6 +40,11 @@ class BoundEvidence:
 
     def auth(self, **overrides):
         return {**self.authorization, **overrides}
+
+    def auth_path(self, **overrides) -> Path:
+        path = self.root / GOVERNANCE / f"synthetic-evaluation-{uuid4().hex}.json"
+        write_json(path, self.auth(**overrides))
+        return path
 
 
 @pytest.fixture

@@ -20,6 +20,8 @@ import importlib
 import json
 import os
 import subprocess
+import weakref
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
@@ -180,6 +182,25 @@ class Generation4Phase7EvaluationAuthorization(BaseModel):
     result_dependent_parameter_change_allowed: StrictBool
     recon009_status: Literal["OPEN"]
     paper_only: StrictBool
+
+
+_VERIFIED_AUTHORIZATION_PROOF = object()
+
+
+@dataclass(frozen=True, slots=True, weakref_slot=True)
+class VerifiedPhase7Authorization:
+    """One validated file read, carried unchanged through acquisition."""
+
+    authorization: Generation4Phase7EvaluationAuthorization
+    raw_bytes: bytes
+    sha256: str
+    canonical_path: Path
+    _proof: object = field(repr=False, compare=False)
+
+
+_ISSUED_VERIFIED_AUTHORIZATIONS: weakref.WeakValueDictionary[int, VerifiedPhase7Authorization] = (
+    weakref.WeakValueDictionary()
+)
 
 
 def _canonical_json(value: Any) -> bytes:
@@ -364,9 +385,9 @@ def _verify_evidence_bindings(
         raise _invalid("evaluation_contract.phase7_data_boundary_source_sha256")
 
 
-def verify_generation4_phase7_evaluation_authorization(
+def _verify_authorization_result(
     raw: Mapping[str, Any] | Path | None,
-) -> Generation4Phase7EvaluationAuthorization:
+) -> tuple[Generation4Phase7EvaluationAuthorization, bytes | None, Path | None]:
     """Validate the authorization; source amendments require its canonical file bytes.
 
     Mapping inputs remain available to synthetic frozen-source tests, but cannot
@@ -465,7 +486,34 @@ def verify_generation4_phase7_evaluation_authorization(
         authorization_path=authorization_path,
         authorization_bytes=authorization_bytes,
     )
-    return authorization
+    return authorization, authorization_bytes, authorization_path
+
+
+def load_and_verify_generation4_phase7_evaluation_authorization(
+    raw: Path,
+) -> VerifiedPhase7Authorization:
+    """Read the governed file once and retain its verified bytes and digest."""
+    if not isinstance(raw, Path):
+        raise _invalid("authorization_path_required")
+    authorization, raw_bytes, path = _verify_authorization_result(raw)
+    if type(raw_bytes) is not bytes or path is None:
+        raise _invalid("authorization_path_required")
+    verified = VerifiedPhase7Authorization(
+        authorization=authorization,
+        raw_bytes=raw_bytes,
+        sha256=sha256(raw_bytes).hexdigest(),
+        canonical_path=path.absolute(),
+        _proof=_VERIFIED_AUTHORIZATION_PROOF,
+    )
+    _ISSUED_VERIFIED_AUTHORIZATIONS[id(verified)] = verified
+    return verified
+
+
+def verify_generation4_phase7_evaluation_authorization(
+    raw: Mapping[str, Any] | Path | None,
+) -> Generation4Phase7EvaluationAuthorization:
+    """Compatibility parser; acquisition requires a verified file result."""
+    return _verify_authorization_result(raw)[0]
 
 
 def _calendar_window(
@@ -952,7 +1000,7 @@ def _write_snapshot(
 
 def acquire_prospective_phase7_data(
     *,
-    evaluation_authorization: Mapping[str, Any] | Path | None,
+    evaluation_authorization: VerifiedPhase7Authorization | Path | None,
     request: Mapping[str, Any] | Any,
     output_dir: Path,
     retrieved_at_utc: str,
@@ -968,30 +1016,32 @@ def acquire_prospective_phase7_data(
     universe, and is always closed.
     """
     # Gate 1: evaluation authorization (before any provider object exists).
-    authorization = verify_generation4_phase7_evaluation_authorization(
-        evaluation_authorization
-    )
+    if isinstance(evaluation_authorization, Path):
+        verified_authorization = load_and_verify_generation4_phase7_evaluation_authorization(
+            evaluation_authorization
+        )
+    elif isinstance(evaluation_authorization, VerifiedPhase7Authorization):
+        verified_authorization = evaluation_authorization
+    elif evaluation_authorization is None:
+        raise Generation4Phase7DataError(GEN4_PHASE7_DATA_AUTHORIZATION_MISSING)
+    else:
+        raise _invalid("authorization_path_required")
+    if (
+        verified_authorization._proof is not _VERIFIED_AUTHORIZATION_PROOF
+        or _ISSUED_VERIFIED_AUTHORIZATIONS.get(id(verified_authorization)) is not verified_authorization
+        or type(verified_authorization.raw_bytes) is not bytes
+        or verified_authorization.sha256 != sha256(verified_authorization.raw_bytes).hexdigest()
+        or not isinstance(verified_authorization.canonical_path, Path)
+    ):
+        raise _invalid("verified_authorization")
+    authorization = verified_authorization.authorization
     # A real provider run uses the trusted system clock. The caller-supplied
     # timestamp is honored only with an injected test client so tests remain
     # deterministic without allowing a production caller to future-date an
     # incomplete market session.
     if client_factory is None:
         retrieved_at_utc = _trusted_now_utc()
-    if isinstance(evaluation_authorization, Path):
-        try:
-            authorization_sha256 = sha256(
-                evaluation_authorization.read_bytes()
-            ).hexdigest()
-        except OSError:
-            raise Generation4Phase7DataError(
-                GEN4_PHASE7_DATA_AUTHORIZATION_INVALID, "authorization_bytes"
-            ) from None
-    elif isinstance(evaluation_authorization, Mapping):
-        authorization_sha256 = sha256(
-            _canonical_json(dict(evaluation_authorization))
-        ).hexdigest()
-    else:
-        raise Generation4Phase7DataError(GEN4_PHASE7_DATA_AUTHORIZATION_MISSING)
+    authorization_sha256 = verified_authorization.sha256
     # Gate 2: the request (universe, holdout, unknown, ranges) before provider.
     validated_request, expected_sessions = _validate_request(
         request, retrieved_at_utc=retrieved_at_utc

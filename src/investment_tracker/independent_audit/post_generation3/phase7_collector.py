@@ -19,6 +19,7 @@ from .phase7_data import (
     SNAPSHOT_SCHEMA,
     Generation4Phase7DataError,
     Generation4Phase7EvaluationAuthorization,
+    VerifiedPhase7Authorization,
     _CHECKPOINT_SESSIONS,
     _canonical_json,
     _normalize_provider_frame,
@@ -26,7 +27,7 @@ from .phase7_data import (
     _validate_request,
     acquire_prospective_phase7_data,
     build_generation4_phase7_data_request,
-    verify_generation4_phase7_evaluation_authorization,
+    load_and_verify_generation4_phase7_evaluation_authorization,
 )
 
 PHASE7_COLLECTION_PENDING = "PHASE7_COLLECTION_PENDING"
@@ -67,7 +68,7 @@ def _require(condition: bool, detail: str) -> None:
         raise Generation4Phase7CollectorError(PHASE7_UNKNOWN_ABSTAIN, detail)
 
 
-def _authorization() -> Generation4Phase7EvaluationAuthorization:
+def _verified_authorization() -> VerifiedPhase7Authorization:
     repository = _REPO_ROOT.resolve()
     _require(
         _AUTHORIZATION_PATH.resolve().is_relative_to(repository)
@@ -77,11 +78,15 @@ def _authorization() -> Generation4Phase7EvaluationAuthorization:
         "governed_paths",
     )
     try:
-        return verify_generation4_phase7_evaluation_authorization(_AUTHORIZATION_PATH)
+        return load_and_verify_generation4_phase7_evaluation_authorization(_AUTHORIZATION_PATH)
     except Generation4Phase7DataError as exc:
         raise Generation4Phase7CollectorError(
             PHASE7_UNKNOWN_ABSTAIN, f"authorization:{exc.code}"
         ) from exc
+
+
+def _authorization() -> Generation4Phase7EvaluationAuthorization:
+    return _verified_authorization().authorization
 
 
 def _utc_now() -> datetime:
@@ -149,9 +154,11 @@ def _expected_file_paths(symbols: tuple[str, ...]) -> set[str]:
 def verify_snapshot(
     snapshot_dir: Path,
     authorization: Generation4Phase7EvaluationAuthorization,
-    authorization_path: Path,
+    authorization_source: Path | VerifiedPhase7Authorization,
 ) -> dict[str, Any]:
     """Verify snapshot bytes and structure without calculating performance."""
+    if isinstance(authorization_source, VerifiedPhase7Authorization):
+        _require(authorization_source.authorization is authorization, "authorization_identity")
     _require(
         snapshot_dir.is_dir()
         and not snapshot_dir.is_symlink()
@@ -163,7 +170,11 @@ def verify_snapshot(
     try:
         raw = manifest_path.read_bytes()
         manifest = json.loads(raw)
-        auth_hash = sha256(authorization_path.read_bytes()).hexdigest()
+        auth_hash = (
+            authorization_source.sha256
+            if isinstance(authorization_source, VerifiedPhase7Authorization)
+            else sha256(authorization_source.read_bytes()).hexdigest()
+        )
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise Generation4Phase7CollectorError(
             PHASE7_UNKNOWN_ABSTAIN, "manifest_or_authorization_bytes"
@@ -323,7 +334,10 @@ def verify_snapshot(
 
 def _verified_snapshots(
     authorization: Generation4Phase7EvaluationAuthorization,
+    authorization_source: Path | VerifiedPhase7Authorization | None = None,
 ) -> list[dict[str, Any]]:
+    if authorization_source is None:
+        authorization_source = _AUTHORIZATION_PATH
     root = _OUTPUT_DIR / "snapshots"
     _require(not root.is_symlink(), "snapshots_directory_symlink")
     if not root.exists():
@@ -331,7 +345,7 @@ def _verified_snapshots(
     _require(root.is_dir() and not root.is_symlink(), "snapshots_directory")
     manifests: list[dict[str, Any]] = []
     for snapshot_dir in sorted(root.iterdir()):
-        manifests.append(verify_snapshot(snapshot_dir, authorization, _AUTHORIZATION_PATH))
+        manifests.append(verify_snapshot(snapshot_dir, authorization, authorization_source))
     ends = [manifest["requested_end"] for manifest in manifests]
     _require(len(ends) == len(set(ends)), "duplicate_acquired_session")
     return sorted(manifests, key=lambda item: item["requested_end"])
@@ -357,9 +371,10 @@ def _status_from_verified(
 
 def prospective_status() -> dict[str, Any]:
     """Report structural progress from verified local snapshots only."""
-    authorization = _authorization()
+    verified = _verified_authorization()
+    authorization = verified.authorization
     completed = latest_completed_session()
-    snapshots = _verified_snapshots(authorization)
+    snapshots = _verified_snapshots(authorization, verified)
     return _status_from_verified(completed, snapshots)
 
 
@@ -397,9 +412,10 @@ def _collection_target_end(
 
 def collect_prospective_data() -> dict[str, Any]:
     """Collect only new completed sessions through the frozen acquisition path."""
-    authorization = _authorization()
+    verified_authorization = _verified_authorization()
+    authorization = verified_authorization.authorization
     completed = latest_completed_session()
-    snapshots = _verified_snapshots(authorization)
+    snapshots = _verified_snapshots(authorization, verified_authorization)
     status = _status_from_verified(completed, snapshots)
     acquired = status["latest_acquired_session"]
     target_end = _collection_target_end(completed, snapshots, authorization)
@@ -436,7 +452,7 @@ def collect_prospective_data() -> dict[str, Any]:
             staging = Path(staging_name)
             try:
                 produced = acquire_prospective_phase7_data(
-                    evaluation_authorization=_AUTHORIZATION_PATH,
+                    evaluation_authorization=verified_authorization,
                     request=request,
                     output_dir=staging,
                     retrieved_at_utc=retrieved_at_utc,
@@ -453,7 +469,7 @@ def collect_prospective_data() -> dict[str, Any]:
             )
             staged_snapshot = staging / "snapshots" / produced["snapshot_id"]
             verified = verify_snapshot(
-                staged_snapshot, authorization, _AUTHORIZATION_PATH
+                staged_snapshot, authorization, verified_authorization
             )
             _require(produced == verified, "acquisition_readback")
             destination_root = _OUTPUT_DIR / "snapshots"

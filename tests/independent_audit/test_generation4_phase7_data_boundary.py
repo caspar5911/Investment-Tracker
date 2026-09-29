@@ -38,6 +38,9 @@ from investment_tracker.independent_audit.post_generation3.phase7_data import (
     GEN4_PHASE7_DATA_WARMUP_INVALID,
     Generation4Phase7DataError,
     Phase7QuoteClient,
+    Generation4Phase7DataRequest,
+    Generation4Phase7EvaluationAuthorization,
+    _snapshot_id,
     acquire_prospective_phase7_data,
 )
 
@@ -122,7 +125,7 @@ def _spy_client_factory(frames):
 
 
 def _authorization(**overrides):
-    return _BOUND_EVIDENCE.auth(**overrides)
+    return _BOUND_EVIDENCE.auth_path(**overrides)
 
 
 def _request(**overrides):
@@ -238,6 +241,36 @@ def test_exact_research_universe_is_accepted(tmp_path, capsys):
     assert created["clients"][0].fetched == list(RESEARCH_UNIVERSE)
     assert created["clients"][0].unadjusted_fetched == list(RESEARCH_UNIVERSE)
     assert created["clients"][0].closed is True
+
+
+def test_manifest_uses_first_validated_authorization_bytes_after_later_read_changes(
+    bound_evidence, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    auth_path = bound_evidence.auth_path()
+    first_bytes = auth_path.read_bytes()
+    forged = json.dumps({**json.loads(first_bytes), "approved_at_utc": "2026-10-01T00:00:00Z"}).encode()
+    actual_read = Path.read_bytes
+    reads = 0
+
+    def changed_later(path: Path) -> bytes:
+        nonlocal reads
+        if path == auth_path:
+            reads += 1
+            if reads > 1:
+                return forged
+        return actual_read(path)
+
+    monkeypatch.setattr(Path, "read_bytes", changed_later)
+    manifest, created = _run(tmp_path, auth=auth_path)
+    expected_id = _snapshot_id(
+        Generation4Phase7EvaluationAuthorization.model_validate(json.loads(first_bytes)),
+        Generation4Phase7DataRequest.model_validate(_request()),
+        "2026-10-01T00:00:00Z",
+    )
+    assert created["count"] == 1
+    assert reads == 1
+    assert manifest["evaluation_authorization_sha256"] == sha256(first_bytes).hexdigest()
+    assert manifest["snapshot_id"] == expected_id
 
 
 def test_universe_order_mismatch_rejected_before_provider(tmp_path):
