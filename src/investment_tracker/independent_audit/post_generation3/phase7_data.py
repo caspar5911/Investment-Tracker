@@ -222,6 +222,9 @@ def _read_bound_json(path: Path, detail: str) -> dict[str, Any]:
 
 def _verify_evidence_bindings(
     authorization: Generation4Phase7EvaluationAuthorization,
+    *,
+    authorization_path: Path | None,
+    authorization_bytes: bytes | None,
 ) -> None:
     from .phase7_evaluation import (
         Generation4Phase7EvaluationError,
@@ -344,7 +347,11 @@ def _verify_evidence_bindings(
         from .phase7_source_amendment import SourceAmendmentError, verify_source_amendment
 
         try:
-            verify_source_amendment(authorization)
+            verify_source_amendment(
+                authorization,
+                supplied_authorization_path=authorization_path,
+                supplied_authorization_bytes=authorization_bytes,
+            )
         except SourceAmendmentError:
             raise _invalid("source_amendment") from None
     if contract.get("phase7_evaluation_source_sha256") != authorization.evaluation_module_sha256:
@@ -360,7 +367,11 @@ def _verify_evidence_bindings(
 def verify_generation4_phase7_evaluation_authorization(
     raw: Mapping[str, Any] | Path | None,
 ) -> Generation4Phase7EvaluationAuthorization:
-    """Validate an Independent-Audit evaluation authorization (fail closed)."""
+    """Validate the authorization; source amendments require its canonical file bytes.
+
+    Mapping inputs remain available to synthetic frozen-source tests, but cannot
+    establish file identity when a source amendment is required.
+    """
     _verify_frozen_identities()
     if raw is None:
         raise Generation4Phase7DataError(GEN4_PHASE7_DATA_AUTHORIZATION_MISSING)
@@ -369,14 +380,20 @@ def verify_generation4_phase7_evaluation_authorization(
             raise Generation4Phase7DataError(
                 GEN4_PHASE7_DATA_AUTHORIZATION_MISSING, str(raw)
             )
+        if raw.is_symlink():
+            raise _invalid("authorization_symlink")
         try:
-            payload = json.loads(raw.read_text(encoding="utf-8"))
+            authorization_bytes = raw.read_bytes()
+            payload = json.loads(authorization_bytes)
         except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             raise Generation4Phase7DataError(
                 GEN4_PHASE7_DATA_AUTHORIZATION_INVALID, "unreadable"
             )
+        authorization_path = raw
     elif isinstance(raw, Mapping):
         payload = dict(raw)
+        authorization_path = None
+        authorization_bytes = None
     else:
         raise Generation4Phase7DataError(
             GEN4_PHASE7_DATA_AUTHORIZATION_INVALID, "not_mapping_or_path"
@@ -443,7 +460,11 @@ def verify_generation4_phase7_evaluation_authorization(
         raise _invalid("initial_cash")
     if authorization.prospective_first_scored_session != _FIRST_SCORED_SESSION:
         raise _invalid("prospective_first_scored_session")
-    _verify_evidence_bindings(authorization)
+    _verify_evidence_bindings(
+        authorization,
+        authorization_path=authorization_path,
+        authorization_bytes=authorization_bytes,
+    )
     return authorization
 
 

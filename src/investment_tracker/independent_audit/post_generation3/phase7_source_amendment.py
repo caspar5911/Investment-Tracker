@@ -23,6 +23,7 @@ _ORIGINAL_AUTH_PATH = (
     _ROOT / "data/governance/successor/generation4-phase7-evaluation-authorization.json"
 )
 _FIRST_CONTRACT_SHA256 = "464b53fea8b08b33b3db851d27b3f4c1228ecf9bcb8a88966faa8c2a50d413bf"
+_CANONICAL_INPUT = object()
 _SOURCE_FILES = (
     "src/investment_tracker/independent_audit/post_generation3/phase7_evaluation.py",
     "src/investment_tracker/independent_audit/post_generation3/phase7_evaluation_cli.py",
@@ -82,15 +83,49 @@ def _verify_sources(commit: str, hashes: dict[str, str]) -> None:
         _require(current == committed and hashes[relative] == sha256(current).hexdigest())
 
 
-def verify_source_amendment(original_authorization: Any) -> None:
-    """Bind every current source byte to an independent amendment decision."""
+def verify_source_amendment(
+    original_authorization: Any,
+    *,
+    supplied_authorization_path: Path | None | object = _CANONICAL_INPUT,
+    supplied_authorization_bytes: bytes | None | object = _CANONICAL_INPUT,
+) -> None:
+    """Bind source bytes and the caller's exact authorization to the audit decision.
+
+    A direct checkpoint-gate call uses the canonical file. The acquisition
+    loader passes its already-read bytes and path; mappings cannot prove that
+    file identity and fail closed when an amendment is needed.
+    """
     try:
+        from .phase7_data import Generation4Phase7EvaluationAuthorization
+
         _require(_AMENDMENT_PATH.is_file() and not _AMENDMENT_PATH.is_symlink())
         _require(sha256(_FIRST_CONTRACT_PATH.read_bytes()).hexdigest() == _FIRST_CONTRACT_SHA256)
         contract = json.loads(_FIRST_CONTRACT_PATH.read_bytes())
+        _require(_ORIGINAL_AUTH_PATH.is_file() and not _ORIGINAL_AUTH_PATH.is_symlink())
+        canonical_bytes = _ORIGINAL_AUTH_PATH.read_bytes()
         _require(
-            sha256(_ORIGINAL_AUTH_PATH.read_bytes()).hexdigest()
+            sha256(canonical_bytes).hexdigest()
             == contract["evaluation_authorization_sha256"]
+        )
+        if (
+            supplied_authorization_path is _CANONICAL_INPUT
+            and supplied_authorization_bytes is _CANONICAL_INPUT
+        ):
+            supplied_authorization_path = _ORIGINAL_AUTH_PATH
+            supplied_authorization_bytes = canonical_bytes
+        _require(
+            isinstance(supplied_authorization_path, Path)
+            and supplied_authorization_path.is_file()
+            and not supplied_authorization_path.is_symlink()
+            and supplied_authorization_path.absolute() == _ORIGINAL_AUTH_PATH.absolute()
+        )
+        _require(
+            type(supplied_authorization_bytes) is bytes
+            and supplied_authorization_bytes == canonical_bytes
+        )
+        _require(type(original_authorization) is Generation4Phase7EvaluationAuthorization)
+        _require(
+            original_authorization.model_dump(mode="json") == json.loads(canonical_bytes)
         )
         raw = _AMENDMENT_PATH.read_bytes()
         amendment = json.loads(raw)

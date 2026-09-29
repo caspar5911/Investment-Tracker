@@ -111,12 +111,16 @@ def test_general_authorization_loader_reaches_amendment_gate_for_source_drift(
 ) -> None:
     called = []
     monkeypatch.setattr(
-        amendment, "verify_source_amendment", lambda authorization: called.append(authorization.authorization_id)
+        amendment, "verify_source_amendment",
+        lambda authorization, **identity: called.append((authorization.authorization_id, identity)),
     )
     authorization = verify_generation4_phase7_evaluation_authorization(
         amendment._ORIGINAL_AUTH_PATH
     )
-    assert called == [authorization.authorization_id]
+    assert called == [(authorization.authorization_id, {
+        "supplied_authorization_path": amendment._ORIGINAL_AUTH_PATH,
+        "supplied_authorization_bytes": amendment._ORIGINAL_AUTH_PATH.read_bytes(),
+    })]
 
 
 def test_cli_denies_without_checkpoint_authorization_before_loading_bars(
