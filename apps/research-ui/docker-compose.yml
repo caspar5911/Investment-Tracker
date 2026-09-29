@@ -1,0 +1,15 @@
+services:
+  api:
+    build:
+      context: ../..
+      dockerfile: apps/research-ui/backend/Dockerfile
+    volumes:
+      - ../../data:/repo/data:ro
+    restart: unless-stopped
+  web:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+    restart: unless-stopped
