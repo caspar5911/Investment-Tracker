@@ -132,6 +132,22 @@ def test_progress_reports_frozen_checkpoints_without_evaluation(
     }
 
 
+def test_collection_preserves_first_exact_checkpoint_before_later_session(environment) -> None:
+    authorization = environment["authorization"]
+    prior = [{"requested_end": "2026-12-23", "scored_session_count": 62}]
+    assert collector._collection_target_end("2026-12-28", prior, authorization) == "2026-12-24"
+    exact = {"requested_end": "2026-12-24", "scored_session_count": 63}
+    assert collector._collection_target_end("2026-12-28", prior + [exact], authorization) == "2026-12-28"
+
+
+def test_collection_abstains_if_later_snapshot_skipped_exact_63(environment) -> None:
+    authorization = environment["authorization"]
+    later = [{"requested_end": "2026-12-28", "scored_session_count": 64}]
+    with pytest.raises(collector.Generation4Phase7CollectorError) as exc:
+        collector._collection_target_end("2026-12-29", later, authorization)
+    assert exc.value.code == collector.PHASE7_UNKNOWN_ABSTAIN
+
+
 def test_valid_content_bound_snapshot_is_accepted_read_only(environment) -> None:
     snapshot_dir, expected = _write_synthetic_snapshot(environment)
 

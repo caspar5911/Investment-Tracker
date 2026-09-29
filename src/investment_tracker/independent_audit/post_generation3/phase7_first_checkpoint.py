@@ -7,6 +7,7 @@ status says only that an exact-63 snapshot is structurally available.
 from __future__ import annotations
 
 import json
+import subprocess
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,7 @@ from typing import Any
 import exchange_calendars as xcals
 
 from . import phase7_collector as collector
+from .phase7_data import Generation4Phase7EvaluationAuthorization
 
 _ROOT = Path(__file__).resolve().parents[4]
 _CONTRACT_PATH = (
@@ -33,6 +35,12 @@ _BOUND_FILES = {
     "data_boundary_source_sha256": "src/investment_tracker/independent_audit/post_generation3/phase7_data.py",
     "collector_source_sha256": "src/investment_tracker/independent_audit/post_generation3/phase7_collector.py",
 }
+_FROZEN_SOURCE_COMMITS = {
+    "evaluation_cli_source_sha256": "5149ac70d2561abff4b2cc6d2b8c75dbedfa3bd2",
+    "durability_source_sha256": "5149ac70d2561abff4b2cc6d2b8c75dbedfa3bd2",
+    "data_boundary_source_sha256": "5149ac70d2561abff4b2cc6d2b8c75dbedfa3bd2",
+    "collector_source_sha256": "9eb2ea9d0277998d14445429bbd25d3fbb6b2f4b",
+}
 
 
 def _require(condition: bool) -> None:
@@ -49,7 +57,14 @@ def _contract() -> dict[str, Any]:
     for field, relative in _BOUND_FILES.items():
         path = _ROOT / relative
         _require(path.is_file() and not path.is_symlink())
-        _require(contract[field] == sha256(path.read_bytes()).hexdigest())
+        if field in _FROZEN_SOURCE_COMMITS:
+            frozen = subprocess.run(
+                ["git", "-C", str(_ROOT), "show", f"{_FROZEN_SOURCE_COMMITS[field]}:{relative}"],
+                capture_output=True, check=True,
+            ).stdout
+            _require(contract[field] == sha256(frozen).hexdigest())
+        else:
+            _require(contract[field] == sha256(path.read_bytes()).hexdigest())
     expected = {
         "schema_version": "GENERATION4-PHASE7-FIRST-CHECKPOINT-CONTRACT-v1",
         "status": "PREREGISTERED_EXECUTION_BLOCKED",
@@ -120,6 +135,19 @@ def _validate_history(snapshots: list[dict[str, Any]], contract: dict[str, Any])
         previous_count, previous_end = count, end
 
 
+def _historical_snapshot_authorization() -> Generation4Phase7EvaluationAuthorization:
+    """Parse the hash-pinned original authority for read-only snapshot checks.
+
+    This is not an acquisition or evaluation authorization for amended code.
+    The original file hash and frozen source identities are checked by _contract.
+    """
+    path = collector._AUTHORIZATION_PATH
+    _require(path.is_file() and not path.is_symlink())
+    return Generation4Phase7EvaluationAuthorization.model_validate(
+        json.loads(path.read_bytes())
+    )
+
+
 def first_checkpoint_readiness() -> dict[str, Any]:
     """Inspect governance and verified snapshot structure; disclose no performance."""
     result: dict[str, Any] = {
@@ -132,7 +160,7 @@ def first_checkpoint_readiness() -> dict[str, Any]:
     try:
         contract = _contract()
         stage = "authorization"
-        authorization = collector._authorization()
+        authorization = _historical_snapshot_authorization()
         _require(authorization.authorization_id == contract["evaluation_authorization_id"])
         _require(authorization.candidate_id == contract["candidate_id"])
         _require(list(authorization.research_universe) == contract["research_universe"])
@@ -155,11 +183,22 @@ def first_checkpoint_readiness() -> dict[str, Any]:
             _require(len(exact) == 1)
             selected = exact[0]
             _require(selected["requested_end"] == contract["last_scored_session"])
+            history = [
+                {"snapshot_id": item["snapshot_id"],
+                 "manifest_sha256": item["manifest_sha256"],
+                 "requested_end": item["requested_end"]}
+                for item in snapshots if item["requested_end"] <= contract["last_scored_session"]
+            ]
+            chain_digest = sha256(json.dumps(
+                history, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+                allow_nan=False,
+            ).encode("utf-8")).hexdigest()
             result.update({
                 "status": collector.PHASE7_CHECKPOINT_READY,
                 "selected_snapshot_id": selected["snapshot_id"],
                 "selected_manifest_sha256": selected["manifest_sha256"],
                 "selected_snapshot_scored_sessions": 63,
+                "selected_snapshot_chain_sha256": chain_digest,
             })
         elif not snapshots or snapshots[-1]["scored_session_count"] < 63:
             result["status"] = "PHASE7_CHECKPOINT_PENDING"

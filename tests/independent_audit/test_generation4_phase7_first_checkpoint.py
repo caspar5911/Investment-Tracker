@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from hashlib import sha256
 from pathlib import Path
 
@@ -65,7 +66,15 @@ def test_contract_binds_current_frozen_sources_and_governance() -> None:
     assert contract["status"] == "PREREGISTERED_EXECUTION_BLOCKED"
     assert contract["authority"] == "NONE"
     for field, path in bound.items():
-        assert contract[field] == sha256(path.read_bytes()).hexdigest()
+        if field in first._FROZEN_SOURCE_COMMITS:
+            relative = path.relative_to(ROOT).as_posix()
+            frozen = subprocess.run(
+                ["git", "-C", str(ROOT), "show", f"{first._FROZEN_SOURCE_COMMITS[field]}:{relative}"],
+                capture_output=True, check=True,
+            ).stdout
+            assert contract[field] == sha256(frozen).hexdigest()
+        else:
+            assert contract[field] == sha256(path.read_bytes()).hexdigest()
     assert contract["candidate_id"] == "G2-A|lookback=189|skip=21|top_k=1|rebalance=21"
     assert contract["research_universe"] == ["GLD", "IEF", "IWM", "QQQ", "SPY", "TLT", "VNQ", "XLP"]
     assert contract["forbidden_holdout_symbols"] == ["QQQM", "FALN", "IIPR", "PSTL", "EFAS"]
@@ -106,6 +115,7 @@ def test_exact_62_63_64_xnys_boundary_and_210_warmup() -> None:
 @pytest.mark.parametrize(
     ("records", "expected_status", "selected_count"),
     [
+        ([], "PHASE7_CHECKPOINT_PENDING", None),
         ([(1, "2026-09-28", True), (62, "2026-12-23", False)], "PHASE7_CHECKPOINT_PENDING", None),
         ([(1, "2026-09-28", True), (63, "2026-12-24", False)], "PHASE7_CHECKPOINT_READY", 63),
         ([(1, "2026-09-28", True), (64, "2026-12-28", False)], "PHASE7_UNKNOWN_ABSTAIN", None),
@@ -166,7 +176,7 @@ def test_missing_authorization_abstains_before_snapshot_read(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        first.collector, "_authorization",
+        first, "_historical_snapshot_authorization",
         lambda: (_ for _ in ()).throw(
             phase7_collector.Generation4Phase7CollectorError(
                 phase7_collector.PHASE7_UNKNOWN_ABSTAIN, "synthetic_missing_authorization"
@@ -194,3 +204,17 @@ def test_first_snapshot_identity_mismatch_abstains(
     report = first.first_checkpoint_readiness()
     assert report["status"] == "PHASE7_UNKNOWN_ABSTAIN"
     assert "selected_snapshot_id" not in report
+
+
+def test_later_snapshot_does_not_change_first_checkpoint_chain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_record = _record(1, "2026-09-28", first_snapshot=True)
+    exact = _record(63, "2026-12-24")
+    later = _record(64, "2026-12-28")
+    records = [first_record, exact]
+    monkeypatch.setattr(first.collector, "_verified_snapshots", lambda _: records)
+    before = first.first_checkpoint_readiness()
+    records.append(later)
+    after = first.first_checkpoint_readiness()
+    assert before["selected_snapshot_chain_sha256"] == after["selected_snapshot_chain_sha256"]

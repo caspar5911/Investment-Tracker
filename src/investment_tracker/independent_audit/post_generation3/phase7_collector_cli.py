@@ -16,6 +16,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("prospective-status")
+    commands.add_parser("first-checkpoint-readiness")
     commands.add_parser("collect-prospective-data")
     return parser
 
@@ -27,7 +28,11 @@ def _print_json(value: dict[str, Any]) -> None:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        if args.command == "prospective-status":
+        if args.command == "first-checkpoint-readiness":
+            from .phase7_first_checkpoint import first_checkpoint_readiness
+
+            report = first_checkpoint_readiness()
+        elif args.command == "prospective-status":
             report = phase7_collector.prospective_status()
         else:
             report = phase7_collector.collect_prospective_data()

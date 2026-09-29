@@ -1,16 +1,14 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from datetime import date, timedelta
 from hashlib import sha256
 from pathlib import Path
 
 from investment_tracker.independent_audit.post_generation3 import (
-    phase7_data as phase7_data_module,
     phase7_evaluation as phase7_evaluation_module,
-    phase7_evaluation_cli as phase7_evaluation_cli_module,
 )
-from investment_tracker.quant.phase7 import generation4_durability as durability_module
 from investment_tracker.independent_audit.post_generation3.phase7_evaluation import (
     resolve_generation4_phase7_prospective_boundary,
     verify_generation4_phase7_evaluation_preflight,
@@ -30,6 +28,14 @@ COMMITTED_EVALUATION_CONTRACT = (
 
 def _file_sha(path: Path) -> str:
     return sha256(path.read_bytes()).hexdigest()
+
+
+def _frozen_sha(commit: str, relative: str) -> str:
+    payload = subprocess.run(
+        ["git", "-C", str(ROOT), "show", f"{commit}:{relative}"],
+        check=True, capture_output=True,
+    ).stdout
+    return sha256(payload).hexdigest()
 
 
 def _committed_paths_exist() -> bool:
@@ -133,15 +139,13 @@ def test_committed_evaluation_contract_binds_frozen_source_hashes() -> None:
     assert contract["phase7_evaluation_source_sha256"] == _file_sha(
         Path(phase7_evaluation_module.__file__)
     )
-    assert contract["phase7_evaluation_cli_source_sha256"] == _file_sha(
-        Path(phase7_evaluation_cli_module.__file__)
-    )
-    assert contract["phase7_durability_source_sha256"] == _file_sha(
-        Path(durability_module.__file__)
-    )
-    assert contract["phase7_data_boundary_source_sha256"] == _file_sha(
-        Path(phase7_data_module.__file__)
-    )
+    commit = contract["phase7_evaluation_implementation_commit"]
+    for field, relative in (
+        ("phase7_evaluation_cli_source_sha256", "src/investment_tracker/independent_audit/post_generation3/phase7_evaluation_cli.py"),
+        ("phase7_durability_source_sha256", "src/investment_tracker/quant/phase7/generation4_durability.py"),
+        ("phase7_data_boundary_source_sha256", "src/investment_tracker/independent_audit/post_generation3/phase7_data.py"),
+    ):
+        assert contract[field] == _frozen_sha(commit, relative)
 
 
 def test_committed_evaluation_contract_holdout_matches_start_artifact() -> None:

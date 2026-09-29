@@ -238,7 +238,7 @@ def test_prospective_checkpoint_replays_unadjusted_bars_with_actions(monkeypatch
         scored_start=pd.Timestamp("2026-09-28", tz="UTC"),
         checkpoint_cutoff=3,
     )
-    report = dur.prospective_checkpoint_report(snapshot)
+    report = dur._prospective_checkpoint_report_unchecked(snapshot)
     assert report["status"] == dur.PHASE7_PROSPECTIVE_EVIDENCE_PENDING
     assert seen["target_bars"] is signal_bars
     assert seen["target_kwargs"]["due_from"] == pd.Timestamp("2026-09-28", tz="UTC")

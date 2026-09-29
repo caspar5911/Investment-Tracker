@@ -9,6 +9,7 @@ import pytest
 
 from investment_tracker.independent_audit.post_generation3 import phase7_collector
 from investment_tracker.independent_audit.post_generation3 import phase7_collector_cli
+from investment_tracker.independent_audit.post_generation3 import phase7_first_checkpoint
 
 
 def test_status_cli_is_provider_free_and_has_no_performance_fields(
@@ -96,3 +97,18 @@ def test_collect_cli_returns_only_structural_status(
 
     assert phase7_collector_cli.main(["collect-prospective-data"]) == 0
     assert json.loads(capsys.readouterr().out)["status"] == "NO_NEW_COMPLETED_SESSION"
+
+
+def test_first_checkpoint_readiness_cli_is_structural_only(
+    monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    monkeypatch.setattr(
+        phase7_first_checkpoint, "first_checkpoint_readiness",
+        lambda: {"status": "PHASE7_CHECKPOINT_PENDING", "checkpoint_scored_sessions": 63,
+                 "evaluation_authorized": False, "performance_computed": False},
+    )
+    assert phase7_collector_cli.main(["first-checkpoint-readiness"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "PHASE7_CHECKPOINT_PENDING"
+    assert payload["evaluation_authorized"] is False
+    assert "friction_cases" not in payload

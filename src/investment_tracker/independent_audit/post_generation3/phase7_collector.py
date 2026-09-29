@@ -373,6 +373,28 @@ def _warmup_start(authorization: Generation4Phase7EvaluationAuthorization) -> st
     return str(prior[-authorization.warmup_session_limit].date())
 
 
+def _collection_target_end(
+    completed: str,
+    snapshots: list[dict[str, Any]],
+    authorization: Generation4Phase7EvaluationAuthorization,
+) -> str:
+    """Preserve an exact first-checkpoint snapshot before collecting later data."""
+    first = pd.Timestamp(authorization.prospective_first_scored_session)
+    calendar = xcals.get_calendar("XNYS")
+    sessions = calendar.sessions_in_range(first, first + pd.Timedelta(days=120))
+    _require(len(sessions) >= _CHECKPOINT_SESSIONS[0], "first_checkpoint_calendar")
+    boundary = str(sessions[_CHECKPOINT_SESSIONS[0] - 1].date())
+    exact = any(item["requested_end"] == boundary for item in snapshots)
+    if not exact:
+        _require(
+            not any(item["requested_end"] > boundary for item in snapshots),
+            "missing_exact_first_checkpoint_snapshot",
+        )
+        if completed >= boundary:
+            return boundary
+    return completed
+
+
 def collect_prospective_data() -> dict[str, Any]:
     """Collect only new completed sessions through the frozen acquisition path."""
     authorization = _authorization()
@@ -380,6 +402,7 @@ def collect_prospective_data() -> dict[str, Any]:
     snapshots = _verified_snapshots(authorization)
     status = _status_from_verified(completed, snapshots)
     acquired = status["latest_acquired_session"]
+    target_end = _collection_target_end(completed, snapshots, authorization)
     if acquired == completed or completed < authorization.prospective_first_scored_session:
         return {**status, "status": NO_NEW_COMPLETED_SESSION}
 
@@ -393,7 +416,7 @@ def collect_prospective_data() -> dict[str, Any]:
         request = build_generation4_phase7_data_request(
             authorization=authorization,
             requested_start=_warmup_start(authorization),
-            requested_end=completed,
+            requested_end=target_end,
             retrieved_at_utc=retrieved_at_utc,
         )
     except Generation4Phase7DataError as exc:

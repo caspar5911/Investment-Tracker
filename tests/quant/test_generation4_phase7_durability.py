@@ -510,7 +510,7 @@ def _prospective_bars(total: int) -> tuple[dict[str, pd.DataFrame], pd.Timestamp
 def _prospective_report(total: int, checkpoint_cutoff: int = 252) -> dict:
     bars, start = _prospective_bars(total)
     snapshot = dur.ProspectiveCheckpoint(bars, start, checkpoint_cutoff)
-    return dur.prospective_checkpoint_report(snapshot)
+    return dur._prospective_checkpoint_report_unchecked(snapshot)
 
 
 def test_prospective_report_schema() -> None:
@@ -571,7 +571,7 @@ def test_prospective_spy_benchmark_alignment_is_exact() -> None:
     scored = [s for s in spy_close.index if s >= start][:252]
     expected = float(spy_close.loc[scored[-1]]) / float(spy_close.loc[scored[0]]) - 1.0
     snapshot = dur.ProspectiveCheckpoint(bars, start, 252)
-    report = dur.prospective_checkpoint_report(snapshot)
+    report = dur._prospective_checkpoint_report_unchecked(snapshot)
     assert report["benchmark_total_return"]["status"] == "AVAILABLE"
     assert report["benchmark_total_return"]["value"] == pytest.approx(expected, rel=1e-12)
 
@@ -591,7 +591,7 @@ def test_prospective_missing_required_evidence_abstains() -> None:
     gap = bars["GLD"].index[PROSPECTIVE_WARMUP + 100]
     bars["GLD"] = bars["GLD"].drop(index=gap)
     snapshot = dur.ProspectiveCheckpoint(bars, start, 252)
-    report = dur.prospective_checkpoint_report(snapshot)
+    report = dur._prospective_checkpoint_report_unchecked(snapshot)
     assert report["status"] == dur.PHASE7_UNKNOWN_ABSTAIN
 
 

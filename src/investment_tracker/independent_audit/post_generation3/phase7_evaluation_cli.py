@@ -34,11 +34,14 @@ from investment_tracker.independent_audit.successor.evaluate_dividend_v3 import 
 
 from ...quant.phase7.generation4_durability import (
     BENCHMARK_SYMBOL,
-    CHECKPOINT_SESSIONS_PRIMARY,
+    CHECKPOINT_SESSIONS_EARLY,
     Generation4DurabilityError,
     ProspectiveCheckpoint,
     prospective_checkpoint_report,
 )
+from . import phase7_checkpoint_gate as checkpoint_gate
+from . import phase7_first_checkpoint as first_checkpoint
+from . import phase7_collector as collector
 from .phase7_data import (
     DATA_REQUEST_SCHEMA,
     SNAPSHOT_SCHEMA,
@@ -60,6 +63,7 @@ _ERROR_TYPES = (
     Generation4Phase7EvaluationError,
     Generation4Phase7DataError,
     Generation4DurabilityError,
+    checkpoint_gate.CheckpointGateError,
 )
 
 
@@ -252,18 +256,20 @@ def _load_corporate_actions(
 
 
 def _evaluate_checkpoint_command(args: argparse.Namespace) -> dict[str, Any]:
-    # Fail closed on the authorization BEFORE any snapshot data is read.
+    # The separate first-checkpoint gate verifies all structural evidence and
+    # Independent-Audit authority before bars, actions, or replay are loaded.
+    snapshot_dir = Path(args.snapshot)
+    permit = checkpoint_gate.checkpoint_execution_permit(snapshot_dir)
     authorization_path = Path(args.evaluation_authorization)
-    authorization = verify_generation4_phase7_evaluation_authorization(
-        authorization_path
-    )
+    if authorization_path.resolve() != collector._AUTHORIZATION_PATH.resolve():
+        raise checkpoint_gate.CheckpointGateError(checkpoint_gate.PHASE7_UNKNOWN_ABSTAIN)
+    authorization = first_checkpoint._historical_snapshot_authorization()
     try:
         authorization_sha256 = sha256(authorization_path.read_bytes()).hexdigest()
     except OSError:
         raise Generation4Phase7EvaluationError(
             GEN4_PHASE7_EVAL_EVIDENCE_INVALID, "evaluation_authorization"
         ) from None
-    snapshot_dir = Path(args.snapshot)
     manifest = _load_json(
         snapshot_dir / "manifest.json",
         expect=dict,
@@ -346,9 +352,10 @@ def _evaluate_checkpoint_command(args: argparse.Namespace) -> dict[str, Any]:
             "snapshot_manifest_sha256": manifest["manifest_sha256"],
         },
         scored_start=scored_start,
-        checkpoint_cutoff=CHECKPOINT_SESSIONS_PRIMARY,
+        checkpoint_cutoff=CHECKPOINT_SESSIONS_EARLY,
     )
-    return prospective_checkpoint_report(snapshot)
+    report = prospective_checkpoint_report(snapshot, permit=permit)
+    return checkpoint_gate.write_checkpoint_result(permit, report)
 
 
 def build_parser() -> argparse.ArgumentParser:

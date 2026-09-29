@@ -522,7 +522,7 @@ def test_evaluate_phase7_checkpoint_missing_auth_fails_before_data(
     assert out["status"] == "FORBIDDEN"
 
 
-def test_evaluate_phase7_checkpoint_valid_auth_renders_pending_report(
+def test_evaluate_phase7_checkpoint_three_sessions_denied_without_performance(
     tmp_path, capsys, monkeypatch
 ):
     frames = _frames()
@@ -546,17 +546,11 @@ def test_evaluate_phase7_checkpoint_valid_auth_renders_pending_report(
             str(snapshot_dir),
         ]
     )
-    assert rc == 0
+    assert rc == 1
     report = _stdout_json(capsys)
-    assert report["schema"] == "GENERATION4-PHASE7-PROSPECTIVE-CHECKPOINT-v1"
-    # The fixture contains three completed post-start sessions, well below
-    # the 63/126/252 checkpoints, so the result remains prospective pending.
-    assert report["scored_session_count"] == 3
-    assert report["status"] == "PHASE7_PROSPECTIVE_EVIDENCE_PENDING"
-    # A pending/complete result never grants production or live authority.
-    assert report["production_authority"] is False
-    assert report["live_trading_authority"] is False
-    assert report["paper_only"] is True
+    assert report["status"] == "FORBIDDEN"
+    assert report["code"] == "PHASE7_CHECKPOINT_PENDING"
+    assert not any(key in report for key in ("friction_cases", "benchmark_total_return", "positions", "signals"))
 
 
 # ---------------------------------------------------------------------------

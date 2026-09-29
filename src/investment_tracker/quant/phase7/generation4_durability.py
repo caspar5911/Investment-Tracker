@@ -777,8 +777,8 @@ def _prospective_benchmark_total_return(
     return scored_total_return(sessions, equity)
 
 
-def prospective_checkpoint_report(snapshot: ProspectiveCheckpoint) -> dict[str, Any]:
-    """Build the fixed, corporate-action-aware prospective checkpoint report."""
+def _prospective_checkpoint_report_unchecked(snapshot: ProspectiveCheckpoint) -> dict[str, Any]:
+    """Pure frozen replay, called only after the public checkpoint gate."""
     signal_bars = snapshot.bars
     execution_bars = (
         snapshot.execution_bars if snapshot.execution_bars is not None else signal_bars
@@ -952,3 +952,15 @@ def prospective_checkpoint_report(snapshot: ProspectiveCheckpoint) -> dict[str, 
         recovery=dq["recovery"],
     )
     return report
+
+
+def prospective_checkpoint_report(
+    snapshot: ProspectiveCheckpoint, *, permit: object | None = None
+) -> dict[str, Any]:
+    """Build a prospective report only under an issued checkpoint permit."""
+    from investment_tracker.independent_audit.post_generation3.phase7_checkpoint_gate import (
+        require_checkpoint_permit,
+    )
+
+    require_checkpoint_permit(permit, snapshot)
+    return _prospective_checkpoint_report_unchecked(snapshot)

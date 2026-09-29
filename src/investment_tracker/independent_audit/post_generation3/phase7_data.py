@@ -325,6 +325,7 @@ def _verify_evidence_bindings(
         raise _invalid("frozen_evaluation_implementation_commit") from None
     if object_type != "commit":
         raise _invalid("frozen_evaluation_implementation_commit")
+    source_drift = False
     for field, relative in _SOURCE_FILES.items():
         path = _REPO_ROOT / relative
         try:
@@ -336,7 +337,16 @@ def _verify_evidence_bindings(
         except (OSError, subprocess.CalledProcessError):
             raise _invalid(f"frozen_implementation:{field}") from None
         if current_bytes != frozen_bytes or sha256(current_bytes).hexdigest() != getattr(authorization, field):
-            raise _invalid(field)
+            source_drift = True
+    if source_drift:
+        # Protective source changes never inherit the original authorization.
+        # Collection resumes only under a separate auditor-owned amendment.
+        from .phase7_source_amendment import SourceAmendmentError, verify_source_amendment
+
+        try:
+            verify_source_amendment(authorization)
+        except SourceAmendmentError:
+            raise _invalid("source_amendment") from None
     if contract.get("phase7_evaluation_source_sha256") != authorization.evaluation_module_sha256:
         raise _invalid("evaluation_contract.phase7_evaluation_source_sha256")
     if contract.get("phase7_evaluation_cli_source_sha256") != authorization.evaluation_cli_sha256:

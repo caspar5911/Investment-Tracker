@@ -50,6 +50,11 @@ on:
       - "tests/independent_audit/test_generation4_phase7_accounting_path.py"
       - "tests/independent_audit/test_generation4_phase7_first_checkpoint.py"
       - "data/governance/successor/generation4-phase7-first-checkpoint-contract.json"
+      - "data/governance/successor/generation4-phase7-source-amendment-independent-audit-request.json"
+      - "data/governance/successor/generation4-phase7-first-checkpoint-independent-audit-request.json"
+      - "tests/independent_audit/test_generation4_phase7_checkpoint_execution.py"
+      - "tests/independent_audit/test_generation4_phase7_collector.py"
+      - "tests/independent_audit/test_generation4_phase7_collector_cli.py"
       - "tests/quant/test_generation4_phase7_durability.py"
       - ".github/workflows/successor-dividend-normalization-v3.yml"
   pull_request:
@@ -96,6 +101,11 @@ on:
       - "tests/independent_audit/test_generation4_phase7_snapshot_integrity.py"
       - "tests/independent_audit/test_generation4_phase7_first_checkpoint.py"
       - "data/governance/successor/generation4-phase7-first-checkpoint-contract.json"
+      - "data/governance/successor/generation4-phase7-source-amendment-independent-audit-request.json"
+      - "data/governance/successor/generation4-phase7-first-checkpoint-independent-audit-request.json"
+      - "tests/independent_audit/test_generation4_phase7_checkpoint_execution.py"
+      - "tests/independent_audit/test_generation4_phase7_collector.py"
+      - "tests/independent_audit/test_generation4_phase7_collector_cli.py"
       - "tests/quant/test_generation4_phase7_durability.py"
       - ".github/workflows/successor-dividend-normalization-v3.yml"
 
@@ -135,6 +145,9 @@ jobs:
             tests/independent_audit/test_generation4_phase7_snapshot_integrity.py \
             tests/independent_audit/test_generation4_phase7_accounting_path.py \
             tests/independent_audit/test_generation4_phase7_first_checkpoint.py \
+            tests/independent_audit/test_generation4_phase7_checkpoint_execution.py \
+            tests/independent_audit/test_generation4_phase7_collector.py \
+            tests/independent_audit/test_generation4_phase7_collector_cli.py \
             tests/quant/test_generation4_phase7_durability.py
 
       - name: Governance boundary
