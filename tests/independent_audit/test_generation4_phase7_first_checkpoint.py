@@ -124,7 +124,7 @@ def test_readiness_uses_only_exact_63_verified_snapshot(
 
     report = first.first_checkpoint_readiness()
 
-    assert report["status"] == expected_status
+    assert report["status"] == expected_status, report
     assert report["checkpoint_scored_sessions"] == 63
     assert report["evaluation_authorized"] is False
     assert report["performance_computed"] is False

@@ -128,8 +128,10 @@ def first_checkpoint_readiness() -> dict[str, Any]:
         "evaluation_authorized": False,
         "performance_computed": False,
     }
+    stage = "contract"
     try:
         contract = _contract()
+        stage = "authorization"
         authorization = collector._authorization()
         _require(authorization.authorization_id == contract["evaluation_authorization_id"])
         _require(authorization.candidate_id == contract["candidate_id"])
@@ -143,8 +145,11 @@ def first_checkpoint_readiness() -> dict[str, Any]:
         _require(authorization.dq030_status == contract["dq030_status"])
         _require(authorization.recon009_status == contract["recon009_status"])
         _require(authorization.paper_only is True)
+        stage = "snapshot_verification"
         snapshots = collector._verified_snapshots(authorization)
+        stage = "history"
         _validate_history(snapshots, contract)
+        stage = "selection"
         exact = [s for s in snapshots if s["scored_session_count"] == 63]
         if exact:
             _require(len(exact) == 1)
@@ -160,5 +165,6 @@ def first_checkpoint_readiness() -> dict[str, Any]:
             result["status"] = "PHASE7_CHECKPOINT_PENDING"
     except Exception:
         # Invalid governance or snapshot evidence cannot grant readiness.
+        result["failure_stage"] = stage
         return result
     return result
