@@ -1,0 +1,63 @@
+name: phase6-independent-audit
+
+on:
+  pull_request:
+  push:
+    branches:
+      - audit/phase6-final-holdout-review
+
+jobs:
+  phase6-independent-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e '.[dev,quant,audit]'
+      - run: python -m compileall -q src/investment_tracker/independent_audit/phase6
+      - name: Independent Audit Phase 6 tests
+        run: >-
+          python -m pytest -q
+          tests/independent_audit/test_phase6_authority.py
+          tests/independent_audit/test_phase6_acquisition_guard.py
+          tests/independent_audit/test_phase6_bundle.py
+          tests/independent_audit/test_phase6_evaluate.py
+          tests/independent_audit/test_phase6_replacement.py
+          tests/independent_audit/test_phase6_virginity.py
+          tests/quant/test_phase6_preseal.py
+          tests/quant/test_phase6_bundle_gate.py
+          tests/quant/test_phase6_cli.py
+          tests/quant/test_phase5_authority.py
+      - name: Verify frozen contract SHA-256
+        run: |
+          python - <<'PY'
+          from hashlib import sha256
+          from pathlib import Path
+          path = Path("data/phase6/phase6-evaluation-contract.json")
+          assert sha256(path.read_bytes()).hexdigest() == "f92339ae5e82b31350569407c682c5e1853e542810a833321061b6f441489893"
+          PY
+      - name: Preserve coordinator pre-unseal isolation
+        run: |
+          ! grep -R -n -E 'OpenQuoteContext|request_history_kline|OpenSecTradeContext|place_order|unlock_trade|modify_order'             src/investment_tracker/quant/phase6
+          ! grep -R -n -E 'HACK|SOXX|NLR|URNM|GEV'             src/investment_tracker/quant/phase6
+      - name: Independent Audit has no trading surface
+        run: |
+          ! grep -R -n -E 'OpenSecTradeContext|place_order|unlock_trade|modify_order'             src/investment_tracker/independent_audit/phase6
+          grep -n 'AuType.QFQ' src/investment_tracker/independent_audit/phase6/opend_qfq.py
+          ! grep -n 'AuType.NONE' src/investment_tracker/independent_audit/phase6/opend_qfq.py
+      - name: Replacement selector contains no market-data call
+        run: |
+          ! grep -n -E '\.request_history_kline\(|\.get_market_snapshot\(|\.get_cur_kline\(|\.get_rt_data\(|\.get_rehab\(' \
+            src/investment_tracker/independent_audit/phase6/replacement.py
+      - name: Composite virginity capture contains no historical-data call
+        run: |
+          grep -n 'get_history_kl_quota' src/investment_tracker/independent_audit/phase6/virginity.py
+          ! grep -n -E '\.request_history_kline\(|\.get_market_snapshot\(|\.get_cur_kline\(|\.get_rehab\(' \
+            src/investment_tracker/independent_audit/phase6/virginity.py
+      - name: Verify sealed Phase 4 remains untouched
+        run: |
+          git diff --exit-code 69bb4347cbe577c4a1277335eef778ddf5b177d0 HEAD --             src/investment_tracker/quant/phase4             results/phase4/finalization

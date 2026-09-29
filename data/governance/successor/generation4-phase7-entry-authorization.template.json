@@ -1,0 +1,7 @@
+{
+  "schema_version": "GENERATION4-PHASE7-ENTRY-AUTHORIZATION-TEMPLATE-v1",
+  "status": "DRAFT_TEMPLATE_NOT_AUTHORIZATION",
+  "authority": "NONE",
+  "note": "Independent Audit must create a separate GENERATION4-PHASE7-ENTRY-AUTHORIZATION-v1 artifact. This template grants no Phase-7, production, live-trading, retry, substitution, search, methodology-change, or parameter-change authority.",
+  "required_schema": "GENERATION4-PHASE7-ENTRY-AUTHORIZATION-v1"
+}

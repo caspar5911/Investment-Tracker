@@ -1,0 +1,41 @@
+name: phase5-static
+
+on:
+  push:
+    branches:
+      - codex/phase5-decision-grade-reconstruction
+  pull_request:
+
+jobs:
+  phase5-static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e '.[dev,quant]'
+      - run: python -m compileall -q src/investment_tracker/quant/phase5
+      - name: Phase 5 focused authority and accounting tests
+        run: >-
+          python -m pytest -q
+          tests/quant/test_phase5_authority.py
+          tests/quant/test_phase5_governance.py
+          tests/quant/test_phase5_signals.py
+          tests/quant/test_phase5_accounting.py
+          tests/quant/test_phase5_conclusion.py
+      - name: Phase 4 regression contracts used by Phase 5
+        run: >-
+          python -m pytest -q
+          tests/quant/test_phase4_gate2_strategies.py
+          tests/quant/test_phase4_gate2_durability.py
+          tests/quant/test_phase4_gate2_robustness.py
+      - name: Verify Phase 4 implementation and final evidence are untouched
+        run: |
+          git diff --exit-code 69bb4347cbe577c4a1277335eef778ddf5b177d0 HEAD --             src/investment_tracker/quant/phase4             results/phase4/finalization
+      - name: Ensure Phase 5 has no order-routing implementation
+        run: |
+          ! grep -R -n -E 'OpenSecTradeContext|place_order|unlock_trade|modify_order'             src/investment_tracker/quant/phase5

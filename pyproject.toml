@@ -19,6 +19,7 @@ quant = [
     "PyYAML>=6,<7",
 ]
 moomoo = ["moomoo-api>=9,<11"]
+audit = ["cryptography>=43,<47"]
 
 [project.scripts]
 investment-tracker = "investment_tracker.cli:main"

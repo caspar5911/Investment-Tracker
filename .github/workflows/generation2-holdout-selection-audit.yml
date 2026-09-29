@@ -1,0 +1,78 @@
+name: generation2-holdout-selection-audit
+
+on:
+  pull_request:
+  push:
+    branches:
+      - audit/generation2-final-holdout-selection
+
+jobs:
+  generation2-holdout-selection-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e '.[dev,quant,audit]'
+      - run: python -m compileall -q src/investment_tracker/independent_audit/generation2
+      - name: Generation 2 blind holdout selector and virginity tests
+        run: >-
+          python -m pytest -q
+          tests/independent_audit/test_generation2_holdout_selection.py
+          tests/independent_audit/test_generation2_virginity.py
+          tests/independent_audit/test_generation2_preaccess.py
+          tests/independent_audit/test_generation2_research_provenance_export.py
+          tests/independent_audit/test_generation2_research_provenance_cache.py
+          tests/independent_audit/test_generation2_phase6_contract.py
+          tests/independent_audit/test_generation2_authorization.py
+          tests/independent_audit/test_generation2_acquisition.py
+          tests/independent_audit/test_generation2_release_evaluate.py
+          tests/independent_audit/test_generation2_cli_phase6.py
+      - name: Verify survivor identity
+        run: >-
+          python -c "from investment_tracker.quant.generation2.survivor_identity import verify_survivor_identity;
+          p=verify_survivor_identity('data/governance/generation2-campaign','.');
+          assert p['implementation_sha256']=='35a3ad8f92598021bbfbd2d5d9337036af525b71f978ab053827c4922da60f1b';
+          assert p['binding_sha256']=='fd482e62e81d6813132f3aef747aecbcb07b5e4960b559dc1253510c95f49c8b'"
+      - name: Selector and virginity remain history-free
+        run: |
+          grep -n 'get_stock_basicinfo' src/investment_tracker/independent_audit/generation2/holdout_selection.py
+          grep -n 'get_history_kl_quota' src/investment_tracker/independent_audit/generation2/holdout_selection.py
+          grep -n 'get_history_kl_quota' src/investment_tracker/independent_audit/generation2/virginity.py || true
+          ! grep -n -E 'request_history_kline|get_market_snapshot|get_cur_kline|get_rt_data|get_order_book|get_ticker|get_rehab|OpenSecTradeContext|place_order|unlock_trade|modify_order'             src/investment_tracker/independent_audit/generation2/holdout_selection.py             src/investment_tracker/independent_audit/generation2/virginity.py
+      - name: Generation 2 acquisition remains quote-only and paper-only
+        run: |
+          ! grep -R -nE 'OpenTradeContext|OpenSecTradeContext|place_order|modify_order|cancel_order|TrdEnv|unlock_trade' src/investment_tracker/independent_audit/generation2
+          grep -n 'OpenQuoteContext' src/investment_tracker/independent_audit/generation2/acquisition.py
+          grep -n 'acquisition-start.json' src/investment_tracker/independent_audit/generation2/acquisition.py
+
+      - name: Cache provenance path is network-free
+        run: |
+          ! grep -n -E 'OpenQuoteContext|request_history_kline|get_market_snapshot|get_cur_kline|get_rt_data|get_rehab|OpenSecTradeContext|place_order|unlock_trade|modify_order'             src/investment_tracker/independent_audit/generation2/research_provenance_cache.py
+      - name: Provenance export is research-only and pre-2023
+        run: |
+          python - <<'PY'
+          from investment_tracker.independent_audit.generation2 import research_provenance_export as p
+          assert tuple(p.RESEARCH_SYMBOLS)==("GLD","IEF","IWM","QQQ","SPY","TLT","VNQ","XLP")
+          assert not (set(p.RESEARCH_SYMBOLS) & p.FORBIDDEN_HOLDOUT_SYMBOLS)
+          assert p.CAMPAIGN_START.isoformat()=="2014-01-01"
+          assert p.CAMPAIGN_END.isoformat()=="2022-12-31"
+          PY
+          ! grep -n -E 'OpenSecTradeContext|place_order|unlock_trade|modify_order'             src/investment_tracker/independent_audit/generation2/research_provenance_export.py
+      - name: Selection contract remains pre-access
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=json.loads(Path('data/governance/generation2-holdout-selection-contract.json').read_text())
+          assert p['status']=='FROZEN_BEFORE_CANDIDATE_UNIVERSE_QUERY'
+          assert p['historical_holdout_access_authorized'] is False
+          assert p['phase6_authorized'] is False
+          assert p['phase7_authorized'] is False
+          assert p['production_readiness_approved'] is False
+          assert p['ranking']['seed_sha256']=='51bc792c6550a3b49e608acf12343153223d29325cbbad97fbbf4785a61a348c'
+          PY

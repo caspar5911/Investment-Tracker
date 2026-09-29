@@ -1,0 +1,102 @@
+{
+  "schema_version": "DIVIDEND-RECONCILIATION-CONTRACT-v3",
+  "status": "PROPOSED_AWAITING_INDEPENDENT_AUDIT",
+  "authority": "COORDINATOR_DRAFT_ONLY",
+  "predecessor": {
+    "formal_name": "GENERATION_3",
+    "closure_commit": "df9a0c974a392f414dc9b44551b544aa64e8e7f6",
+    "phase6_status": "PHASE6_UNKNOWN_ABSTAIN",
+    "failure_reason": "ValueError:SUCCESSOR_PHASE6_DIVIDEND_AMOUNT_AMBIGUOUS",
+    "holdout_consumed": true,
+    "retry_authorized": false,
+    "symbol_substitution_authorized": false,
+    "phase7_authorized": false,
+    "recon009_status": "OPEN"
+  },
+  "successor": {
+    "formal_name": "UNDECIDED_REQUIRES_INDEPENDENT_AUDIT",
+    "frozen_candidate_id": "G2-A|lookback=189|skip=21|top_k=1|rebalance=21",
+    "binding_sha256": "fd482e62e81d6813132f3aef747aecbcb07b5e4960b559dc1253510c95f49c8b",
+    "implementation_sha256": "35a3ad8f92598021bbfbd2d5d9337036af525b71f978ab053827c4922da60f1b",
+    "candidate_search_allowed": false,
+    "parameter_mutation_allowed": false
+  },
+  "dividend_amount_authority": {
+    "ordinary_cash": "MOOMOO_REHAB_STRUCTURED_PER_SHARE_CASH_DIVIDEND",
+    "special_cash": "MOOMOO_REHAB_STRUCTURED_SPECIAL_DIVIDEND_WHEN_EXPOSED_BY_SDK",
+    "endpoint_statement_numeric_authority": false,
+    "endpoint_statement_role": "NONEMPTY_DISTRIBUTION_PLAN_CORROBORATION_ONLY",
+    "endpoint_roles": [
+      "EVENT_EXISTENCE_CORROBORATION",
+      "EX_DATE_CORROBORATION",
+      "PAY_DATE_AUTHORITY",
+      "SOURCE_RECORD_IDENTITY"
+    ],
+    "rationale": "The corporate-actions dividend endpoint documents statement as free-text distribution-plan text. Numeric amounts must not be inferred from prose when structured rehab fields exist."
+  },
+  "structured_rehab_requirements": {
+    "ex_div_date_required": true,
+    "ordinary_cash_nonnegative_finite": true,
+    "special_cash_nonnegative_finite": true,
+    "total_cash_must_be_positive_for_cash_event": true,
+    "sdk_special_dividend_mapping_must_be_independently_validated_before_authorization": false,
+    "missing_required_structured_amount_result": "UNKNOWN_ABSTAIN",
+    "sdk_mapping_verified": true,
+    "sdk_mapping_evidence": {
+      "repository": "MoomooOpen/py-moomoo-api",
+      "source_path": "moomoo/quote/quote_query.py",
+      "source_commit": "dfb09498bdd34bdeb37c12b3cfec6d55908450d9",
+      "mapping": {
+        "per_cash_div": "rehab.dividend",
+        "special_dividend": "rehab.spDividend"
+      }
+    }
+  },
+  "endpoint_reconciliation": {
+    "matching_key": "EX_DATE",
+    "at_least_one_endpoint_record_required": true,
+    "duplicate_source_identity_forbidden": true,
+    "one_unique_pay_date_required": true,
+    "pay_date_must_not_precede_ex_date": true,
+    "statement_must_be_nonempty": true,
+    "statement_numeric_parsing_forbidden": true
+  },
+  "split_reconciliation": {
+    "contract": "CORPORATE-ACTION-NORMALIZATION-CONTRACT-v2",
+    "unchanged_from_generation3": true
+  },
+  "fail_closed_on": [
+    "MISSING_STRUCTURED_AMOUNT",
+    "NONFINITE_OR_NEGATIVE_STRUCTURED_AMOUNT",
+    "MISSING_ENDPOINT_RECORD",
+    "BLANK_ENDPOINT_STATEMENT",
+    "DUPLICATE_ENDPOINT_RECORD",
+    "AMBIGUOUS_PAY_DATE",
+    "PAY_DATE_BEFORE_EX_DATE",
+    "UNSUPPORTED_CORPORATE_ACTION",
+    "SOURCE_DATE_DISAGREEMENT"
+  ],
+  "governance": {
+    "generation3_holdout_must_not_be_reopened": true,
+    "generation3_observations_must_not_influence_parameters": true,
+    "protected_history_access_authorized": false,
+    "new_virgin_holdout_required": true,
+    "one_time_acquisition_required": true,
+    "retry_after_historical_access_allowed": false,
+    "phase7_authorized": false,
+    "production_readiness_approved": false,
+    "recon009_status": "OPEN",
+    "paper_only": true
+  },
+  "evidence_basis": {
+    "consumed_generation3_history_inspected_for_fix": false,
+    "synthetic_fixtures_only": true,
+    "public_provider_documentation_only": true,
+    "provider_docs": [
+      "https://openapi.moomoo.com/moomoo-api-doc/en/quote/get-corporate-actions-dividends.html",
+      "https://openapi.moomoo.com/moomoo-api-doc/en/quote/get-rehab.html",
+      "https://openapi.moomoo.com/moomoo-api-doc/en/quote/quote.html",
+      "https://github.com/MoomooOpen/py-moomoo-api/blob/dfb09498bdd34bdeb37c12b3cfec6d55908450d9/moomoo/quote/quote_query.py"
+    ]
+  }
+}

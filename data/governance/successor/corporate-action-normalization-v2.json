@@ -1,0 +1,111 @@
+{
+  "schema_version": "CORPORATE-ACTION-NORMALIZATION-CONTRACT-v2",
+  "status": "PROPOSED_AWAITING_INDEPENDENT_AUDIT",
+  "authority": "COORDINATOR_DRAFT_ONLY",
+  "predecessor": {
+    "closure_commit_sha": "f875167f3e758ab3391ff2f961aa740f231568e5",
+    "phase6_status": "PHASE6_UNKNOWN_ABSTAIN",
+    "failure_reason": "GEN2_PHASE6_SPLIT_RATE_AMBIGUOUS:BNO",
+    "consumed_holdout_reopen_allowed": false,
+    "predecessor_artifact_mutation_allowed": false,
+    "phase7_authorized": false,
+    "recon009_status": "OPEN"
+  },
+  "successor_naming": {
+    "generation_or_formal_name": "UNDECIDED_REQUIRES_INDEPENDENT_AUDIT",
+    "self_authorized": false
+  },
+  "protected_data": {
+    "historical_access_authorized": false,
+    "protected_history_may_be_used_for_development": false,
+    "consumed_holdout_performance_may_be_inspected": false,
+    "successor_holdout_selection_authorized": false
+  },
+  "sources": {
+    "opend_adjustment_factor_doc": "https://openapi.moomoo.com/moomoo-api-doc/en/quote/get-rehab.html",
+    "opend_stock_splits_doc": "https://openapi.moomoo.com/moomoo-api-doc/en/quote/get-corporate-actions-stock-splits.html",
+    "sec_forward_split_example": "https://www.sec.gov/Archives/edgar/data/1119809/000121390010002529/def14a0610_sunnyside.htm",
+    "sec_reverse_split_example": "https://www.sec.gov/Archives/edgar/data/1058307/000149315221006384/formdef14c.htm"
+  },
+  "ratio_syntax": {
+    "endpoint_semantics": "OLD_UNITS_TO_NEW_UNITS",
+    "accepted": [
+      "A->B",
+      "A→B"
+    ],
+    "unicode_normalization": [
+      "NFKC",
+      "U+2192_RIGHTWARDS_ARROW_TO_ASCII_ARROW"
+    ],
+    "whitespace": "REMOVE_ALL",
+    "rejected_unless_future_contract_version": [
+      "A:B",
+      "A/B",
+      "bare_numeric",
+      "other_arrow_codepoints"
+    ],
+    "positivity_required": true
+  },
+  "direction": {
+    "endpoint_unit_multiplier": "NEW_UNITS / OLD_UNITS",
+    "rehab_split_ratio_semantics": "OLD_UNITS / NEW_UNITS",
+    "rehab_to_ledger_unit_multiplier": "1 / split_ratio",
+    "forward_2_for_1": {
+      "endpoint_rate": "1->2",
+      "rehab_split_ratio": 0.5,
+      "ledger_unit_multiplier": 2
+    },
+    "reverse_1_for_5": {
+      "endpoint_rate": "5->1",
+      "rehab_split_ratio": 5,
+      "ledger_unit_multiplier": 0.2
+    }
+  },
+  "effective_date_and_window": {
+    "authoritative_effective_date_source": "MOOMOO_REHAB.ex_div_date",
+    "endpoint_ex_date_role": "CORROBORATION_ONLY",
+    "dated_endpoint_outside_evaluation_window": "IGNORE_BEFORE_RATE_PARSING_OR_RECONCILIATION",
+    "rehab_outside_evaluation_window": "IGNORE",
+    "in_window_effective_date_must_be_scored_session": true,
+    "us_endpoint_limitation": "OpenD documents ex_date/ex_date_str as HK-only; undated US endpoint rows cannot establish ledger event dates",
+    "announcement_date_may_substitute_for_ex_date": false
+  },
+  "reconciliation": {
+    "rehab_is_primary_dated_event_source": true,
+    "corporate_action_endpoint_is_required_corroboration_for_in_window_rehab_split": true,
+    "dated_endpoint_match": [
+      "same_effective_date",
+      "same_ledger_unit_multiplier"
+    ],
+    "undated_endpoint_match": [
+      "unique_unused_row",
+      "same_ledger_unit_multiplier"
+    ],
+    "undated_endpoint_may_create_event_without_rehab": false,
+    "unmatched_undated_endpoint_rows": "RECORD_AS_IGNORED_NON_BINDABLE;DO_NOT_CREATE_EVENT",
+    "unmatched_dated_in_window_endpoint": "FAIL_CLOSED",
+    "missing_match_for_in_window_rehab_split": "FAIL_CLOSED",
+    "source_multiplier_disagreement": "FAIL_CLOSED",
+    "ambiguous_multiple_matches": "FAIL_CLOSED"
+  },
+  "duplicates": {
+    "duplicate_in_window_dated_endpoint": "FAIL_CLOSED",
+    "duplicate_in_window_rehab_effective_date": "FAIL_CLOSED",
+    "multiple_undated_endpoint_candidates_for_one_rehab_event": "FAIL_CLOSED"
+  },
+  "development_evidence": {
+    "protected_symbols_allowed": false,
+    "synthetic_fixtures_required": true,
+    "public_non_protected_examples": [
+      "PTSI",
+      "SEC_GENERIC_REVERSE_SPLIT_EXAMPLE"
+    ],
+    "provider_history_required_for_contract_tests": false
+  },
+  "deployment": {
+    "implementation_path": "src/investment_tracker/quant/successor/corporate_actions_v2.py",
+    "predecessor_generation2_evaluator_modified": false,
+    "protected_data_execution_allowed": false,
+    "one_time_acquisition_authorization_required_before_any_future_successor_holdout_access": true
+  }
+}
