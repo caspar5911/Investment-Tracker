@@ -48,6 +48,8 @@ on:
       - "tests/independent_audit/test_generation4_phase7_evaluation_contract.py"
       - "tests/independent_audit/test_generation4_phase7_snapshot_integrity.py"
       - "tests/independent_audit/test_generation4_phase7_accounting_path.py"
+      - "tests/independent_audit/test_generation4_phase7_first_checkpoint.py"
+      - "data/governance/successor/generation4-phase7-first-checkpoint-contract.json"
       - "tests/quant/test_generation4_phase7_durability.py"
       - ".github/workflows/successor-dividend-normalization-v3.yml"
   pull_request:
@@ -92,6 +94,8 @@ on:
       - "tests/independent_audit/test_generation4_phase7_evaluation_cli.py"
       - "tests/independent_audit/test_generation4_phase7_evaluation_contract.py"
       - "tests/independent_audit/test_generation4_phase7_snapshot_integrity.py"
+      - "tests/independent_audit/test_generation4_phase7_first_checkpoint.py"
+      - "data/governance/successor/generation4-phase7-first-checkpoint-contract.json"
       - "tests/quant/test_generation4_phase7_durability.py"
       - ".github/workflows/successor-dividend-normalization-v3.yml"
 
@@ -127,6 +131,7 @@ jobs:
             tests/independent_audit/test_generation4_phase7_evaluation_contract.py \
             tests/independent_audit/test_generation4_phase7_snapshot_integrity.py \
             tests/independent_audit/test_generation4_phase7_accounting_path.py \
+            tests/independent_audit/test_generation4_phase7_first_checkpoint.py \
             tests/quant/test_generation4_phase7_durability.py
 
       - name: Governance boundary
