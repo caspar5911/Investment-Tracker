@@ -6,7 +6,7 @@
   "original_evaluation_authorization_sha256": "35c767097e135319f059060ca01553160f8ae492b9571769a90bafe1a4585812",
   "evaluation_contract_sha256": "b1dccfe54762f9e9e13a496e0d574999a5b547ff986d3e7ec1c1ca9b03835f39",
   "first_checkpoint_contract_sha256": "464b53fea8b08b33b3db851d27b3f4c1228ecf9bcb8a88966faa8c2a50d413bf",
-  "implementation_commit": "d3d3acae32b57c73837f11d229daca508b2a21df",
+  "implementation_commit": "a8d394c980a94c899f6b39ea83825dc44a554ef8",
   "source_sha256": {
     "src/investment_tracker/independent_audit/post_generation3/phase7_evaluation.py": "4cdeb100013da639a5084a5bbd46e3a69aba0ee2c6dc908a6cf523ff69630209",
     "src/investment_tracker/independent_audit/post_generation3/phase7_evaluation_cli.py": "469b8ac6060264b496e8dcd97aabde2c37f87ff875ac4242547b2c26b03f02f1",
@@ -15,7 +15,7 @@
     "src/investment_tracker/independent_audit/post_generation3/phase7_collector_cli.py": "f7f352aea2fe1ae0361e253617f5816cc50d82bc0ead0542647d5ea05eeffac5",
     "src/investment_tracker/independent_audit/post_generation3/phase7_first_checkpoint.py": "5b92a7715b55bbcdb0d825ee2ada0975048a59fdaf74f137dc26f7bb1e6f356f",
     "src/investment_tracker/independent_audit/post_generation3/phase7_checkpoint_gate.py": "585ba61ea6cb2bab98fb0303ffc0227d000ff2fd8c612aa0103c3115d7388b0a",
-    "src/investment_tracker/independent_audit/post_generation3/phase7_source_amendment.py": "33ea08944e3b7760bc50f9632faa1038fe47f138b05c1ac267fb73f58e8c4eda",
+    "src/investment_tracker/independent_audit/post_generation3/phase7_source_amendment.py": "6ec333e10e972f24f6ffe0b5d24a3e06c63e40838e16acc8921210d64ba37527",
     "src/investment_tracker/quant/phase7/generation4_durability.py": "9319173098c9d5f5f103f2183536a1b0ad62775915ee1b57774a57f4c6f3ad69"
   },
   "candidate_id": "G2-A|lookback=189|skip=21|top_k=1|rebalance=21",
@@ -60,6 +60,7 @@
   "result_dependent_methodology_change_allowed": false,
   "audit_checks": [
     "Compare every current source byte and hash against implementation_commit; this amendment removes pre-authorization raw snapshot-content reads without changing strategy or accounting methodology.",
+    "Verify source-amendment authorization exact-byte integrity: only sorted-key compact UTF-8 canonical JSON for the full artifact, including artifact_sha256 and without a BOM or trailing newline, is accepted; semantically equivalent whitespace, key-order, indentation, newline, separator, BOM, or CRLF byte drift must be rejected while the canonical body self-hash remains valid.",
     "Verify pending and exact-63 checkpoint readiness use only manifest and file metadata; before permit consumption no QFQ, unadjusted, rehab, dividend, or split payload bytes may be opened or parsed.",
     "Verify checkpoint authorization and source-amendment drift, invalid authority, wrong snapshot or chain, forged capability, double consumption, and reuse fail before any performance-bearing raw read or replay.",
     "Verify full snapshot byte, hash, schema, session, OHLC, and corporate-action checks run after one-shot capability consumption, and evaluation consumes the same immutable verified bytes even if filesystem payloads change afterward.",
