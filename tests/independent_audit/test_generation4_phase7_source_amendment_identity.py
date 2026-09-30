@@ -60,7 +60,7 @@ def synthetic_amendment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
         **body,
         "artifact_sha256": sha256(amendment._canonical_json(body)).hexdigest(),
     }
-    amendment_path.write_text(json.dumps(payload), encoding="utf-8")
+    amendment_path.write_bytes(amendment._canonical_json(payload))
     return amendment_path
 
 
@@ -82,6 +82,119 @@ def test_alternate_authorization_with_same_id_and_changed_field_is_rejected(
 def test_canonical_authorization_passes_synthetic_amendment(synthetic_amendment: Path) -> None:
     verified = verify_generation4_phase7_evaluation_authorization(amendment._ORIGINAL_AUTH_PATH)
     assert verified.authorization_id == json.loads(amendment._ORIGINAL_AUTH_PATH.read_bytes())["authorization_id"]
+
+
+def test_source_amendment_rejects_appended_whitespace_bytes(synthetic_amendment: Path) -> None:
+    original = Generation4Phase7EvaluationAuthorization.model_validate(
+        json.loads(amendment._ORIGINAL_AUTH_PATH.read_bytes())
+    )
+    synthetic_amendment.write_bytes(synthetic_amendment.read_bytes() + b" ")
+    with pytest.raises(amendment.SourceAmendmentError):
+        amendment.verify_source_amendment(original)
+
+
+@pytest.mark.parametrize("encoding", [
+    "append_space", "append_newline", "prepend_space", "pretty_print",
+    "reordered_keys", "utf8_bom", "spaced_separators", "crlf", "indent_two",
+])
+def test_source_amendment_rejects_alternate_json_bytes(
+    synthetic_amendment: Path, encoding: str
+) -> None:
+    original = Generation4Phase7EvaluationAuthorization.model_validate(
+        json.loads(amendment._ORIGINAL_AUTH_PATH.read_bytes())
+    )
+    canonical = synthetic_amendment.read_bytes()
+    payload = json.loads(canonical)
+    alternatives = {
+        "append_space": canonical + b" ",
+        "append_newline": canonical + b"\n",
+        "prepend_space": b" " + canonical,
+        "pretty_print": json.dumps(payload, sort_keys=True, indent=4).encode("utf-8"),
+        "reordered_keys": json.dumps(dict(reversed(list(payload.items()))),
+                                     separators=(",", ":")).encode("utf-8"),
+        "utf8_bom": b"\xef\xbb\xbf" + canonical,
+        "spaced_separators": json.dumps(payload, sort_keys=True).encode("utf-8"),
+        "crlf": json.dumps(payload, sort_keys=True, indent=2).replace("\n", "\r\n").encode("utf-8"),
+        "indent_two": json.dumps(payload, indent=2).encode("utf-8"),
+    }
+    synthetic_amendment.write_bytes(alternatives[encoding])
+    with pytest.raises(amendment.SourceAmendmentError):
+        amendment.verify_source_amendment(original)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("schema_version", "OTHER"),
+    ("status", "DRAFT_TEMPLATE_NOT_AUTHORIZATION"),
+    ("authority", "NONE"),
+    ("audit_request_sha256", "0" * 64),
+    ("original_evaluation_authorization_id", "INDEP-AUDIT-OTHER"),
+    ("original_evaluation_authorization_sha256", "0" * 64),
+    ("evaluation_contract_sha256", "0" * 64),
+    ("implementation_commit", "0" * 40),
+    ("source_sha256", {}),
+    ("first_checkpoint_contract_sha256", "0" * 64),
+    ("candidate_id", "G2-B"),
+    ("research_universe", ["SPY"]),
+    ("forbidden_holdout_symbols", []),
+    ("benchmark_symbol", "QQQ"),
+    ("friction_cases_bps", [3]),
+    ("primary_friction_bps", 10),
+    ("first_scored_session", "2026-09-29"),
+    ("warmup_session_count", 209),
+    ("dq030_status", "RESOLVED"),
+    ("recon009_status", "CLOSED"),
+    ("paper_only", False),
+    ("live_trading_authorized", True),
+    ("production_readiness_approved", True),
+    ("candidate_search_authorized", True),
+    ("parameter_mutation_authorized", True),
+    ("symbol_substitution_authorized", True),
+    ("holdout_reuse_authorized", True),
+    ("result_dependent_methodology_change_allowed", True),
+    ("checkpoint_evaluation_authorized", True),
+])
+def test_canonical_source_amendment_rejects_semantic_scope_tamper(
+    synthetic_amendment: Path, field: str, value: object
+) -> None:
+    original = Generation4Phase7EvaluationAuthorization.model_validate(
+        json.loads(amendment._ORIGINAL_AUTH_PATH.read_bytes())
+    )
+    payload = json.loads(synthetic_amendment.read_bytes())
+    payload[field] = value
+    body = {key: item for key, item in payload.items() if key != "artifact_sha256"}
+    payload["artifact_sha256"] = sha256(amendment._canonical_json(body)).hexdigest()
+    synthetic_amendment.write_bytes(amendment._canonical_json(payload))
+    with pytest.raises(amendment.SourceAmendmentError):
+        amendment.verify_source_amendment(original)
+
+
+def test_source_amendment_keeps_body_hash_check(synthetic_amendment: Path) -> None:
+    original = Generation4Phase7EvaluationAuthorization.model_validate(
+        json.loads(amendment._ORIGINAL_AUTH_PATH.read_bytes())
+    )
+    payload = json.loads(synthetic_amendment.read_bytes())
+    payload["approved_at_utc"] = "2026-10-01T00:00:00Z"
+    synthetic_amendment.write_bytes(amendment._canonical_json(payload))
+    with pytest.raises(amendment.SourceAmendmentError):
+        amendment.verify_source_amendment(original)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("approved_at_utc", "2026-10-01T00:00:00Z"),
+    ("authorization_id", "INDEP-AUDIT-GEN4-PHASE7-SOURCE-SYNTHETIC-REISSUED"),
+])
+def test_auditor_selected_metadata_uses_canonical_bytes_and_fresh_body_hash(
+    synthetic_amendment: Path, field: str, value: str
+) -> None:
+    original = Generation4Phase7EvaluationAuthorization.model_validate(
+        json.loads(amendment._ORIGINAL_AUTH_PATH.read_bytes())
+    )
+    payload = json.loads(synthetic_amendment.read_bytes())
+    payload[field] = value
+    body = {key: item for key, item in payload.items() if key != "artifact_sha256"}
+    payload["artifact_sha256"] = sha256(amendment._canonical_json(body)).hexdigest()
+    synthetic_amendment.write_bytes(amendment._canonical_json(payload))
+    amendment.verify_source_amendment(original)
 
 
 @pytest.mark.parametrize("field,value", [

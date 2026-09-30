@@ -109,7 +109,7 @@ def test_synthetic_auditor_source_amendment_binds_unchanged_methodology(
 
     def write(value: dict) -> None:
         payload = {**value, "artifact_sha256": sha256(amendment._canonical_json(value)).hexdigest()}
-        path.write_text(json.dumps(payload), encoding="utf-8")
+        path.write_bytes(amendment._canonical_json(payload))
 
     write(body)
     authorization = first._historical_snapshot_authorization()
@@ -357,10 +357,10 @@ def _authorized_synthetic_boundary(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
         "paper_only": True,
         **{field: False for field in amendment._FALSE_FLAGS},
     }
-    source.write_text(json.dumps({
+    source.write_bytes(amendment._canonical_json({
         **source_body,
         "artifact_sha256": sha256(amendment._canonical_json(source_body)).hexdigest(),
-    }), encoding="utf-8")
+    }))
     authorization_path = tmp_path / "checkpoint-authorization.json"
     selected = {
         "status": "PHASE7_CHECKPOINT_READY",

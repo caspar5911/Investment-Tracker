@@ -127,6 +127,9 @@ def verify_source_amendment(
         _require(isinstance(amendment, dict) and set(amendment) == _FIELDS)
         body = {key: value for key, value in amendment.items() if key != "artifact_sha256"}
         _require(amendment["artifact_sha256"] == sha256(_canonical_json(body)).hexdigest())
+        # The body hash checks content; the complete artifact has one accepted
+        # UTF-8 encoding: sorted, compact JSON without a BOM or final newline.
+        _require(raw == _canonical_json(amendment))
         request_bytes = _REQUEST_PATH.read_bytes()
         request = json.loads(request_bytes)
         _require(isinstance(request, dict))
