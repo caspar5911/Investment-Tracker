@@ -957,10 +957,25 @@ def _prospective_checkpoint_report_unchecked(snapshot: ProspectiveCheckpoint) ->
 def prospective_checkpoint_report(
     snapshot: ProspectiveCheckpoint, *, permit: object | None = None
 ) -> dict[str, Any]:
-    """Build a prospective report only under an issued checkpoint permit."""
+    """Reject preconstructed snapshots at the public Python boundary."""
     from investment_tracker.independent_audit.post_generation3.phase7_checkpoint_gate import (
-        require_checkpoint_permit,
+        CheckpointGateError,
+        PHASE7_CHECKPOINT_EVALUATION_NOT_AUTHORIZED,
     )
 
-    require_checkpoint_permit(permit, snapshot)
-    return _prospective_checkpoint_report_unchecked(snapshot)
+    raise CheckpointGateError(PHASE7_CHECKPOINT_EVALUATION_NOT_AUTHORIZED)
+
+
+def _governed_prospective_checkpoint_report(
+    snapshot: ProspectiveCheckpoint, *, permit: object
+) -> dict[str, Any]:
+    """Internal report step for a snapshot loaded after capability consumption."""
+    from investment_tracker.independent_audit.post_generation3.phase7_checkpoint_gate import (
+        begin_checkpoint_report,
+        complete_checkpoint_report,
+    )
+
+    begin_checkpoint_report(permit, snapshot)
+    report = _prospective_checkpoint_report_unchecked(snapshot)
+    complete_checkpoint_report(permit, snapshot, report)
+    return report

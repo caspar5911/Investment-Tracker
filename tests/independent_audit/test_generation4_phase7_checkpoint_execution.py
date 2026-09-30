@@ -39,6 +39,18 @@ def test_public_report_denies_direct_python_call_before_touching_bars() -> None:
     assert exc.value.code == gate.PHASE7_CHECKPOINT_EVALUATION_NOT_AUTHORIZED
 
 
+def test_public_python_checkpoint_entrypoint_denies_before_loading_bars(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(
+        cli, "_load_bars", lambda *args, **kwargs: pytest.fail("bars were loaded")
+    )
+    with pytest.raises(gate.CheckpointGateError):
+        cli.evaluate_phase7_checkpoint(
+            tmp_path / "absent-snapshot", tmp_path / "absent-authorization.json"
+        )
+
+
 def test_original_general_authorization_pauses_without_auditor_source_amendment(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -172,7 +184,38 @@ def _authorized_synthetic_boundary(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     snapshot.mkdir()
     request = tmp_path / "audit-request.json"
     source = tmp_path / "source-amendment.json"
-    source.write_text("{}", encoding="utf-8")
+    source_request = tmp_path / "source-request.json"
+    source_request.write_bytes(amendment._REQUEST_PATH.read_bytes())
+    source_request_body = json.loads(source_request.read_bytes())
+    source_body = {
+        "schema_version": "GENERATION4-PHASE7-SOURCE-AMENDMENT-AUTHORIZATION-v1",
+        "status": "GENERATION4_PHASE7_SOURCE_AMENDMENT_AUTHORIZED",
+        "authority": "INDEPENDENT_AUDIT",
+        "authorization_id": "INDEP-AUDIT-GEN4-PHASE7-SOURCE-SYNTHETIC-CHECKPOINT",
+        "approved_at_utc": "2026-12-25T00:00:00Z",
+        "audit_request_sha256": sha256(source_request.read_bytes()).hexdigest(),
+        "original_evaluation_authorization_id": contract["evaluation_authorization_id"],
+        "original_evaluation_authorization_sha256": contract["evaluation_authorization_sha256"],
+        "evaluation_contract_sha256": contract["evaluation_contract_sha256"],
+        "first_checkpoint_contract_sha256": first._CONTRACT_SHA256,
+        "implementation_commit": source_request_body["implementation_commit"],
+        "source_sha256": source_request_body["source_sha256"],
+        "candidate_id": contract["candidate_id"],
+        "research_universe": contract["research_universe"],
+        "forbidden_holdout_symbols": contract["forbidden_holdout_symbols"],
+        "benchmark_symbol": contract["benchmark_symbol"],
+        "friction_cases_bps": contract["friction_cases_bps"],
+        "primary_friction_bps": contract["primary_friction_bps"],
+        "first_scored_session": contract["first_scored_session"],
+        "warmup_session_count": contract["warmup_session_count"],
+        "dq030_status": "UNRESOLVED", "recon009_status": "OPEN",
+        "paper_only": True,
+        **{field: False for field in amendment._FALSE_FLAGS},
+    }
+    source.write_text(json.dumps({
+        **source_body,
+        "artifact_sha256": sha256(amendment._canonical_json(source_body)).hexdigest(),
+    }), encoding="utf-8")
     authorization_path = tmp_path / "checkpoint-authorization.json"
     selected = {
         "status": "PHASE7_CHECKPOINT_READY",
@@ -185,7 +228,8 @@ def _authorized_synthetic_boundary(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     monkeypatch.setattr(gate, "_AUTHORIZATION_PATH", authorization_path)
     monkeypatch.setattr(gate, "_AUDIT_REQUEST_PATH", request)
     monkeypatch.setattr(amendment, "_AMENDMENT_PATH", source)
-    monkeypatch.setattr(amendment, "verify_source_amendment", lambda _: None)
+    monkeypatch.setattr(amendment, "_REQUEST_PATH", source_request)
+    monkeypatch.setattr(amendment, "_verify_sources", lambda commit, hashes: None)
     monkeypatch.setattr(first, "first_checkpoint_readiness", lambda: selected)
     monkeypatch.setattr(gate, "_verify_current_sources", lambda commit, hashes: None)
     authority = {
@@ -252,11 +296,126 @@ def test_synthetic_checkpoint_authorization_is_distinct_from_ready(
 ) -> None:
     snapshot, selected, _, _ = _authorized_synthetic_boundary(monkeypatch, tmp_path)
     permit = gate.checkpoint_execution_permit(snapshot)
-    gate.require_checkpoint_permit(
-        permit, SimpleNamespace(evidence_bindings={"snapshot_manifest_sha256": selected["selected_manifest_sha256"]})
+    bound = SimpleNamespace(evidence_bindings={
+        "snapshot_id": snapshot.name,
+        "snapshot_manifest_sha256": selected["selected_manifest_sha256"],
+        "snapshot_chain_sha256": selected["selected_snapshot_chain_sha256"],
+    })
+    with pytest.raises(gate.CheckpointGateError):
+        gate.require_checkpoint_permit(permit, bound)
+    consumed = gate.consume_checkpoint_permit(
+        permit, snapshot, selected["selected_manifest_sha256"]
     )
+    gate.require_checkpoint_permit(consumed, bound)
+    gate.begin_checkpoint_report(consumed, bound)
+    with pytest.raises(gate.CheckpointGateError):
+        gate.begin_checkpoint_report(consumed, bound)
+    with pytest.raises(gate.CheckpointGateError):
+        gate.consume_checkpoint_permit(
+            permit, snapshot, selected["selected_manifest_sha256"]
+        )
+    with pytest.raises(gate.CheckpointGateError):
+        gate.require_checkpoint_permit(gate._ConsumedCheckpointPermit(permit), bound)
     with pytest.raises(gate.CheckpointGateError):
         gate.require_checkpoint_permit(object(), SimpleNamespace(evidence_bindings={}))
+
+
+def test_checkpoint_source_amendment_drift_denied_at_consumption(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    snapshot, selected, _, _ = _authorized_synthetic_boundary(monkeypatch, tmp_path)
+    permit = gate.checkpoint_execution_permit(snapshot)
+    amendment._AMENDMENT_PATH.write_bytes(amendment._AMENDMENT_PATH.read_bytes() + b" ")
+    with pytest.raises(gate.CheckpointGateError):
+        gate.consume_checkpoint_permit(
+            permit, snapshot, selected["selected_manifest_sha256"]
+        )
+
+
+def test_checkpoint_consumption_binds_snapshot_manifest_and_chain(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    snapshot, selected, _, _ = _authorized_synthetic_boundary(monkeypatch, tmp_path)
+    permit = gate.checkpoint_execution_permit(snapshot)
+    wrong = snapshot.parent / ("gen4-phase7-snapshot-" + "b" * 32)
+    wrong.mkdir()
+    for path, digest in (
+        (wrong, selected["selected_manifest_sha256"]),
+        (snapshot, "0" * 64),
+    ):
+        with pytest.raises(gate.CheckpointGateError):
+            gate.consume_checkpoint_permit(permit, path, digest)
+    selected["selected_snapshot_chain_sha256"] = "0" * 64
+    with pytest.raises(gate.CheckpointGateError):
+        gate.consume_checkpoint_permit(
+            permit, snapshot, selected["selected_manifest_sha256"]
+        )
+
+
+def test_checkpoint_consumed_capability_uses_frozen_identity_after_consumption(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    snapshot, selected, _, _ = _authorized_synthetic_boundary(monkeypatch, tmp_path)
+    permit = gate.checkpoint_execution_permit(snapshot)
+    consumed = gate.consume_checkpoint_permit(
+        permit, snapshot, selected["selected_manifest_sha256"]
+    )
+    gate._AUTHORIZATION_PATH.write_bytes(gate._AUTHORIZATION_PATH.read_bytes() + b" ")
+    amendment._AMENDMENT_PATH.write_bytes(amendment._AMENDMENT_PATH.read_bytes() + b" ")
+    gate.require_checkpoint_permit(
+        consumed, SimpleNamespace(evidence_bindings={
+            "snapshot_id": snapshot.name,
+            "snapshot_manifest_sha256": selected["selected_manifest_sha256"],
+            "snapshot_chain_sha256": selected["selected_snapshot_chain_sha256"],
+        })
+    )
+
+
+@pytest.mark.parametrize("field", [
+    "snapshot_id", "snapshot_manifest_sha256", "snapshot_chain_sha256",
+])
+def test_consumed_capability_rejects_other_snapshot_identity(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, field: str
+) -> None:
+    snapshot, selected, _, _ = _authorized_synthetic_boundary(monkeypatch, tmp_path)
+    issued = gate.checkpoint_execution_permit(snapshot)
+    consumed = gate.consume_checkpoint_permit(
+        issued, snapshot, selected["selected_manifest_sha256"]
+    )
+    bindings = {
+        "snapshot_id": snapshot.name,
+        "snapshot_manifest_sha256": selected["selected_manifest_sha256"],
+        "snapshot_chain_sha256": selected["selected_snapshot_chain_sha256"],
+    }
+    bindings[field] = "different"
+    with pytest.raises(gate.CheckpointGateError):
+        gate.begin_checkpoint_report(
+            consumed, SimpleNamespace(evidence_bindings=bindings)
+        )
+
+
+def test_public_report_rejects_preconstructed_snapshot_with_consumed_capability(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    snapshot, selected, _, _ = _authorized_synthetic_boundary(monkeypatch, tmp_path)
+    issued = gate.checkpoint_execution_permit(snapshot)
+    consumed = gate.consume_checkpoint_permit(
+        issued, snapshot, selected["selected_manifest_sha256"]
+    )
+
+    class Sensitive:
+        evidence_bindings = {
+            "snapshot_id": snapshot.name,
+            "snapshot_manifest_sha256": selected["selected_manifest_sha256"],
+            "snapshot_chain_sha256": selected["selected_snapshot_chain_sha256"],
+        }
+
+        @property
+        def bars(self):
+            pytest.fail("preconstructed snapshot bars were touched")
+
+    with pytest.raises(gate.CheckpointGateError):
+        durability.prospective_checkpoint_report(Sensitive(), permit=consumed)
 
 
 def test_checkpoint_placeholder_request_cannot_authorize_evaluation(
@@ -304,9 +463,93 @@ def test_authorization_byte_drift_denied_before_performance(
     permit = gate.checkpoint_execution_permit(snapshot)
     gate._AUTHORIZATION_PATH.write_bytes(gate._AUTHORIZATION_PATH.read_bytes() + b" ")
     with pytest.raises(gate.CheckpointGateError):
-        gate.require_checkpoint_permit(
-            permit, SimpleNamespace(evidence_bindings={"snapshot_manifest_sha256": selected["selected_manifest_sha256"]})
+        gate.consume_checkpoint_permit(
+            permit, snapshot, selected["selected_manifest_sha256"]
         )
+
+
+@pytest.mark.parametrize("mutation_target", ["checkpoint", "source_amendment"])
+def test_checkpoint_authorization_drift_after_issuance_denied_before_loaders(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mutation_target: str
+) -> None:
+    snapshot, selected, authority, write = _authorized_synthetic_boundary(
+        monkeypatch, tmp_path
+    )
+    general = first._historical_snapshot_authorization()
+    manifest = {
+        "schema_version": cli.SNAPSHOT_SCHEMA,
+        "candidate_id": general.candidate_id,
+        "evaluation_authorization_id": general.authorization_id,
+        "evaluation_authorization_sha256": sha256(
+            gate.collector._AUTHORIZATION_PATH.read_bytes()
+        ).hexdigest(),
+        "audit_request_sha256": general.audit_request_sha256,
+        "evaluation_contract_sha256": general.evaluation_contract_sha256,
+        "start_artifact_sha256": general.start_artifact_sha256,
+        "frozen_evaluation_implementation_commit": general.frozen_evaluation_implementation_commit,
+        "scored_start": general.prospective_first_scored_session,
+        "benchmark_symbol": general.benchmark_symbol,
+        "symbols": {symbol: {} for symbol in general.research_universe},
+        "signal_price_convention": "QFQ",
+        "execution_price_convention": "UNADJUSTED",
+        "corporate_actions_included": True,
+        "files": [],
+    }
+    manifest["manifest_sha256"] = sha256(cli._canonical_json(manifest)).hexdigest()
+    (snapshot / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    selected["selected_manifest_sha256"] = manifest["manifest_sha256"]
+    authority["snapshot_manifest_sha256"] = manifest["manifest_sha256"]
+    audit_request = json.loads(gate._AUDIT_REQUEST_PATH.read_bytes())
+    audit_request["snapshot_manifest_sha256"] = manifest["manifest_sha256"]
+    gate._AUDIT_REQUEST_PATH.write_text(json.dumps(audit_request), encoding="utf-8")
+    authority["audit_request_sha256"] = sha256(
+        gate._AUDIT_REQUEST_PATH.read_bytes()
+    ).hexdigest()
+    write(authority)
+
+    checkpoint_bytes = gate._AUTHORIZATION_PATH.read_bytes()
+    source_bytes = amendment._AMENDMENT_PATH.read_bytes()
+    original_table = cli._snapshot_file_table
+    original_permit = gate.checkpoint_execution_permit
+    calls = {"issued": 0, "bars": 0, "actions": 0, "report": 0}
+
+    def issue(path: Path):
+        permit = original_permit(path)
+        calls["issued"] += 1
+        return permit
+
+    def mutate_after_issuance(value: dict):
+        table = original_table(value)
+        if mutation_target == "checkpoint":
+            gate._AUTHORIZATION_PATH.write_bytes(checkpoint_bytes + b" ")
+        else:
+            amendment._AMENDMENT_PATH.write_bytes(source_bytes + b" ")
+        return table
+
+    def sensitive_loader(*args: object, **kwargs: object):
+        calls["bars"] += 1
+        raise AssertionError("bars loaded under changed checkpoint authority")
+
+    def action_loader(*args: object, **kwargs: object):
+        calls["actions"] += 1
+        raise AssertionError("actions loaded under changed checkpoint authority")
+
+    def report_loader(*args: object, **kwargs: object):
+        calls["report"] += 1
+        raise AssertionError("report reached under changed checkpoint authority")
+
+    monkeypatch.setattr(gate, "checkpoint_execution_permit", issue)
+    monkeypatch.setattr(cli, "_snapshot_file_table", mutate_after_issuance)
+    monkeypatch.setattr(cli, "_load_bars", sensitive_loader)
+    monkeypatch.setattr(cli, "_load_corporate_actions", action_loader)
+    monkeypatch.setattr(cli, "_governed_prospective_checkpoint_report", report_loader)
+
+    with pytest.raises(gate.CheckpointGateError):
+        cli._evaluate_checkpoint_command(SimpleNamespace(
+            snapshot=str(snapshot),
+            evaluation_authorization=str(gate.collector._AUTHORIZATION_PATH),
+        ))
+    assert calls == {"issued": 1, "bars": 0, "actions": 0, "report": 0}
 
 
 def test_result_is_content_bound_and_second_write_is_denied(
@@ -315,6 +558,9 @@ def test_result_is_content_bound_and_second_write_is_denied(
     snapshot, selected, authority, _ = _authorized_synthetic_boundary(monkeypatch, tmp_path)
     monkeypatch.setattr(gate, "_RESULT_PATH", tmp_path / "result" / "checkpoint-result.json")
     permit = gate.checkpoint_execution_permit(snapshot)
+    consumed = gate.consume_checkpoint_permit(
+        permit, snapshot, selected["selected_manifest_sha256"]
+    )
     unknown = {"status": "UNKNOWN", "value": None, "reason": "DQ-030_UNRESOLVED"}
     available = {"status": "AVAILABLE", "value": 0.0, "reason": "OK"}
     report = {
@@ -328,7 +574,11 @@ def test_result_is_content_bound_and_second_write_is_denied(
         "no_tuning_performed": True, "no_final_holdout_reuse": True,
         "candidate_changed": False, "methodology_changed": False,
         "exposure_invariant_passes": True,
-        "evidence_bindings": {"snapshot_manifest_sha256": selected["selected_manifest_sha256"]},
+        "evidence_bindings": {
+            "snapshot_id": snapshot.name,
+            "snapshot_manifest_sha256": selected["selected_manifest_sha256"],
+            "snapshot_chain_sha256": selected["selected_snapshot_chain_sha256"],
+        },
         "max_drawdown": unknown, "calmar": unknown, "recovery": unknown,
         "rolling_12m_return": {"status": "UNKNOWN", "value": None,
                                "reason": "INCOMPLETE_WINDOW"},
@@ -338,20 +588,39 @@ def test_result_is_content_bound_and_second_write_is_denied(
         "benchmark_total_return": available,
         "excess_return_vs_spy": available, "excess_return_vs_cash": available,
     }
-    output = gate.write_checkpoint_result(permit, report)
+    with pytest.raises(gate.CheckpointGateError):
+        gate.write_checkpoint_result(permit, report)
+    with pytest.raises(gate.CheckpointGateError):
+        gate.write_checkpoint_result(consumed, report)
+    with pytest.raises(gate.CheckpointGateError):
+        gate.write_checkpoint_result(gate._ConsumedCheckpointPermit(permit), report)
+    gate.begin_checkpoint_report(
+        consumed, SimpleNamespace(evidence_bindings=report["evidence_bindings"])
+    )
+    gate.complete_checkpoint_report(
+        consumed, SimpleNamespace(evidence_bindings=report["evidence_bindings"]), report
+    )
+    with pytest.raises(gate.CheckpointGateError):
+        gate.write_checkpoint_result(consumed, {**report})
+    output = gate.write_checkpoint_result(consumed, report)
     result = json.loads(gate._RESULT_PATH.read_bytes())
     digest = result.pop("result_sha256")
     assert digest == output["result_sha256"] == sha256(gate._canonical_json(result)).hexdigest()
     assert result["snapshot_manifest_sha256"] == selected["selected_manifest_sha256"]
-    assert result["checkpoint_authorization_sha256"] == permit.authorization_sha256
+    assert result["checkpoint_authorization_sha256"] == consumed.authorization_sha256
     with pytest.raises(gate.CheckpointGateError):
-        gate.write_checkpoint_result(permit, report)
+        gate.write_checkpoint_result(consumed, report)
 
 
+@pytest.mark.parametrize("mutate_after_consumption", [False, True])
 def test_synthetic_exact_63_cli_runs_only_after_checkpoint_authorization(
-    bound_evidence, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+    bound_evidence, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys,
+    mutate_after_consumption: bool,
 ) -> None:
     _, selected, authority, write = _authorized_synthetic_boundary(monkeypatch, tmp_path)
+    # This full replay fixture uses a separately generated general authorization;
+    # the source-amendment identity gate is exercised by the other synthetic tests.
+    monkeypatch.setattr(amendment, "verify_source_amendment", lambda _: None)
     calendar = xcals.get_calendar("XNYS")
     sessions = calendar.sessions_in_range("2025-11-24", "2026-12-24")
     assert len(sessions) == 273
@@ -397,6 +666,21 @@ def test_synthetic_exact_63_cli_runs_only_after_checkpoint_authorization(
     authority["audit_request_sha256"] = sha256(gate._AUDIT_REQUEST_PATH.read_bytes()).hexdigest()
     write(authority)
     monkeypatch.setattr(gate, "_RESULT_PATH", tmp_path / "result" / "checkpoint-result.json")
+
+    if mutate_after_consumption:
+        original_consume = gate.consume_checkpoint_permit
+
+        def consume_then_mutate(*args: object, **kwargs: object):
+            capability = original_consume(*args, **kwargs)
+            gate._AUTHORIZATION_PATH.write_bytes(
+                gate._AUTHORIZATION_PATH.read_bytes() + b" "
+            )
+            amendment._AMENDMENT_PATH.write_bytes(
+                amendment._AMENDMENT_PATH.read_bytes() + b" "
+            )
+            return capability
+
+        monkeypatch.setattr(gate, "consume_checkpoint_permit", consume_then_mutate)
 
     rc = cli.main([
         "evaluate-phase7-checkpoint", "--evaluation-authorization", str(general_path),

@@ -37,7 +37,7 @@ from ...quant.phase7.generation4_durability import (
     CHECKPOINT_SESSIONS_EARLY,
     Generation4DurabilityError,
     ProspectiveCheckpoint,
-    prospective_checkpoint_report,
+    _governed_prospective_checkpoint_report,
 )
 from . import phase7_checkpoint_gate as checkpoint_gate
 from . import phase7_first_checkpoint as first_checkpoint
@@ -320,6 +320,11 @@ def _evaluate_checkpoint_command(args: argparse.Namespace) -> dict[str, Any]:
         )
 
     file_table = _snapshot_file_table(manifest)
+    # Consume the issued authority while only structural metadata has been read.
+    # This is the final mutable-file authorization check for this transaction.
+    capability = checkpoint_gate.consume_checkpoint_permit(
+        permit, snapshot_dir, manifest["manifest_sha256"]
+    )
     symbols = list(authorization.research_universe)
     signal_bars = _load_bars(
         snapshot_dir, symbols, kind="qfq", file_table=file_table
@@ -350,13 +355,31 @@ def _evaluate_checkpoint_command(args: argparse.Namespace) -> dict[str, Any]:
         corporate_action_reconciliation=action_evidence,
         evidence_bindings={
             **bound_manifest,
+            "snapshot_id": manifest["snapshot_id"],
             "snapshot_manifest_sha256": manifest["manifest_sha256"],
+            "snapshot_chain_sha256": capability.snapshot_chain_sha256,
         },
         scored_start=scored_start,
         checkpoint_cutoff=CHECKPOINT_SESSIONS_EARLY,
     )
-    report = prospective_checkpoint_report(snapshot, permit=permit)
-    return checkpoint_gate.write_checkpoint_result(permit, report)
+    report = _governed_prospective_checkpoint_report(snapshot, permit=capability)
+    return checkpoint_gate.write_checkpoint_result(capability, report)
+
+
+def evaluate_phase7_checkpoint(
+    snapshot_dir: Path, evaluation_authorization_path: Path
+) -> dict[str, Any]:
+    """Governed Python entrypoint; consume authority before loading snapshot data."""
+    return _evaluate_checkpoint_command(argparse.Namespace(
+        snapshot=str(snapshot_dir),
+        evaluation_authorization=str(evaluation_authorization_path),
+    ))
+
+
+def _evaluate_checkpoint_cli_command(args: argparse.Namespace) -> dict[str, Any]:
+    return evaluate_phase7_checkpoint(
+        Path(args.snapshot), Path(args.evaluation_authorization)
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -395,7 +418,7 @@ def main(argv: list[str] | None = None) -> int:
         "verify-evaluation-preflight": _preflight_command,
         "resolve-prospective-boundary": _resolve_boundary_command,
         "acquire-phase7-data": _acquire_command,
-        "evaluate-phase7-checkpoint": _evaluate_checkpoint_command,
+        "evaluate-phase7-checkpoint": _evaluate_checkpoint_cli_command,
     }
     try:
         report = handlers[args.command](args)

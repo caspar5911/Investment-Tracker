@@ -10,6 +10,7 @@ import json
 import math
 import os
 import subprocess
+import threading
 import weakref
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -81,13 +82,15 @@ class _CheckpointPermit:
     __slots__ = (
         "snapshot_id", "manifest_sha256", "authorization_sha256",
         "authorization_id", "implementation_commit", "source_sha256", "__weakref__",
-        "source_amendment_sha256", "snapshot_chain_sha256",
+        "source_amendment_sha256", "snapshot_chain_sha256", "candidate_id",
+        "evaluation_contract_sha256",
     )
 
     def __init__(self, snapshot_id: str, manifest_sha256: str, authorization_sha256: str,
                  authorization_id: str, implementation_commit: str,
                  source_sha256: dict[str, str], source_amendment_sha256: str,
-                 snapshot_chain_sha256: str):
+                 snapshot_chain_sha256: str, candidate_id: str,
+                 evaluation_contract_sha256: str):
         object.__setattr__(self, "snapshot_id", snapshot_id)
         object.__setattr__(self, "manifest_sha256", manifest_sha256)
         object.__setattr__(self, "authorization_sha256", authorization_sha256)
@@ -96,12 +99,39 @@ class _CheckpointPermit:
         object.__setattr__(self, "source_sha256", tuple(sorted(source_sha256.items())))
         object.__setattr__(self, "source_amendment_sha256", source_amendment_sha256)
         object.__setattr__(self, "snapshot_chain_sha256", snapshot_chain_sha256)
+        object.__setattr__(self, "candidate_id", candidate_id)
+        object.__setattr__(self, "evaluation_contract_sha256", evaluation_contract_sha256)
 
     def __setattr__(self, _name: str, _value: object) -> None:
         raise AttributeError("checkpoint permit is immutable")
 
 
 _ISSUED: weakref.WeakSet[_CheckpointPermit] = weakref.WeakSet()
+
+
+class _ConsumedCheckpointPermit(_CheckpointPermit):
+    """Immutable authority verified at the single pre-load consumption boundary."""
+
+    __slots__ = ()
+
+    def __init__(self, issued: _CheckpointPermit) -> None:
+        for field in (
+            "snapshot_id", "manifest_sha256", "authorization_sha256",
+            "authorization_id", "implementation_commit", "source_sha256",
+            "source_amendment_sha256", "snapshot_chain_sha256", "candidate_id",
+            "evaluation_contract_sha256",
+        ):
+            object.__setattr__(self, field, getattr(issued, field))
+
+
+_CONSUMPTION_LOCK = threading.Lock()
+_USED_PERMITS: weakref.WeakSet[_CheckpointPermit] = weakref.WeakSet()
+_CONSUMED: weakref.WeakSet[_ConsumedCheckpointPermit] = weakref.WeakSet()
+_REPORT_STARTED: weakref.WeakSet[_ConsumedCheckpointPermit] = weakref.WeakSet()
+_EVALUATED_REPORTS: weakref.WeakKeyDictionary[
+    _ConsumedCheckpointPermit, tuple[int, str]
+] = weakref.WeakKeyDictionary()
+_PUBLISHED: weakref.WeakSet[_ConsumedCheckpointPermit] = weakref.WeakSet()
 
 
 def _require(condition: bool, code: str = PHASE7_UNKNOWN_ABSTAIN) -> None:
@@ -221,7 +251,8 @@ def checkpoint_execution_permit(snapshot_dir: Path) -> _CheckpointPermit:
             selected_id, readiness["selected_manifest_sha256"], digest,
             authority["authorization_id"], authority["implementation_commit"],
             authority["source_sha256"], authority["source_amendment_authorization_sha256"],
-            readiness["selected_snapshot_chain_sha256"],
+            readiness["selected_snapshot_chain_sha256"], authority["candidate_id"],
+            authority["evaluation_contract_sha256"],
         )
         _ISSUED.add(permit)
         return permit
@@ -231,10 +262,19 @@ def checkpoint_execution_permit(snapshot_dir: Path) -> _CheckpointPermit:
         raise CheckpointGateError(PHASE7_UNKNOWN_ABSTAIN) from None
 
 
-def require_checkpoint_permit(permit: object, snapshot: object) -> None:
-    """Reject unissued or mismatched permits before touching any bars or signals."""
-    if not isinstance(permit, _CheckpointPermit) or permit not in _ISSUED:
+def consume_checkpoint_permit(
+    permit: object, snapshot_dir: Path, manifest_sha256: str
+) -> _ConsumedCheckpointPermit:
+    """Revalidate mutable authority once, then issue a one-shot execution capability."""
+    if type(permit) is not _CheckpointPermit or permit not in _ISSUED:
         raise CheckpointGateError(PHASE7_CHECKPOINT_EVALUATION_NOT_AUTHORIZED)
+    _require(isinstance(snapshot_dir, Path) and snapshot_dir.is_dir()
+             and not snapshot_dir.is_symlink())
+    _require(snapshot_dir.resolve() == (_SNAPSHOT_ROOT / permit.snapshot_id).resolve())
+    _require(manifest_sha256 == permit.manifest_sha256)
+    _require(_AUTHORIZATION_PATH.is_file() and not _AUTHORIZATION_PATH.is_symlink())
+    _require(source_amendment._AMENDMENT_PATH.is_file()
+             and not source_amendment._AMENDMENT_PATH.is_symlink())
     try:
         _require(sha256(_AUTHORIZATION_PATH.read_bytes()).hexdigest() == permit.authorization_sha256)
         _require(sha256(source_amendment._AMENDMENT_PATH.read_bytes()).hexdigest()
@@ -243,26 +283,68 @@ def require_checkpoint_permit(permit: object, snapshot: object) -> None:
         raise CheckpointGateError(PHASE7_UNKNOWN_ABSTAIN) from None
     current = first.first_checkpoint_readiness()
     _require(current.get("status") == collector.PHASE7_CHECKPOINT_READY)
+    _require(current.get("selected_snapshot_scored_sessions") == 63)
     _require(current.get("selected_snapshot_id") == permit.snapshot_id)
     _require(current.get("selected_manifest_sha256") == permit.manifest_sha256)
     _require(current.get("selected_snapshot_chain_sha256") == permit.snapshot_chain_sha256)
+    try:
+        _verify_current_sources(permit.implementation_commit, dict(permit.source_sha256))
+    except (OSError, subprocess.CalledProcessError):
+        raise CheckpointGateError(PHASE7_UNKNOWN_ABSTAIN) from None
+    with _CONSUMPTION_LOCK:
+        _require(permit not in _USED_PERMITS)
+        _USED_PERMITS.add(permit)
+        consumed = _ConsumedCheckpointPermit(permit)
+        _CONSUMED.add(consumed)
+    return consumed
+
+
+def require_checkpoint_permit(permit: object, snapshot: object) -> None:
+    """Accept only an issued consumed capability; never reread authorization files."""
+    if type(permit) is not _ConsumedCheckpointPermit or permit not in _CONSUMED:
+        raise CheckpointGateError(PHASE7_CHECKPOINT_EVALUATION_NOT_AUTHORIZED)
     bindings = getattr(snapshot, "evidence_bindings", None)
-    if not isinstance(bindings, dict) or bindings.get("snapshot_manifest_sha256") != permit.manifest_sha256:
-        raise CheckpointGateError(PHASE7_UNKNOWN_ABSTAIN)
+    _require(isinstance(bindings, dict))
+    _require(bindings.get("snapshot_id") == permit.snapshot_id)
+    _require(bindings.get("snapshot_manifest_sha256") == permit.manifest_sha256)
+    _require(bindings.get("snapshot_chain_sha256") == permit.snapshot_chain_sha256)
+
+
+def begin_checkpoint_report(permit: object, snapshot: object) -> None:
+    """Claim the consumed capability before any replay calculation."""
+    require_checkpoint_permit(permit, snapshot)
+    with _CONSUMPTION_LOCK:
+        _require(permit not in _REPORT_STARTED and permit not in _PUBLISHED)
+        _REPORT_STARTED.add(permit)
+
+
+def complete_checkpoint_report(
+    permit: object, snapshot: object, report: dict[str, Any]
+) -> None:
+    """Bind one computed report to the consumed capability for publication."""
+    require_checkpoint_permit(permit, snapshot)
+    _require(isinstance(report, dict))
+    _require(permit in _REPORT_STARTED)
+    _require(permit not in _EVALUATED_REPORTS and permit not in _PUBLISHED)
+    _EVALUATED_REPORTS[permit] = (id(report), sha256(_canonical_json(report)).hexdigest())
 
 
 def write_checkpoint_result(permit: object, report: dict[str, Any]) -> dict[str, Any]:
     """Publish one content-bound result with exclusive create and readback."""
-    _require(isinstance(permit, _CheckpointPermit) and permit in _ISSUED)
+    _require(type(permit) is _ConsumedCheckpointPermit and permit in _CONSUMED)
     _require(isinstance(report, dict))
     require_checkpoint_permit(
         permit, SimpleNamespace(evidence_bindings=report.get("evidence_bindings"))
     )
+    _require(permit not in _PUBLISHED)
+    _require(_EVALUATED_REPORTS.get(permit) == (
+        id(report), sha256(_canonical_json(report)).hexdigest()
+    ))
     _require(report.get("scored_session_count") == 63)
     _require(report.get("checkpoint_cutoff") == 63)
     _require(report.get("checkpoint_label") == "EARLY_DIAGNOSTIC")
     _require(report.get("status") == "PHASE7_PROSPECTIVE_EVIDENCE_PENDING")
-    _require(report.get("candidate_id") == first._contract()["candidate_id"])
+    _require(report.get("candidate_id") == permit.candidate_id)
     _require(report.get("paper_only") is True)
     _require(report.get("production_authority") is False)
     _require(report.get("live_trading_authority") is False)
@@ -313,7 +395,7 @@ def write_checkpoint_result(permit: object, report: dict[str, Any]) -> dict[str,
         "schema_version": "GENERATION4-PHASE7-FIRST-CHECKPOINT-RESULT-v1",
         "status": "EARLY_DIAGNOSTIC_NON_DECISION_GRADE",
         "checkpoint_contract_sha256": first._CONTRACT_SHA256,
-        "evaluation_contract_sha256": first._contract()["evaluation_contract_sha256"],
+        "evaluation_contract_sha256": permit.evaluation_contract_sha256,
         "checkpoint_authorization_id": permit.authorization_id,
         "checkpoint_authorization_sha256": permit.authorization_sha256,
         "snapshot_id": permit.snapshot_id,
@@ -347,5 +429,6 @@ def write_checkpoint_result(permit: object, report: dict[str, Any]) -> dict[str,
         _require(_RESULT_PATH.read_bytes() == raw)
     except (OSError, ValueError, TypeError, CheckpointGateError):
         raise CheckpointGateError(PHASE7_UNKNOWN_ABSTAIN) from None
+    _PUBLISHED.add(permit)
     return {"status": "PHASE7_CHECKPOINT_EVALUATED", "result_sha256": payload["result_sha256"],
             "snapshot_id": permit.snapshot_id, "result_path": str(_RESULT_PATH)}
