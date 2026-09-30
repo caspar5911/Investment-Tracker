@@ -175,7 +175,7 @@ def _snapshot_file_table(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 def _read_snapshot_bytes(
-    snapshot_dir: Path,
+    snapshot_dir: Path | collector.VerifiedCheckpointSnapshot,
     relative: str,
     file_table: dict[str, dict[str, Any]],
 ) -> bytes:
@@ -184,10 +184,13 @@ def _read_snapshot_bytes(
         raise Generation4Phase7EvaluationError(
             GEN4_PHASE7_EVAL_EVIDENCE_INVALID, f"manifest_missing:{relative}"
         )
-    path = snapshot_dir / relative
     try:
-        payload = path.read_bytes()
-    except OSError:
+        payload = (
+            snapshot_dir.payload(relative)
+            if isinstance(snapshot_dir, collector.VerifiedCheckpointSnapshot)
+            else (snapshot_dir / relative).read_bytes()
+        )
+    except (OSError, collector.Generation4Phase7CollectorError):
         raise Generation4Phase7EvaluationError(
             GEN4_PHASE7_EVAL_EVIDENCE_INVALID, relative
         ) from None
@@ -199,7 +202,7 @@ def _read_snapshot_bytes(
 
 
 def _load_bars(
-    snapshot_dir: Path,
+    snapshot_dir: Path | collector.VerifiedCheckpointSnapshot,
     symbols: list[str],
     *,
     kind: str,
@@ -223,7 +226,7 @@ def _load_bars(
 
 
 def _load_corporate_actions(
-    snapshot_dir: Path,
+    snapshot_dir: Path | collector.VerifiedCheckpointSnapshot,
     symbols: list[str],
     scored_sessions: pd.DatetimeIndex,
     file_table: dict[str, dict[str, Any]],
@@ -320,17 +323,28 @@ def _evaluate_checkpoint_command(args: argparse.Namespace) -> dict[str, Any]:
         )
 
     file_table = _snapshot_file_table(manifest)
-    # Consume the issued authority while only structural metadata has been read.
-    # This is the final mutable-file authorization check for this transaction.
+    # Structural readiness reads manifests only. Consume the last mutable-file
+    # authority before reading any performance-bearing snapshot payload.
     capability = checkpoint_gate.consume_checkpoint_permit(
         permit, snapshot_dir, manifest["manifest_sha256"]
     )
+    try:
+        # Deep verification reads payloads once after consumption. All later
+        # loaders use these immutable verified bytes, never reopen snapshot files.
+        verified_snapshot = collector.verify_snapshot_payloads(
+            snapshot_dir, authorization, authorization_sha256,
+            expected_manifest_sha256=capability.manifest_sha256,
+        )
+    except collector.Generation4Phase7CollectorError as exc:
+        raise Generation4Phase7EvaluationError(
+            GEN4_PHASE7_EVAL_EVIDENCE_INVALID, f"snapshot:{exc.detail}"
+        ) from None
     symbols = list(authorization.research_universe)
     signal_bars = _load_bars(
-        snapshot_dir, symbols, kind="qfq", file_table=file_table
+        verified_snapshot, symbols, kind="qfq", file_table=file_table
     )
     execution_bars = _load_bars(
-        snapshot_dir, symbols, kind="unadjusted", file_table=file_table
+        verified_snapshot, symbols, kind="unadjusted", file_table=file_table
     )
     scored_start = pd.Timestamp(manifest["scored_start"], tz="UTC")
     scored_sessions = pd.DatetimeIndex(
@@ -345,7 +359,7 @@ def _evaluate_checkpoint_command(args: argparse.Namespace) -> dict[str, Any]:
             GEN4_PHASE7_EVAL_BINDING_MISMATCH, "scored_session_count"
         )
     splits, dividends, action_evidence = _load_corporate_actions(
-        snapshot_dir, symbols, scored_sessions, file_table
+        verified_snapshot, symbols, scored_sessions, file_table
     )
     snapshot = ProspectiveCheckpoint(
         bars=signal_bars,

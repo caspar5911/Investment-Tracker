@@ -173,8 +173,10 @@ def first_checkpoint_readiness() -> dict[str, Any]:
         _require(authorization.dq030_status == contract["dq030_status"])
         _require(authorization.recon009_status == contract["recon009_status"])
         _require(authorization.paper_only is True)
-        stage = "snapshot_verification"
-        snapshots = collector._verified_snapshots(authorization)
+        # Authority has not been consumed: verify manifests and file metadata
+        # only. Full payload verification belongs after checkpoint consumption.
+        stage = "snapshot_structure"
+        snapshots = collector._structural_snapshots(authorization)
         stage = "history"
         _validate_history(snapshots, contract)
         stage = "selection"

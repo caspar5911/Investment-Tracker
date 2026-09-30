@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import json
 from hashlib import sha256
 from pathlib import Path
@@ -153,6 +154,150 @@ def test_cli_denies_without_checkpoint_authorization_before_loading_bars(
     ])
     assert rc == 1
     assert gate.PHASE7_CHECKPOINT_EVALUATION_NOT_AUTHORIZED in capsys.readouterr().out
+
+
+def _synthetic_checkpoint_history(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, include_exact63: bool = True,
+) -> Path:
+    """Build manifest-valid snapshots with invented prices, never provider data."""
+    authorization = first._historical_snapshot_authorization()
+    calendar = xcals.get_calendar("XNYS")
+    snapshot_root = tmp_path / "prospective" / "snapshots"
+    auth_sha = sha256(gate.collector._AUTHORIZATION_PATH.read_bytes()).hexdigest()
+    first_manifest = None
+    selected = None
+    history = ((1, "2026-09-28"), (63, "2026-12-24")) if include_exact63 else (
+        (1, "2026-09-28"),)
+    for count, end in history:
+        sessions = calendar.sessions_in_range("2025-11-24", end)
+        assert len(sessions) == 210 + count
+        frames = {}
+        for offset, symbol in enumerate(authorization.research_universe):
+            close = 100.0 + offset
+            frames[symbol] = pd.DataFrame({
+                "open": [close] * len(sessions),
+                "high": [close + 1.0] * len(sessions),
+                "low": [close - 1.0] * len(sessions),
+                "close": [close] * len(sessions),
+                "volume": [1000] * len(sessions),
+            }, index=sessions)
+        request = Generation4Phase7DataRequest.model_validate({
+            "schema_version": "GENERATION4-PHASE7-DATA-REQUEST-v1",
+            "symbols": list(authorization.research_universe),
+            "requested_start": "2025-11-24",
+            "requested_end": end,
+            "scored_start": "2026-09-28",
+            "warmup_session_count": 210,
+            "scored_session_count": count,
+        })
+        retrieved = (calendar.session_close(end) + pd.Timedelta(hours=1)).isoformat()
+        snapshot_id = _snapshot_id(authorization, request, retrieved)
+        manifest, payloads = _build_snapshot(
+            authorization, request, frames, frames,
+            {symbol: pd.DataFrame(columns=["ex_div_date"])
+             for symbol in authorization.research_universe},
+            {symbol: {"dividend_list": []} for symbol in authorization.research_universe},
+            {symbol: {"split_list": []} for symbol in authorization.research_universe},
+            retrieved, snapshot_id=snapshot_id, authorization_sha256=auth_sha,
+        )
+        snapshot = snapshot_root / snapshot_id
+        _write_snapshot(snapshot, manifest, payloads)
+        if count == 1:
+            first_manifest = manifest
+        selected = snapshot
+    contract = dict(first._contract())
+    contract["first_verified_snapshot_id"] = first_manifest["snapshot_id"]
+    contract["first_verified_snapshot_manifest_sha256"] = first_manifest["manifest_sha256"]
+    monkeypatch.setattr(first, "_contract", lambda: contract)
+    monkeypatch.setattr(gate.collector, "_OUTPUT_DIR", snapshot_root.parent)
+    monkeypatch.setattr(gate, "_SNAPSHOT_ROOT", snapshot_root)
+    return selected
+
+
+def _trace_sensitive_reads(
+    monkeypatch: pytest.MonkeyPatch, snapshot_root: Path, record,
+) -> None:
+    """Observe both Path and builtin raw-open routes for synthetic payloads."""
+    original_read = Path.read_bytes
+    original_path_open = Path.open
+    original_builtin_open = builtins.open
+
+    def sensitive(path: Path) -> bool:
+        return path.is_relative_to(snapshot_root) and (
+            "bars" in path.parts or "corporate_actions" in path.parts
+        )
+
+    def read(path: Path) -> bytes:
+        if sensitive(path):
+            record(path)
+        return original_read(path)
+
+    def path_open(path: Path, *args, **kwargs):
+        mode = args[0] if args else kwargs.get("mode", "r")
+        if "r" in mode and sensitive(path):
+            record(path)
+        return original_path_open(path, *args, **kwargs)
+
+    def builtin_open(path, *args, **kwargs):
+        mode = args[0] if args else kwargs.get("mode", "r")
+        if isinstance(path, (str, Path)) and "r" in mode and sensitive(Path(path)):
+            record(Path(path))
+        return original_builtin_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_bytes", read)
+    monkeypatch.setattr(Path, "open", path_open)
+    monkeypatch.setattr(builtins, "open", builtin_open)
+
+
+def test_exact63_readiness_uses_no_raw_performance_payloads(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    selected = _synthetic_checkpoint_history(monkeypatch, tmp_path)
+    raw_reads: list[str] = []
+    _trace_sensitive_reads(
+        monkeypatch, selected.parent,
+        lambda path: raw_reads.append(path.relative_to(selected.parent).as_posix()),
+    )
+    readiness = first.first_checkpoint_readiness()
+    assert readiness["status"] == gate.collector.PHASE7_CHECKPOINT_READY
+    assert readiness["selected_snapshot_scored_sessions"] == 63
+    assert raw_reads == []
+
+
+def test_pending_readiness_uses_no_raw_performance_payloads(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    latest = _synthetic_checkpoint_history(
+        monkeypatch, tmp_path, include_exact63=False
+    )
+    raw_reads: list[str] = []
+    _trace_sensitive_reads(
+        monkeypatch, latest.parent,
+        lambda path: raw_reads.append(path.relative_to(latest.parent).as_posix()),
+    )
+    readiness = first.first_checkpoint_readiness()
+    assert readiness["status"] == gate.PHASE7_CHECKPOINT_PENDING
+    assert raw_reads == []
+
+
+@pytest.mark.parametrize("checkpoint_bytes", [None, b"{", b"{}"])
+def test_public_checkpoint_path_denies_without_raw_performance_reads(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    checkpoint_bytes: bytes | None,
+) -> None:
+    selected = _synthetic_checkpoint_history(monkeypatch, tmp_path)
+    checkpoint_path = tmp_path / "checkpoint-authorization.json"
+    if checkpoint_bytes is not None:
+        checkpoint_path.write_bytes(checkpoint_bytes)
+    monkeypatch.setattr(gate, "_AUTHORIZATION_PATH", checkpoint_path)
+    raw_reads: list[str] = []
+    _trace_sensitive_reads(
+        monkeypatch, selected.parent,
+        lambda path: raw_reads.append(path.relative_to(selected.parent).as_posix()),
+    )
+    with pytest.raises(gate.CheckpointGateError):
+        cli.evaluate_phase7_checkpoint(selected, gate.collector._AUTHORIZATION_PATH)
+    assert raw_reads == []
 
 
 def test_missing_checkpoint_authorization_fails_closed_after_structural_ready(
@@ -512,6 +657,7 @@ def test_checkpoint_authorization_drift_after_issuance_denied_before_loaders(
     original_table = cli._snapshot_file_table
     original_permit = gate.checkpoint_execution_permit
     calls = {"issued": 0, "bars": 0, "actions": 0, "report": 0}
+    raw_reads: list[str] = []
 
     def issue(path: Path):
         permit = original_permit(path)
@@ -543,6 +689,10 @@ def test_checkpoint_authorization_drift_after_issuance_denied_before_loaders(
     monkeypatch.setattr(cli, "_load_bars", sensitive_loader)
     monkeypatch.setattr(cli, "_load_corporate_actions", action_loader)
     monkeypatch.setattr(cli, "_governed_prospective_checkpoint_report", report_loader)
+    _trace_sensitive_reads(
+        monkeypatch, snapshot,
+        lambda path: raw_reads.append(path.relative_to(snapshot).as_posix()),
+    )
 
     with pytest.raises(gate.CheckpointGateError):
         cli._evaluate_checkpoint_command(SimpleNamespace(
@@ -550,6 +700,7 @@ def test_checkpoint_authorization_drift_after_issuance_denied_before_loaders(
             evaluation_authorization=str(gate.collector._AUTHORIZATION_PATH),
         ))
     assert calls == {"issued": 1, "bars": 0, "actions": 0, "report": 0}
+    assert raw_reads == []
 
 
 def test_result_is_content_bound_and_second_write_is_denied(
@@ -613,9 +764,10 @@ def test_result_is_content_bound_and_second_write_is_denied(
 
 
 @pytest.mark.parametrize("mutate_after_consumption", [False, True])
+@pytest.mark.parametrize("payload_mutation", ["none", "before", "after"])
 def test_synthetic_exact_63_cli_runs_only_after_checkpoint_authorization(
     bound_evidence, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys,
-    mutate_after_consumption: bool,
+    mutate_after_consumption: bool, payload_mutation: str,
 ) -> None:
     _, selected, authority, write = _authorized_synthetic_boundary(monkeypatch, tmp_path)
     # This full replay fixture uses a separately generated general authorization;
@@ -667,26 +819,61 @@ def test_synthetic_exact_63_cli_runs_only_after_checkpoint_authorization(
     write(authority)
     monkeypatch.setattr(gate, "_RESULT_PATH", tmp_path / "result" / "checkpoint-result.json")
 
-    if mutate_after_consumption:
-        original_consume = gate.consume_checkpoint_permit
+    events = {"consumed": False, "deep_attempts": 0, "raw_reads": [], "bar_loads": 0}
+    original_consume = gate.consume_checkpoint_permit
+    original_deep = gate.collector.verify_snapshot_payloads
+    original_load_bars = cli._load_bars
 
-        def consume_then_mutate(*args: object, **kwargs: object):
-            capability = original_consume(*args, **kwargs)
+    def consume_then_mark(*args: object, **kwargs: object):
+        capability = original_consume(*args, **kwargs)
+        events["consumed"] = True
+        if mutate_after_consumption:
             gate._AUTHORIZATION_PATH.write_bytes(
                 gate._AUTHORIZATION_PATH.read_bytes() + b" "
             )
             amendment._AMENDMENT_PATH.write_bytes(
                 amendment._AMENDMENT_PATH.read_bytes() + b" "
             )
-            return capability
+        if payload_mutation == "before":
+            (snapshot / "bars/qfq/GLD.csv").write_bytes(b"changed before verification")
+        return capability
 
-        monkeypatch.setattr(gate, "consume_checkpoint_permit", consume_then_mutate)
+    def deep_then_mutate(*args: object, **kwargs: object):
+        assert events["consumed"]
+        events["deep_attempts"] += 1
+        verified = original_deep(*args, **kwargs)
+        if payload_mutation == "after":
+            (snapshot / "bars/qfq/GLD.csv").write_bytes(b"changed after verification")
+        return verified
+
+    def load_bars(*args: object, **kwargs: object):
+        events["bar_loads"] += 1
+        return original_load_bars(*args, **kwargs)
+
+    _trace_sensitive_reads(
+        monkeypatch, snapshot,
+        lambda path: events["raw_reads"].append(events["consumed"]),
+    )
+    monkeypatch.setattr(gate, "consume_checkpoint_permit", consume_then_mark)
+    monkeypatch.setattr(gate.collector, "verify_snapshot_payloads", deep_then_mutate)
+    monkeypatch.setattr(cli, "_load_bars", load_bars)
 
     rc = cli.main([
         "evaluate-phase7-checkpoint", "--evaluation-authorization", str(general_path),
         "--snapshot", str(snapshot),
     ])
     payload = json.loads(capsys.readouterr().out)
+    if payload_mutation == "before":
+        assert rc == 1, payload
+        assert payload["code"] == cli.GEN4_PHASE7_EVAL_EVIDENCE_INVALID
+        assert events["deep_attempts"] == 1
+        assert events["bar_loads"] == 0
+        assert events["raw_reads"] and all(events["raw_reads"])
+        assert not gate._RESULT_PATH.exists()
+        return
     assert rc == 0, payload
     assert payload["status"] == "PHASE7_CHECKPOINT_EVALUATED"
     assert gate._RESULT_PATH.is_file()
+    assert events["deep_attempts"] == 1
+    assert events["bar_loads"] == 2
+    assert events["raw_reads"] and all(events["raw_reads"])

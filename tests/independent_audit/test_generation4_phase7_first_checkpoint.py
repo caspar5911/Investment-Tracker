@@ -126,7 +126,7 @@ def test_readiness_uses_only_exact_63_verified_snapshot(
     records, expected_status, selected_count, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     manifests = [_record(*item[:2], first_snapshot=item[2]) for item in records]
-    monkeypatch.setattr(first.collector, "_verified_snapshots", lambda authorization: manifests)
+    monkeypatch.setattr(first.collector, "_structural_snapshots", lambda authorization: manifests)
     monkeypatch.setattr(
         first.collector, "acquire_prospective_phase7_data",
         lambda **kwargs: pytest.fail("provider path was reached"),
@@ -150,7 +150,7 @@ def test_corrupt_snapshot_abstains_without_evaluation(monkeypatch: pytest.Monkey
             phase7_collector.PHASE7_UNKNOWN_ABSTAIN, "synthetic_corruption"
         )
 
-    monkeypatch.setattr(first.collector, "_verified_snapshots", corrupt)
+    monkeypatch.setattr(first.collector, "_structural_snapshots", corrupt)
     report = first.first_checkpoint_readiness()
     assert report["status"] == "PHASE7_UNKNOWN_ABSTAIN"
     assert report["performance_computed"] is False
@@ -165,7 +165,7 @@ def test_contract_drift_abstains_before_snapshot_read(
     bad.write_text(json.dumps(contract), encoding="utf-8")
     monkeypatch.setattr(first, "_CONTRACT_PATH", bad)
     monkeypatch.setattr(
-        first.collector, "_verified_snapshots",
+        first.collector, "_structural_snapshots",
         lambda authorization: pytest.fail("snapshot read before contract validation"),
     )
     report = first.first_checkpoint_readiness()
@@ -184,7 +184,7 @@ def test_missing_authorization_abstains_before_snapshot_read(
         ),
     )
     monkeypatch.setattr(
-        first.collector, "_verified_snapshots",
+        first.collector, "_structural_snapshots",
         lambda authorization: pytest.fail("snapshot read before authorization"),
     )
     report = first.first_checkpoint_readiness()
@@ -199,7 +199,7 @@ def test_first_snapshot_identity_mismatch_abstains(
     first_record["manifest_sha256"] = "0" * 64
     exact = _record(63, "2026-12-24")
     monkeypatch.setattr(
-        first.collector, "_verified_snapshots", lambda authorization: [first_record, exact]
+        first.collector, "_structural_snapshots", lambda authorization: [first_record, exact]
     )
     report = first.first_checkpoint_readiness()
     assert report["status"] == "PHASE7_UNKNOWN_ABSTAIN"
@@ -213,7 +213,7 @@ def test_later_snapshot_does_not_change_first_checkpoint_chain(
     exact = _record(63, "2026-12-24")
     later = _record(64, "2026-12-28")
     records = [first_record, exact]
-    monkeypatch.setattr(first.collector, "_verified_snapshots", lambda _: records)
+    monkeypatch.setattr(first.collector, "_structural_snapshots", lambda _: records)
     before = first.first_checkpoint_readiness()
     records.append(later)
     after = first.first_checkpoint_readiness()

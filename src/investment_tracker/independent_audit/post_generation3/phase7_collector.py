@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import tempfile
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
 from io import BytesIO
@@ -151,12 +152,56 @@ def _expected_file_paths(symbols: tuple[str, ...]) -> set[str]:
     }
 
 
-def verify_snapshot(
+@dataclass(frozen=True, slots=True)
+class StructuralSnapshot:
+    """Manifest-only identity; contains no performance-bearing payload bytes."""
+
+    snapshot_id: str
+    manifest_sha256: str
+    requested_start: str
+    requested_end: str
+    scored_start: str
+    warmup_session_count: int
+    scored_session_count: int
+    candidate_id: str
+    evaluation_authorization_id: str
+    evaluation_authorization_sha256: str
+    manifest_bytes: bytes
+
+    def history_record(self) -> dict[str, Any]:
+        return {
+            key: getattr(self, key) for key in (
+                "snapshot_id", "manifest_sha256", "requested_start",
+                "requested_end", "scored_start", "warmup_session_count",
+                "scored_session_count", "candidate_id",
+                "evaluation_authorization_id", "evaluation_authorization_sha256",
+            )
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class VerifiedCheckpointSnapshot:
+    """Immutable bytes that passed full verification after capability consumption."""
+
+    structural: StructuralSnapshot
+    payloads: tuple[tuple[str, bytes], ...]
+
+    def payload(self, relative: str) -> bytes:
+        for path, value in self.payloads:
+            if path == relative:
+                return value
+        raise Generation4Phase7CollectorError(PHASE7_UNKNOWN_ABSTAIN, f"missing_file:{relative}")
+
+    def manifest(self) -> dict[str, Any]:
+        return json.loads(self.structural.manifest_bytes)
+
+
+def verify_snapshot_structure(
     snapshot_dir: Path,
     authorization: Generation4Phase7EvaluationAuthorization,
-    authorization_source: Path | VerifiedPhase7Authorization,
-) -> dict[str, Any]:
-    """Verify snapshot bytes and structure without calculating performance."""
+    authorization_source: Path | VerifiedPhase7Authorization | str,
+) -> StructuralSnapshot:
+    """Verify manifest, file names, and declared hashes without reading payloads."""
     if isinstance(authorization_source, VerifiedPhase7Authorization):
         _require(authorization_source.authorization is authorization, "authorization_identity")
     _require(
@@ -170,11 +215,17 @@ def verify_snapshot(
     try:
         raw = manifest_path.read_bytes()
         manifest = json.loads(raw)
-        auth_hash = (
-            authorization_source.sha256
-            if isinstance(authorization_source, VerifiedPhase7Authorization)
-            else sha256(authorization_source.read_bytes()).hexdigest()
-        )
+        if isinstance(authorization_source, VerifiedPhase7Authorization):
+            auth_hash = authorization_source.sha256
+        elif isinstance(authorization_source, Path):
+            auth_hash = sha256(authorization_source.read_bytes()).hexdigest()
+        else:
+            _require(
+                isinstance(authorization_source, str)
+                and re.fullmatch(r"[0-9a-f]{64}", authorization_source) is not None,
+                "authorization_hash",
+            )
+            auth_hash = authorization_source
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise Generation4Phase7CollectorError(
             PHASE7_UNKNOWN_ABSTAIN, "manifest_or_authorization_bytes"
@@ -274,11 +325,71 @@ def verify_snapshot(
         for item in snapshot_dir.rglob("*") if item.is_file()
     } - {"manifest.json"}
     _require(actual == expected_paths, "snapshot_file_set")
+    declared = {entry["path"]: entry["sha256"] for entry in file_entries}
+    _require(
+        all(re.fullmatch(r"[0-9a-f]{64}", digest) is not None
+            for digest in declared.values()),
+        "file_hash_schema",
+    )
+    for symbol in symbols:
+        _require(
+            manifest["symbols"][symbol] == {
+                "qfq_sha256": declared[f"bars/qfq/{symbol}.csv"],
+                "unadjusted_sha256": declared[f"bars/unadjusted/{symbol}.csv"],
+                "rehab_sha256": declared[f"corporate_actions/rehab/{symbol}.csv"],
+                "dividends_sha256": declared[f"corporate_actions/dividends/{symbol}.json"],
+                "splits_sha256": declared[f"corporate_actions/splits/{symbol}.json"],
+            },
+            f"symbol_hashes:{symbol}",
+        )
+    return StructuralSnapshot(
+        snapshot_id=manifest["snapshot_id"],
+        manifest_sha256=manifest["manifest_sha256"],
+        requested_start=manifest["requested_start"],
+        requested_end=manifest["requested_end"],
+        scored_start=manifest["scored_start"],
+        warmup_session_count=manifest["warmup_session_count"],
+        scored_session_count=manifest["scored_session_count"],
+        candidate_id=manifest["candidate_id"],
+        evaluation_authorization_id=manifest["evaluation_authorization_id"],
+        evaluation_authorization_sha256=manifest["evaluation_authorization_sha256"],
+        manifest_bytes=raw,
+    )
+
+
+def verify_snapshot_payloads(
+    snapshot_dir: Path,
+    authorization: Generation4Phase7EvaluationAuthorization,
+    authorization_source: Path | VerifiedPhase7Authorization | str,
+    *,
+    expected_manifest_sha256: str | None = None,
+) -> VerifiedCheckpointSnapshot:
+    """Read and fully verify payload bytes once, after the checkpoint capability."""
+    structural = verify_snapshot_structure(
+        snapshot_dir, authorization, authorization_source
+    )
+    if expected_manifest_sha256 is not None:
+        _require(structural.manifest_sha256 == expected_manifest_sha256, "manifest_drift")
+    manifest = json.loads(structural.manifest_bytes)
+    sessions = _validate_request({
+        "schema_version": "GENERATION4-PHASE7-DATA-REQUEST-v1",
+        "symbols": list(authorization.research_universe),
+        "requested_start": manifest["requested_start"],
+        "requested_end": manifest["requested_end"],
+        "scored_start": manifest["scored_start"],
+        "warmup_session_count": manifest["warmup_session_count"],
+        "scored_session_count": manifest["scored_session_count"],
+    }, retrieved_at_utc=manifest["retrieved_at_utc"])[1]
+    file_entries = manifest["files"]
+    symbols = tuple(authorization.research_universe)
     hashes: dict[str, str] = {}
+    payloads: list[tuple[str, bytes]] = []
     for entry in file_entries:
         relative = entry["path"]
+        path = snapshot_dir / relative
+        _require(path.is_file() and not path.is_symlink(), f"payload_path:{relative}")
         try:
-            payload = (snapshot_dir / relative).read_bytes()
+            payload = path.read_bytes()
         except OSError as exc:
             raise Generation4Phase7CollectorError(
                 PHASE7_UNKNOWN_ABSTAIN, f"missing_file:{relative}"
@@ -289,6 +400,7 @@ def verify_snapshot(
             f"file_hash:{relative}",
         )
         hashes[relative] = digest
+        payloads.append((relative, payload))
         if relative.startswith("bars/"):
             try:
                 frame = pd.read_csv(BytesIO(payload), index_col=0)
@@ -329,7 +441,36 @@ def verify_snapshot(
             },
             f"symbol_hashes:{symbol}",
         )
-    return manifest
+    return VerifiedCheckpointSnapshot(structural, tuple(payloads))
+
+
+def verify_snapshot(
+    snapshot_dir: Path,
+    authorization: Generation4Phase7EvaluationAuthorization,
+    authorization_source: Path | VerifiedPhase7Authorization,
+) -> dict[str, Any]:
+    """Collection-time deep verification remains mandatory and unchanged."""
+    return verify_snapshot_payloads(
+        snapshot_dir, authorization, authorization_source
+    ).manifest()
+
+
+def _structural_snapshots(
+    authorization: Generation4Phase7EvaluationAuthorization,
+) -> list[dict[str, Any]]:
+    """Checkpoint pre-authorization history: manifests and file metadata only."""
+    root = _OUTPUT_DIR / "snapshots"
+    _require(not root.is_symlink(), "snapshots_directory_symlink")
+    if not root.exists():
+        return []
+    _require(root.is_dir() and not root.is_symlink(), "snapshots_directory")
+    records = [
+        verify_snapshot_structure(snapshot_dir, authorization, _AUTHORIZATION_PATH).history_record()
+        for snapshot_dir in sorted(root.iterdir())
+    ]
+    ends = [record["requested_end"] for record in records]
+    _require(len(ends) == len(set(ends)), "duplicate_acquired_session")
+    return sorted(records, key=lambda item: item["requested_end"])
 
 
 def _verified_snapshots(
