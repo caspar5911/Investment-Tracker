@@ -6,17 +6,17 @@
   "original_evaluation_authorization_sha256": "35c767097e135319f059060ca01553160f8ae492b9571769a90bafe1a4585812",
   "evaluation_contract_sha256": "b1dccfe54762f9e9e13a496e0d574999a5b547ff986d3e7ec1c1ca9b03835f39",
   "first_checkpoint_contract_sha256": "464b53fea8b08b33b3db851d27b3f4c1228ecf9bcb8a88966faa8c2a50d413bf",
-  "implementation_commit": "a967cd92c6e62bf043a5cb20c0cafd8fa58af5c6",
+  "implementation_commit": "7f6b44bd2cb3a34bd95b9725350947c726858732",
   "source_sha256": {
     "src/investment_tracker/independent_audit/post_generation3/phase7_evaluation.py": "4cdeb100013da639a5084a5bbd46e3a69aba0ee2c6dc908a6cf523ff69630209",
-    "src/investment_tracker/independent_audit/post_generation3/phase7_evaluation_cli.py": "11a1f33e7e1427c9093cdb67cd5ca282dc031f6c26d603755ba54e85e46adcca",
+    "src/investment_tracker/independent_audit/post_generation3/phase7_evaluation_cli.py": "f5291bb3cdb2c1f1408c7a497fe963e2e2915ebb581e668dc3e41ef28c8973bf",
     "src/investment_tracker/independent_audit/post_generation3/phase7_data.py": "6e051e803d14cc8f68ec00ca967b0b81583c331aaa4b5856c17bbe66f438f755",
     "src/investment_tracker/independent_audit/post_generation3/phase7_collector.py": "79a7cf22e442ef18fe134f077f9ed39f12166cd87093af660c85330f6e5379ff",
     "src/investment_tracker/independent_audit/post_generation3/phase7_collector_cli.py": "f7f352aea2fe1ae0361e253617f5816cc50d82bc0ead0542647d5ea05eeffac5",
     "src/investment_tracker/independent_audit/post_generation3/phase7_first_checkpoint.py": "f742c4a3e661140e18b58e699bd2a0ed70f516921ad15e11301a900bfb1f4942",
-    "src/investment_tracker/independent_audit/post_generation3/phase7_checkpoint_gate.py": "b075c6a592cdf30c1606fb301b54595ee6a7fa9edd96f5bd6674af3922d37c8d",
+    "src/investment_tracker/independent_audit/post_generation3/phase7_checkpoint_gate.py": "585ba61ea6cb2bab98fb0303ffc0227d000ff2fd8c612aa0103c3115d7388b0a",
     "src/investment_tracker/independent_audit/post_generation3/phase7_source_amendment.py": "33ea08944e3b7760bc50f9632faa1038fe47f138b05c1ac267fb73f58e8c4eda",
-    "src/investment_tracker/quant/phase7/generation4_durability.py": "fc386e7e924537e3ca690c3566732fb51f932af0ea319b87141c8d757d360110"
+    "src/investment_tracker/quant/phase7/generation4_durability.py": "9319173098c9d5f5f103f2183536a1b0ad62775915ee1b57774a57f4c6f3ad69"
   },
   "candidate_id": "G2-A|lookback=189|skip=21|top_k=1|rebalance=21",
   "research_universe": [
@@ -59,11 +59,12 @@
   "holdout_reuse_authorized": false,
   "result_dependent_methodology_change_allowed": false,
   "audit_checks": [
-    "Compare every current source byte and hash against implementation_commit; this amendment closes the post-validation authorization reread race without changing methodology.",
-    "Verify the canonical path, exact bytes, parsed object, and ID against the pinned original authorization; carry the SHA of those same bytes through CLI, collector, acquisition, and snapshot verification without reopening the authorization after validation.",
-    "Verify copied files, symlinks, mapping acquisition, changed first reads, and forged verified results fail before provider access; verify a later filesystem change cannot alter the validated SHA, snapshot ID, or provider gate.",
+    "Compare every current source byte and hash against implementation_commit; this amendment closes the checkpoint authorization pre-load race without changing methodology.",
+    "Verify the previously remediated evaluation authorization remains a one-read, immutable identity through CLI, collector, acquisition, and snapshot verification; copied files, symlinks, mappings, changed first reads, and forged verified results must fail before provider access.",
+    "Verify exact-63 structural readiness, issued checkpoint permit, and one-shot pre-load consumption; checkpoint or source-amendment authorization drift between issuance and consumption must fail before bars, corporate actions, or replay are loaded.",
+    "Verify consumed capability identity, snapshot and chain bindings, forgery rejection, no double consumption or report reuse, and append-only result publication without post-load authorization-file rereads.",
     "Verify original evaluation authorization, first-checkpoint contract, candidate, universe, benchmark, friction schedule, warmup, DQ-030 and RECON-009 independently.",
-    "Confirm frozen methodology and accounting were not changed; source amendment only restores governed collection.",
+    "Confirm frozen methodology and accounting were not changed; source amendment remains separate from checkpoint evaluation authorization.",
     "Confirm no provider was contacted, no market data was acquired, no prospective performance was computed or inspected, and no final holdout data was accessed in the engineering review.",
     "Issue auditor-owned source amendment only if all checks pass; keep checkpoint evaluation unauthorized."
   ]
