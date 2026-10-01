@@ -1,0 +1,30 @@
+name: research-ui
+on:
+  push:
+    branches: ["feat/research-ui"]
+    paths:
+      - "apps/research-ui/**"
+      - ".github/workflows/research-ui.yml"
+  pull_request:
+    paths:
+      - "apps/research-ui/**"
+      - ".github/workflows/research-ui.yml"
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install frontend
+        working-directory: apps/research-ui/frontend
+        run: npm install
+      - name: Typecheck and build frontend
+        working-directory: apps/research-ui/frontend
+        run: npm run build
+      - name: Validate Python API syntax
+        run: python -m py_compile apps/research-ui/backend/app.py
+      - name: Build deployment images
+        working-directory: apps/research-ui
+        run: docker compose build

@@ -1,0 +1,32 @@
+{
+  "schema_version": "POST-GENERATION3-INDEPENDENT-AUDIT-REQUEST-v1",
+  "status": "DRAFT_NOT_APPROVED",
+  "authority_granted": false,
+  "predecessor": {
+    "closure_commit": "df9a0c974a392f414dc9b44551b544aa64e8e7f6",
+    "status": "PHASE6_UNKNOWN_ABSTAIN",
+    "holdout_consumed": true,
+    "retry_authorized": false,
+    "phase7_authorized": false,
+    "recon009_status": "OPEN"
+  },
+  "proposal": {
+    "dividend_contract": "DIVIDEND-RECONCILIATION-CONTRACT-v3",
+    "split_contract": "CORPORATE-ACTION-NORMALIZATION-CONTRACT-v2",
+    "frozen_candidate_id": "G2-A|lookback=189|skip=21|top_k=1|rebalance=21",
+    "generation_name": "UNDECIDED_REQUIRES_INDEPENDENT_AUDIT"
+  },
+  "decisions_requested": [
+    "APPROVE_OR_REJECT_STRUCTURED_REHAB_DIVIDEND_AMOUNT_AUTHORITY",
+    "APPROVE_OR_REJECT_ENDPOINT_STATEMENT_NON_NUMERIC_ROLE",
+    "VERIFY_PYTHON_SDK_SPECIAL_DIVIDEND_MAPPING",
+    "VERIFY_FROZEN_SURVIVOR_AND_PREDECESSOR_IMMUTABILITY",
+    "DECIDE_FORMAL_SUCCESSOR_NAME",
+    "ISSUE_OR_REJECT_STAGE_A_METHODOLOGY_AND_BLIND_SELECTION_AUTHORIZATION"
+  ],
+  "protected_history_access_authorized": false,
+  "phase7_authorized": false,
+  "production_readiness_approved": false,
+  "recon009_status": "OPEN",
+  "paper_only": true
+}
