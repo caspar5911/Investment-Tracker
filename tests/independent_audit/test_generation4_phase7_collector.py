@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import json
+import errno
+import os
+import tempfile
 from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
+from types import SimpleNamespace
 
 import exchange_calendars as xcals
 import pandas as pd
@@ -90,6 +94,18 @@ def _write_synthetic_snapshot(
     snapshot_dir = environment["output_dir"] / "snapshots" / snapshot_id
     _write_snapshot(snapshot_dir, manifest, payloads)
     return snapshot_dir, manifest
+
+
+def _synthetic_next_acquisition(environment, calls: list[str]):
+    def acquire(**kwargs):
+        calls.append(kwargs["request"]["requested_end"])
+        stage_environment = {**environment, "output_dir": kwargs["output_dir"]}
+        return _write_synthetic_snapshot(
+            stage_environment, scored_count=2,
+            retrieved_at_utc=kwargs["retrieved_at_utc"],
+        )[1]
+
+    return acquire
 
 
 @pytest.mark.parametrize(
@@ -428,6 +444,191 @@ def test_new_completed_session_uses_frozen_request_and_appends_snapshot(
     assert result["scored_session_count"] == 2
     assert (first_dir / "manifest.json").read_bytes() == original_manifest
     assert len(list((environment["output_dir"] / "snapshots").iterdir())) == 2
+
+
+def test_publication_rename_error_identifies_unpublished_snapshot(
+    environment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first_dir, _ = _write_synthetic_snapshot(environment)
+    calls: list[str] = []
+    monkeypatch.setattr(
+        collector, "acquire_prospective_phase7_data",
+        _synthetic_next_acquisition(environment, calls),
+    )
+    original_rename = Path.rename
+
+    def locked_rename(path: Path, destination: Path):
+        if path.name.startswith("gen4-phase7-snapshot-"):
+            error = PermissionError(errno.EACCES, "synthetic rename lock")
+            error.winerror = 32
+            raise error
+        return original_rename(path, destination)
+
+    monkeypatch.setattr(Path, "rename", locked_rename)
+
+    with pytest.raises(collector.Generation4Phase7CollectorError) as exc:
+        collector.collect_prospective_data()
+
+    assert exc.value.code == collector.PHASE7_UNKNOWN_ABSTAIN
+    assert exc.value.detail.startswith("publication_rename:")
+    assert "PermissionError" in exc.value.detail
+    assert "errno=13" in exc.value.detail
+    assert "winerror=32" in exc.value.detail
+    assert isinstance(exc.value.__cause__, PermissionError)
+    assert first_dir.is_dir()
+    assert len(list((environment["output_dir"] / "snapshots").iterdir())) == 1
+    assert collector.prospective_status()["scored_session_count"] == 1
+    assert calls == ["2026-09-29"]
+
+
+def test_cleanup_error_after_rename_identifies_published_snapshot_without_reacquisition(
+    environment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_synthetic_snapshot(environment)
+    calls: list[str] = []
+    monkeypatch.setattr(
+        collector, "acquire_prospective_phase7_data",
+        _synthetic_next_acquisition(environment, calls),
+    )
+    original_temporary_directory = collector.tempfile.TemporaryDirectory
+
+    class CleanupFailure:
+        def __init__(self, *args, **kwargs):
+            self.inner = original_temporary_directory(*args, **kwargs)
+
+        def __enter__(self):
+            return self.inner.__enter__()
+
+        def __exit__(self, *args):
+            self.inner.__exit__(*args)
+            error = PermissionError(errno.EACCES, "synthetic cleanup lock")
+            error.winerror = 32
+            raise error
+
+    monkeypatch.setattr(
+        collector, "tempfile",
+        SimpleNamespace(TemporaryDirectory=CleanupFailure),
+    )
+
+    with pytest.raises(collector.Generation4Phase7CollectorError) as exc:
+        collector.collect_prospective_data()
+
+    assert exc.value.code == collector.PHASE7_UNKNOWN_ABSTAIN
+    assert exc.value.detail.startswith("post_publication_cleanup:")
+    assert "PermissionError" in exc.value.detail
+    assert "errno=13" in exc.value.detail
+    assert "winerror=32" in exc.value.detail
+    assert isinstance(exc.value.__cause__, PermissionError)
+    status = collector.prospective_status()
+    assert status["scored_session_count"] == 2
+    assert status["latest_acquired_session"] == "2026-09-29"
+    assert status["manifest_verification"] == "VERIFIED"
+    assert len(list((environment["output_dir"] / "snapshots").iterdir())) == 2
+    assert collector.collect_prospective_data()["status"] == "NO_NEW_COMPLETED_SESSION"
+    assert calls == ["2026-09-29"]
+
+
+def test_staging_creation_error_has_distinct_provenance_before_provider(
+    environment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first_dir, _ = _write_synthetic_snapshot(environment)
+
+    def denied_staging(*args, **kwargs):
+        error = PermissionError(errno.EACCES, "synthetic staging lock")
+        error.winerror = 5
+        raise error
+
+    monkeypatch.setattr(
+        collector, "tempfile",
+        SimpleNamespace(TemporaryDirectory=denied_staging),
+    )
+    monkeypatch.setattr(
+        collector, "acquire_prospective_phase7_data",
+        lambda **kwargs: pytest.fail("provider reached after staging failure"),
+    )
+
+    with pytest.raises(collector.Generation4Phase7CollectorError) as exc:
+        collector.collect_prospective_data()
+
+    assert exc.value.code == collector.PHASE7_UNKNOWN_ABSTAIN
+    assert exc.value.detail.startswith("staging_setup:")
+    assert "PermissionError" in exc.value.detail
+    assert "errno=13" in exc.value.detail
+    assert "winerror=5" in exc.value.detail
+    assert first_dir.is_dir()
+    assert len(list((environment["output_dir"] / "snapshots").iterdir())) == 1
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows file sharing semantics")
+def test_windows_open_staged_file_blocks_snapshot_directory_rename(tmp_path: Path) -> None:
+    output = tmp_path / "prospective"
+    output.mkdir()
+    with tempfile.TemporaryDirectory(prefix=".phase7-collector-", dir=output) as stage:
+        staged = Path(stage) / "snapshots" / "fake-snapshot"
+        staged.mkdir(parents=True)
+        dummy = staged / "dummy.txt"
+        dummy.write_text("synthetic", encoding="utf-8")
+        destination_root = output / "snapshots"
+        destination_root.mkdir()
+        destination = destination_root / "fake-snapshot"
+
+        with dummy.open("rb"):
+            with pytest.raises(PermissionError) as exc:
+                staged.rename(destination)
+
+        assert exc.value.errno == errno.EACCES
+        assert exc.value.winerror in (5, 32)
+        assert not destination.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows directory handle semantics")
+def test_windows_locked_empty_staging_directory_blocks_cleanup_after_rename(
+    tmp_path: Path,
+) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_file = kernel32.CreateFileW
+    create_file.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+        wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+    ]
+    create_file.restype = wintypes.HANDLE
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = [wintypes.HANDLE]
+    close_handle.restype = wintypes.BOOL
+    output = tmp_path / "prospective"
+    output.mkdir()
+    destination = output / "snapshots" / "fake-snapshot"
+    handle = None
+    stage_path = None
+    try:
+        with pytest.raises(PermissionError) as exc:
+            with tempfile.TemporaryDirectory(
+                prefix=".phase7-collector-", dir=output
+            ) as stage:
+                stage_path = Path(stage)
+                staged = stage_path / "snapshots" / "fake-snapshot"
+                staged.mkdir(parents=True)
+                (staged / "dummy.txt").write_text("synthetic", encoding="utf-8")
+                destination.parent.mkdir()
+                staged.rename(destination)
+                handle = create_file(
+                    str(stage_path / "snapshots"), 0x0001, 0x0003, None,
+                    3, 0x02000000, None,
+                )
+                assert handle != ctypes.c_void_p(-1).value
+
+        assert exc.value.errno == errno.EACCES
+        assert exc.value.winerror == 32
+        assert destination.is_dir()
+    finally:
+        if handle is not None:
+            close_handle(handle)
+        if stage_path is not None and stage_path.exists():
+            (stage_path / "snapshots").rmdir()
+            stage_path.rmdir()
 
 
 def test_failed_acquisition_preserves_prior_snapshot(

@@ -69,6 +69,17 @@ def _require(condition: bool, detail: str) -> None:
         raise Generation4Phase7CollectorError(PHASE7_UNKNOWN_ABSTAIN, detail)
 
 
+def _filesystem_failure_detail(stage: str, exc: OSError) -> str:
+    """Expose the failing operation and OS code without leaking local paths."""
+    parts = [stage, type(exc).__name__]
+    if exc.errno is not None:
+        parts.append(f"errno={exc.errno}")
+    winerror = getattr(exc, "winerror", None)
+    if winerror is not None:
+        parts.append(f"winerror={winerror}")
+    return ":".join(parts)
+
+
 def _verified_authorization() -> VerifiedPhase7Authorization:
     repository = _REPO_ROOT.resolve()
     _require(
@@ -585,12 +596,17 @@ def collect_prospective_data() -> dict[str, Any]:
         not _OUTPUT_DIR.is_symlink(),
         "output_directory_symlink",
     )
+    filesystem_stage = "staging_setup"
+    rename_error: OSError | None = None
+    published = False
+    destination: Path | None = None
     try:
         _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(
             prefix=".phase7-collector-", dir=_OUTPUT_DIR
         ) as staging_name:
             staging = Path(staging_name)
+            filesystem_stage = "staging_acquisition"
             try:
                 produced = acquire_prospective_phase7_data(
                     evaluation_authorization=verified_authorization,
@@ -609,10 +625,12 @@ def collect_prospective_data() -> dict[str, Any]:
                 "acquisition_manifest",
             )
             staged_snapshot = staging / "snapshots" / produced["snapshot_id"]
+            filesystem_stage = "staging_verification"
             verified = verify_snapshot(
                 staged_snapshot, authorization, verified_authorization
             )
             _require(produced == verified, "acquisition_readback")
+            filesystem_stage = "publication_setup"
             destination_root = _OUTPUT_DIR / "snapshots"
             _require(
                 not _OUTPUT_DIR.is_symlink()
@@ -625,11 +643,51 @@ def collect_prospective_data() -> dict[str, Any]:
                 not destination.exists() and not destination.is_symlink(),
                 "snapshot_exists",
             )
-            staged_snapshot.rename(destination)
+            filesystem_stage = "publication_rename"
+            try:
+                staged_snapshot.rename(destination)
+            except OSError as exc:
+                rename_error = exc
+            else:
+                published = True
+            filesystem_stage = "temporary_cleanup"
     except OSError as exc:
+        if rename_error is not None:
+            detail = _filesystem_failure_detail("publication_rename", rename_error)
+            detail += ";" + _filesystem_failure_detail("temporary_cleanup", exc)
+            raise Generation4Phase7CollectorError(
+                PHASE7_UNKNOWN_ABSTAIN, detail
+            ) from rename_error
+        if published:
+            try:
+                _require(destination is not None, "published_destination_missing")
+                final = verify_snapshot_structure(
+                    destination, authorization, verified_authorization
+                )
+                _require(
+                    final.manifest_sha256 == verified["manifest_sha256"],
+                    "published_manifest_mismatch",
+                )
+            except (Generation4Phase7CollectorError, OSError):
+                detail = _filesystem_failure_detail(
+                    "post_publication_cleanup_unverified", exc
+                )
+                raise Generation4Phase7CollectorError(
+                    PHASE7_UNKNOWN_ABSTAIN, detail
+                ) from exc
+            detail = _filesystem_failure_detail("post_publication_cleanup", exc)
+            raise Generation4Phase7CollectorError(
+                PHASE7_UNKNOWN_ABSTAIN, detail
+            ) from exc
         raise Generation4Phase7CollectorError(
-            PHASE7_UNKNOWN_ABSTAIN, "staging_or_publication"
+            PHASE7_UNKNOWN_ABSTAIN,
+            _filesystem_failure_detail(filesystem_stage, exc),
         ) from exc
+    if rename_error is not None:
+        raise Generation4Phase7CollectorError(
+            PHASE7_UNKNOWN_ABSTAIN,
+            _filesystem_failure_detail("publication_rename", rename_error),
+        ) from rename_error
     updated = _status_from_verified(completed, snapshots + [verified])
     if updated["status"] != PHASE7_CHECKPOINT_READY:
         updated["status"] = PHASE7_COLLECTION_UPDATED
