@@ -1,0 +1,16 @@
+{
+  "schema_version": "GENERATION4-STAGE-B-INDEPENDENT-AUDIT-REQUEST-v1",
+  "status": "DRAFT_NOT_APPROVED",
+  "authority_granted": false,
+  "successor_formal_name": "GENERATION_4",
+  "stage_a_commit": "4883a026ad68afaaaa1b13aecc742c0bf5108b05",
+  "phase6_contract_status": "FROZEN_PRE_ACCESS",
+  "historical_market_data_api_called": false,
+  "protected_history_access_authorized": false,
+  "requested_authorization_schema": "SUCCESSOR-PHASE6-ACQUISITION-AUTHORIZATION-v2",
+  "one_time_acquisition_only": true,
+  "phase7_authorized": false,
+  "production_readiness_approved": false,
+  "recon009_status": "OPEN",
+  "paper_only": true
+}
